@@ -12,6 +12,7 @@
 #include "aeron/scene/scene3d.h"
 #include "aeron/scene/settings.h"
 #include "aeron/scene/world.h"
+#include "aeron/xr.h"
 #include "xwa_remaster/color.h"
 #include "xwa_remaster/effects.h"
 #include "xwa_remaster/flight_map.h"
@@ -3270,6 +3271,9 @@ int XwaRemasterFlight_CanDirectPresent(int target_w, int target_h) {
 	return Aeron_CanRenderDirectToSwapchain(target_w, target_h) && fl_ensure_direct_present();
 }
 
+static void fl_draw_hud(AeronCommandBuffer* cmd, AeronRenderPass* pass, AeronRenderTarget* target, int target_w,
+						int target_h);
+
 /* Shared tone-map + semantic-HUD draw sequence. The target can be the FP16
  * composition fallback or Aeron's borrowed swapchain target. */
 static void fl_draw_present(AeronCommandBuffer* cmd, AeronRenderPass* pass, AeronRenderTarget* target,
@@ -3284,6 +3288,12 @@ static void fl_draw_present(AeronCommandBuffer* cmd, AeronRenderPass* pass, Aero
 	AeronScenePresentChain_Draw(chain, pass, s.present_scene_tex, s.present_sampler, s.present_bloom_tex,
 								s.map_present ? 0.0f : AeronSceneBloom_Intensity(), s.rt_w, s.rt_h,
 								/*bar_y_uv=*/1.0f, present_tint, /*src_coverage=*/0);
+	fl_draw_hud(cmd, pass, target, target_w, target_h);
+}
+
+/* Semantic HUD draws over an open pass (flat presentation or the VR HUD quad). */
+static void fl_draw_hud(AeronCommandBuffer* cmd, AeronRenderPass* pass, AeronRenderTarget* target, int target_w,
+						int target_h) {
 	if (s.suppress_hud) {
 		return;
 	}
@@ -3709,6 +3719,177 @@ static AeronTexture* fl_render_map(AeronCommandBuffer* cmd, const XwaSnapshot* s
 	return fl_present(cmd, direct_present);
 }
 
+/* ---- OpenXR stereo (VR) -------------------------------------------------
+ * The ordinary world path renders once per eye: the scene's submissions are
+ * shared and only the camera changes (AeronScene_SetCamera). Each eye camera
+ * is the ship camera composed with the tracked head pose from the OpenXR
+ * LOCAL space, with the headset's asymmetric per-eye field of view. The
+ * cockpit, billboards and glows keep using the ship camera, so they stay
+ * fixed in the ship while the player looks around. Temporal AA and motion
+ * blur are disabled in stereo; lens flares (screen-space) are skipped. The
+ * 2D HUD renders into a transparent texture shown as a quad layer that
+ * subtends exactly the ship camera's field of view, so target brackets line
+ * up with the 3D world from the seated head position. */
+static AeronScenePresentChain* s_xr_present;
+static AeronTextureFormat s_xr_present_format = AERON_TEXTURE_FORMAT_UNKNOWN;
+
+static float fl_xr_env(const char* name, float fallback) {
+	const char* value = getenv(name);
+	if (value && value[0]) {
+		const float parsed = (float)atof(value);
+		if (parsed > 0.0f) {
+			return parsed;
+		}
+	}
+	return fallback;
+}
+
+static int fl_xr_stereo_eligible(const XwaFlightCamera* cam) {
+	const char* env = getenv("XWA_XR_STEREO");
+	if (env && env[0] == '0') {
+		return 0;
+	}
+	return cam && !cam->map_mode && !cam->hyperspace_phase && !s.hyperspace_preview && !cam->film_overlay;
+}
+
+int XwaRemasterFlight_StereoSize(const XwaSnapshot* snap, int* width, int* height) {
+	AeronXrStereoFrame frame;
+	if (!snap || !snap->flight_camera_valid || !fl_xr_stereo_eligible(&snap->flight_camera) ||
+		!Aeron_XrStereoBegin(&frame)) {
+		return 0;
+	}
+	*width = frame.width;
+	*height = frame.height;
+	return 1;
+}
+
+/* Ship camera + tracked eye -> scene camera. Engine eye space is x right,
+ * y down, z forward; OpenXR view space is x right, y up, -z forward, so the
+ * axis change is C = diag(1, -1, -1). */
+static void fl_xr_eye_camera(const AeronSceneCamera* base, const AeronXrView* v, AeronSceneCamera* out) {
+	static const float c[3] = { 1.0f, -1.0f, -1.0f };
+	const float qx = v->orientation[0], qy = v->orientation[1], qz = v->orientation[2], qw = v->orientation[3];
+	const float xr[9] = {
+		1.0f - 2.0f * (qy * qy + qz * qz), 2.0f * (qx * qy - qw * qz),        2.0f * (qx * qz + qw * qy),
+		2.0f * (qx * qy + qw * qz),        1.0f - 2.0f * (qx * qx + qz * qz), 2.0f * (qy * qz - qw * qx),
+		2.0f * (qx * qz - qw * qy),        2.0f * (qy * qz + qw * qx),        1.0f - 2.0f * (qx * qx + qy * qy),
+	};
+	float r[9];
+	float h[9];
+	float e[9];
+	float p[3];
+	const float units = AERON_OPT_UNITS_PER_METER * fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f);
+
+	*out = *base;
+	fl_quat_to_mat3(base->ori, r); /* rows: world -> ship eye */
+	for (int i = 0; i < 3; i++) {
+		for (int j = 0; j < 3; j++) {
+			h[i * 3 + j] = c[i] * c[j] * xr[i * 3 + j]; /* head -> ship eye */
+		}
+	}
+	for (int i = 0; i < 3; i++) {
+		for (int j = 0; j < 3; j++) {
+			e[i * 3 + j] = h[0 * 3 + i] * r[0 * 3 + j] + h[1 * 3 + i] * r[1 * 3 + j] + h[2 * 3 + i] * r[2 * 3 + j];
+		}
+	}
+	fl_rows_to_quat(e, out->ori);
+	p[0] = v->position[0] * units;
+	p[1] = -v->position[1] * units;
+	p[2] = -v->position[2] * units;
+	for (int j = 0; j < 3; j++) {
+		out->pos[j] = base->pos[j] + r[0 * 3 + j] * p[0] + r[1 * 3 + j] * p[1] + r[2 * 3 + j] * p[2];
+	}
+	{
+		const float tl = tanf(v->fov[0]), tr = tanf(v->fov[1]);
+		const float tu = tanf(v->fov[2]), td = tanf(v->fov[3]);
+		out->h_half_rad = atanf((tr - tl) * 0.5f);
+		out->v_half_rad = atanf((tu - td) * 0.5f);
+		out->proj_x_offset = -(tr + tl) / (tr - tl);
+		out->proj_y_offset = -(tu + td) / (tu - td);
+	}
+	out->viewport = (AeronRectI) { 0, 0, 0, 0 };
+}
+
+static AeronScenePresentChain* fl_xr_chain(AeronTextureFormat format) {
+	if (s_xr_present && s_xr_present_format == format) {
+		return s_xr_present;
+	}
+	if (s_xr_present) {
+		AeronScenePresentChain_Destroy(s_xr_present);
+	}
+	s_xr_present = AeronScenePresentChain_Create(format);
+	s_xr_present_format = s_xr_present ? format : AERON_TEXTURE_FORMAT_UNKNOWN;
+	return s_xr_present;
+}
+
+/* Bloom + tonemap of the current scene RT into one eye target. */
+static int fl_xr_output_eye(AeronCommandBuffer* cmd, AeronRenderTarget* target, AeronTextureFormat format,
+							AeronTexture* bloom_tex) {
+	AeronScenePresentChain* chain = fl_xr_chain(format);
+	AeronTexture* scene_tex = Aeron_RenderTargetGetTexture(AeronScene_SceneRt(s.scene));
+	static const float tint[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+	if (!chain || !scene_tex || !s.present_sampler) {
+		return 0;
+	}
+	if (!bloom_tex && s.bloom && AeronSceneBloom_Intensity() > 0.0f) {
+		if (!AeronSceneBloom_Apply(s.bloom, cmd, scene_tex, s.rt_w, s.rt_h, s.rt_h)) {
+			return 0;
+		}
+		AeronRenderTarget* bloom_rt = AeronSceneBloom_ColorRt(s.bloom);
+		bloom_tex = bloom_rt ? Aeron_RenderTargetGetTexture(bloom_rt) : NULL;
+	}
+	AeronRenderPass* pass = Aeron_BeginRenderPass(&(AeronRenderPassDesc) {
+		.color_target = target,
+		.clear_color = 1,
+		.clear_color_rgba = { 0.0f, 0.0f, 0.0f, 1.0f },
+		.command_buffer = cmd,
+		.debug_label = "OpenXWA VR eye tonemap",
+	});
+	if (!pass) {
+		return 0;
+	}
+	const AeronRectI full = { 0, 0, s.rt_w, s.rt_h };
+	Aeron_SetViewport(pass, &full);
+	Aeron_SetScissor(pass, &full);
+	AeronScenePresentChain_Draw(chain, pass, scene_tex, s.present_sampler, bloom_tex,
+								bloom_tex ? AeronSceneBloom_Intensity() : 0.0f, s.rt_w, s.rt_h, 1.0f, tint, 0);
+	Aeron_EndRenderPass(pass);
+	return 1;
+}
+
+static int fl_xr_output_hud(AeronCommandBuffer* cmd, AeronRenderTarget* target) {
+	AeronRenderPass* pass = Aeron_BeginRenderPass(&(AeronRenderPassDesc) {
+		.color_target = target,
+		.clear_color = 1,
+		.clear_color_rgba = { 0.0f, 0.0f, 0.0f, 0.0f },
+		.command_buffer = cmd,
+		.debug_label = "OpenXWA VR HUD",
+	});
+	if (!pass) {
+		return 0;
+	}
+	const AeronRectI full = { 0, 0, s.rt_w, s.rt_h };
+	Aeron_SetViewport(pass, &full);
+	Aeron_SetScissor(pass, &full);
+	fl_draw_hud(cmd, pass, target, s.rt_w, s.rt_h);
+	Aeron_EndRenderPass(pass);
+	return 1;
+}
+
+/* HUD quad matching the ship camera's frustum at a fixed distance. */
+static void fl_xr_hud_quad(const AeronSceneCamera* base, AeronXrHudQuad* out) {
+	const float d = fl_xr_env("XWA_XR_HUD_DISTANCE", 3.0f);
+	const float th = tanf(base->h_half_rad);
+	const float tv = tanf(base->v_half_rad);
+	memset(out, 0, sizeof *out);
+	out->visible = !s.suppress_hud;
+	out->size[0] = 2.0f * d * th;
+	out->size[1] = 2.0f * d * tv;
+	out->position[0] = -base->proj_x_offset * th * d;
+	out->position[1] = -base->proj_y_offset * tv * d;
+	out->position[2] = -d;
+}
+
 AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapshot* snap,
 									   XwaRemasterAssets* assets, int target_w, int target_h,
 									   int direct_present) {
@@ -3741,6 +3922,15 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	}
 	s.suppress_hud = 0;
 	s.snap = snap;
+	/* VR stereo: the caller sized the targets to the headset's per-eye size. */
+	AeronXrStereoFrame xr_frame;
+	AeronSceneCamera xr_eyes[2];
+	const int stereo = fl_xr_stereo_eligible(cam) && Aeron_XrStereoBegin(&xr_frame) &&
+					   xr_frame.width == s.rt_w && xr_frame.height == s.rt_h;
+	if (stereo) {
+		fl_xr_eye_camera(&flight_view.camera, &xr_frame.views[0], &xr_eyes[0]);
+		fl_xr_eye_camera(&flight_view.camera, &xr_frame.views[1], &xr_eyes[1]);
+	}
 	/* The hook persists on the scene object; explicitly clear it when
 	 * returning to the ordinary world path. */
 	AeronScene_SetPassHook(s.scene, AERON_SCENE_HOOK_BEFORE_OPAQUE, NULL, NULL);
@@ -3756,7 +3946,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	 * buffer invalidated via NULL prev_view_proj). */
 	const XwaSnapshot* prev = XwaSnapshot_Previous();
 	XwaRemasterFlightView previous_flight_view;
-	const int mb_on = s.mb_quality > 0 || s.fsr_mode != AERON_TEMPORAL_OFF;
+	const int mb_on = !stereo && (s.mb_quality > 0 || s.fsr_mode != AERON_TEMPORAL_OFF);
 	s.mb_enabled = 0;
 	int mb_regen = 0;
 	int paused = 0;
@@ -3918,8 +4108,8 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		fl_request_fsr_reset(motion_reset_reasons ? motion_reset_reasons
 												  : FL_FSR_RESET_MOTION_CONTEXT_UNKNOWN);
 	}
-	fl_set_temporal(host_time_us, 1);
-	if (!AeronScene_Begin(s.scene, &flight_view.camera)) {
+	fl_set_temporal(host_time_us, !stereo);
+	if (!AeronScene_Begin(s.scene, stereo ? &xr_eyes[0] : &flight_view.camera)) {
 		Aeron_CommandBufferSetFailure(cmd, "Flight scene initialization failed");
 		s.snap = NULL;
 		return NULL;
@@ -3971,6 +4161,8 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	static const float fl_world_to_cube[9] = {
 		1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, -1.0f, 0.0f,
 	};
+	XwaRemasterSkyStarsParams stars_params;
+	int stars_prepared = 0;
 	if (!cam->death_star_mode) {
 		if (s.sky_mode == 1) {
 			/* Classic stars are one flight-viewport pixel; the HD scene
@@ -3979,7 +4171,11 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 			 * footprint at any render resolution. */
 			const float classic_h =
 				cam->vp_h > 0 ? (float)cam->vp_h : (cam->screen_h > 0 ? (float)cam->screen_h : 480.0f);
-			const float upscale = (s.rt_h > 0 && classic_h > 0.0f) ? (float)s.rt_h / classic_h : 1.0f;
+			float upscale = (s.rt_h > 0 && classic_h > 0.0f) ? (float)s.rt_h / classic_h : 1.0f;
+			if (stereo) {
+				/* The eye covers a wider field than the ship camera at the same height. */
+				upscale *= tanf(flight_view.camera.v_half_rad) / tanf(xr_eyes[0].v_half_rad);
+			}
 			const XwaRemasterSkyStarsParams stars = {
 				.exposure = s.sky_exposure,
 				.brightness = s.star_brightness,
@@ -3991,6 +4187,8 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 				.flare_strength = s.star_flare,
 				.game_time_ms = (uint32_t)snap->game_time_ms,
 			};
+			stars_params = stars;
+			stars_prepared = 1;
 			if (!XwaRemasterSkyStars_Prepare(s.sky_stars, s.scene, fl_world_to_cube, &stars)) {
 				Aeron_CommandBufferSetFailure(cmd, "Procedural starfield preparation failed");
 				s.snap = NULL;
@@ -4332,9 +4530,20 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	fl_submit_billboards();
 	/* Lens-flare trains (LENS stage — the scene draws them after its
 	 * color passes with GPU anchor occlusion, before bloom). */
-	fl_submit_lens_flares(snap, &flight_view);
+	if (!stereo) {
+		fl_submit_lens_flares(snap, &flight_view);
+	}
 
-	if (!AeronScene_Render(s.scene, cmd)) {
+	int render_ok = AeronScene_Render(s.scene, cmd);
+	if (render_ok && stereo) {
+		/* Left eye out, then re-render the same submissions for the right eye. */
+		render_ok = fl_xr_output_eye(cmd, xr_frame.eye_targets[0], xr_frame.format, NULL) &&
+					AeronScene_SetCamera(s.scene, &xr_eyes[1]) &&
+					(!stars_prepared || XwaRemasterSkyStars_Prepare(s.sky_stars, s.scene, fl_world_to_cube,
+																	&stars_params)) &&
+					AeronScene_Render(s.scene, cmd);
+	}
+	if (!render_ok) {
 		AeronScene_SetPassHook(s.scene, AERON_SCENE_HOOK_BEFORE_OPAQUE, NULL, NULL);
 		s.before_opaque_mode = FL_BEFORE_OPAQUE_NONE;
 		s.snap = NULL;
@@ -4343,10 +4552,25 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	AeronScene_SetPassHook(s.scene, AERON_SCENE_HOOK_BEFORE_OPAQUE, NULL, NULL);
 	s.before_opaque_mode = FL_BEFORE_OPAQUE_NONE;
 	s.snap = NULL; /* hooks must not outlive the snapshot */
-	return fl_present(cmd, direct_present);
+	/* Flat output (desktop window / non-VR): right eye in stereo, plus HUD. */
+	AeronTexture* out = fl_present(cmd, stereo ? 0 : direct_present);
+	if (out && stereo) {
+		AeronXrHudQuad hud;
+		if (fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format, s.present_bloom_tex) &&
+			fl_xr_output_hud(cmd, xr_frame.hud_target)) {
+			fl_xr_hud_quad(&flight_view.camera, &hud);
+			Aeron_XrStereoCommit(&hud);
+		}
+	}
+	return out;
 }
 
 void XwaRemasterFlight_Shutdown(void) {
+	if (s_xr_present) {
+		AeronScenePresentChain_Destroy(s_xr_present);
+		s_xr_present = NULL;
+		s_xr_present_format = AERON_TEXTURE_FORMAT_UNKNOWN;
+	}
 	XwaRemasterFlightMap_Shutdown();
 	XwaRemasterHyperspace_Destroy(s.hyperspace);
 	s.hyperspace = NULL;

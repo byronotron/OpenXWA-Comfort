@@ -552,6 +552,9 @@ void XwaRemaster_Frame(int32_t delta_us) {
 	if (!snap) {
 		return;
 	}
+	/* VR: the right controller is a mouse pointer on the virtual screen in
+	 * menus/briefings; in flight its trigger fires instead. */
+	Aeron_XrSetPointerEnabled(snap->scene_kind != XWA_SCENE_FLIGHT);
 	const int hyperspace_preview = XwaRemasterFlight_HyperspaceTunnelPreviewEnabled();
 	const int hyperspace_preview_visible = hyperspace_preview && snap->scene_kind == XWA_SCENE_FLIGHT &&
 										   snap->flight_camera_valid && !snap->flight_camera.map_mode &&
@@ -621,7 +624,13 @@ void XwaRemaster_Frame(int32_t delta_us) {
 	const int assets_need_sync =
 		!retain_invalid_flight_frame && (frontend_assets_need_sync || ship_assets_need_sync ||
 										 texture_assets_need_sync || process_assets_need_prepare);
-	const int render_snapshot = snap->tick_index != g.last_tick || g.force_scene_render;
+	/* VR stereo needs a fresh render every headset frame (head tracking), not
+	 * only on new simulation ticks. */
+	int stereo_w = 0;
+	int stereo_h = 0;
+	const int stereo_frame = snap->scene_kind == XWA_SCENE_FLIGHT && g.mode == RM_VIEW_HD &&
+							 XwaRemasterFlight_StereoSize(snap, &stereo_w, &stereo_h);
+	const int render_snapshot = snap->tick_index != g.last_tick || g.force_scene_render || stereo_frame;
 	const int frontend_scene = snap->scene_kind == XWA_SCENE_FRONTEND ||
 							   snap->scene_kind == XWA_SCENE_FRONTEND_MODAL ||
 							   snap->scene_kind == XWA_SCENE_LOADING;
@@ -746,10 +755,13 @@ void XwaRemaster_Frame(int32_t delta_us) {
 				case XWA_SCENE_FLIGHT:
 					render_output_required = snap->flight_camera_valid;
 					Aeron_GpuDebugPush(cmd, "OpenXWA flight renderer");
-					next_scene_tex = snap->flight_camera_valid
-										 ? XwaRemasterFlight_Render(cmd, snap, g.assets, g.render_pixel_width,
-																	g.render_pixel_height, direct_present)
-										 : NULL;
+					next_scene_tex =
+						snap->flight_camera_valid
+							? XwaRemasterFlight_Render(cmd, snap, g.assets,
+													   stereo_frame ? stereo_w : g.render_pixel_width,
+													   stereo_frame ? stereo_h : g.render_pixel_height,
+													   direct_present && !stereo_frame)
+							: NULL;
 					next_scene_is_direct = next_scene_tex && XwaRemasterFlight_DirectPresentationReady();
 					next_scene_is_tonemapped = next_scene_tex != NULL;
 					Aeron_GpuDebugPop(cmd);

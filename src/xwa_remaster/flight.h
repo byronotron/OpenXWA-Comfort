@@ -229,6 +229,10 @@ int XwaRemasterFlight_ProcessAssetsNeedPrepare(void);
 int XwaRemasterFlight_PrepareProcessAssets(AeronCommandBuffer* cmd, XwaRemasterAssets* assets);
 void XwaRemasterFlight_CommitProcessAssets(void);
 
+/* VR: returns 1 with the per-eye render size when this snapshot's flight view
+ * renders in stereo this host frame (pass that size to Render). */
+int XwaRemasterFlight_StereoSize(const XwaSnapshot* snap, int* width, int* height);
+
 /* Returns whether the current full-frame output can use Aeron's direct
  * swapchain render layer at the requested dimensions. */
 int XwaRemasterFlight_CanDirectPresent(int target_w, int target_h);
