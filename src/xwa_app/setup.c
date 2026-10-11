@@ -73,6 +73,10 @@ int XwaLaunchOptions_Parse(int argc, char** argv, XwaLaunchOptions* out, char* e
 			}
 			continue;
 		}
+		if (!pass_through && strcmp(argv[i], "--xr") == 0) {
+			out->xr_enabled = 1;
+			continue;
+		}
 		value = pass_through ? NULL : setup_option_value(argv[i], "--resource-root");
 		if (!pass_through && (value || strcmp(argv[i], "--resource-root") == 0)) {
 			if (!value) {

@@ -14,6 +14,7 @@ typedef struct XwaLaunchOptions {
 	char game_data_path[XWA_HOST_CONFIG_PATH_CAPACITY];
 	char resource_root[XWA_HOST_CONFIG_PATH_CAPACITY];
 	char game_command_line[1024];
+	int xr_enabled; /* --xr: present to an OpenXR headset (virtual screen) */
 } XwaLaunchOptions;
 
 int XwaLaunchOptions_Parse(int argc, char** argv, XwaLaunchOptions* out, char* error, size_t error_size);

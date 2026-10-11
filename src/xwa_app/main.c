@@ -300,6 +300,7 @@ int main(int argc, char** argv) {
 	config.clear_color_rgba[1] = 0.0f;
 	config.clear_color_rgba[2] = 0.0f;
 	config.clear_color_rgba[3] = 1.0f;
+	config.xr_enabled = launch.xr_enabled;
 
 	if (!Aeron_Init(&config)) {
 		return 1;
