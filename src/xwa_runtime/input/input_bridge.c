@@ -244,3 +244,9 @@ void XwaInputBridge_UpdateFrontend(const AeronInputSnapshot* input) {
 	XwaInputBridge_UpdateFrontendMouse(input);
 	XwaInputBridge_UpdateFrontendKeyboard(input);
 }
+
+void XwaInputBridge_InjectFrontendChar(unsigned char ch) {
+	if ((ch >= 0x20 && ch < 0x80) || ch == XWA_KEY_BACKSPACE || ch == XWA_KEY_RETURN || ch == XWA_KEY_ESCAPE) {
+		XwaInputBridge_AppendFrontendChar(ch);
+	}
+}

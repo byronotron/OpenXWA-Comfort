@@ -66,6 +66,9 @@ int FrontendText_DrawWrappedClippedEx(int fontSize, const char* str, FrontendRec
 									  int lineSpacing, int firstVisibleLine, int clipBottomAdjust);
 void FrontendText_DrawFormattedWrappedText(FrontendRect* rect, const unsigned char* text,
 										   short suppressCenteredHeadings);
+/* Incremented whenever an editable text field is drawn (port addition). */
+extern unsigned int g_frontendEditFieldSerial;
+
 int FrontendText_DrawEditableField(FrontendRect* rect, char* text, int maxChars, int fieldId,
 								   unsigned int fontSize, const char* ignoredChars);
 int Frontend_FormatSecondsToClockString(unsigned int seconds);

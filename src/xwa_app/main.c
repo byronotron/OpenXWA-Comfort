@@ -3,6 +3,7 @@
 #include "host_config.h"
 #include "setup.h"
 #include "setup_screen.h"
+#include "vr_keyboard.h"
 #include "window_icon.h"
 #include "xwa/config/game_config.h"
 #include "xwa_remaster/xwa_remaster.h"
@@ -609,6 +610,8 @@ int main(int argc, char** argv) {
 		int xr_paused = 0;
 		while (!Aeron_QuitRequested() && !XwaPort_ShouldQuit()) {
 			const int32_t delta_us = Aeron_BeginFrame();
+			/* Before the game reads input: the VR keyboard consumes its clicks. */
+			XwaVrKeyboard_BeginFrame(delta_us);
 			const int xr_unfocused = xr_auto_pause && Aeron_XrIsUnfocused();
 			if (xr_unfocused != xr_paused) {
 				xr_paused = xr_unfocused;
@@ -676,6 +679,7 @@ int main(int argc, char** argv) {
 			if (Aeron_QuitRequested() || XwaPort_ShouldQuit()) {
 				break;
 			}
+			XwaVrKeyboard_Submit();
 			if (!Aeron_Present()) {
 				Aeron_RequestFatalRendererError("frame presentation");
 				break;
@@ -691,6 +695,7 @@ int main(int argc, char** argv) {
 	}
 
 	exit_code = Aeron_FatalErrorRequested() ? 1 : XwaPort_GetExitCode();
+	XwaVrKeyboard_Shutdown();
 	XwaRemaster_Shutdown();
 	XwaPort_Shutdown();
 	Aeron_Shutdown();

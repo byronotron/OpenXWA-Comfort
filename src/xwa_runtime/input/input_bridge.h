@@ -10,6 +10,9 @@ extern "C" {
 void XwaInputBridge_UpdateFrontendMouse(const AeronInputSnapshot* input);
 void XwaInputBridge_UpdateFrontendKeyboard(const AeronInputSnapshot* input);
 void XwaInputBridge_UpdateFrontend(const AeronInputSnapshot* input);
+/* Queues one frontend character (printable ASCII, or 8/13/27 for
+ * Backspace/Return/Escape), e.g. from the VR on-screen keyboard. */
+void XwaInputBridge_InjectFrontendChar(unsigned char ch);
 
 #ifdef __cplusplus
 }
