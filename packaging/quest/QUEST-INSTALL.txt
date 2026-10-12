@@ -1,0 +1,84 @@
+OpenXWA for Meta Quest 3 (standalone) - test build 0.0.17-quest1
+================================================================
+
+This is an UNTESTED first build: it was compiled and checked on a build server
+with no Quest. Expect problems on first launch. The log file (step 6) is
+what's needed to fix them.
+
+What you need
+  * Quest 3 / 3S (Quest 2 and Pro may also work) in Developer Mode
+    (Meta Horizon phone app -> Devices -> your headset -> Headset settings ->
+    Developer Mode; needs a free Meta developer account).
+  * A PC with adb plus a USB-C cable. Easiest on Windows:
+      winget install Google.PlatformTools
+    then open a NEW PowerShell window, run "adb devices", put the headset on
+    and allow USB debugging. (SideQuest and Meta Quest Developer Hub also
+    bring their own adb.)
+  * Your installed X-Wing Alliance folder (GOG or Steam), about 1 GB.
+
+1. Install the APK
+     adb install -r OpenXWA-quest.apk
+   (SideQuest: drag the APK onto the window.) A newer APK installs over the
+   old one the same way; the copied game files stay.
+
+2. Start it once
+   In the headset: Library -> filter "Unknown sources" -> OpenXWA.
+   It creates its game folder and shows "X-Wing Alliance game files needed".
+   Leave it open or quit; either is fine.
+
+3. Copy the game files (from the PC, headset connected via USB)
+     adb push "C:\GOG Games\Star Wars - X-Wing Alliance\." /sdcard/Android/data/org.openxwa.quest/files/XWA
+   Use your own install path. The "\." at the end copies the folder's
+   CONTENTS, so RESDATA.TXT etc. must end up directly in .../files/XWA/.
+   Check with:
+     adb shell ls /sdcard/Android/data/org.openxwa.quest/files/XWA
+   (Windows Explorer often can't see Android/data on the Quest, so adb or
+   the SideQuest file browser is the reliable way.)
+
+4. Play
+   In the headset choose "Try Again" (point with the right controller, pull
+   the trigger) or restart the app. On first start the game asks for a pilot
+   name: a keyboard appears on the virtual screen, type with the laser
+   pointer and press Enter. Controls are the same as the PC VR build:
+     right stick = pitch/yaw, left stick X = roll, left stick Y = throttle lever,
+     right trigger = fire, right grip = target in sights, A/B/X/Y = buttons,
+     left menu button = Esc. In menus the right controller is a laser pointer.
+   Taking the headset off or opening the Meta menu pauses the game.
+   Hold the Meta button to recenter.
+
+5. Settings (optional)
+   /sdcard/Android/data/org.openxwa.quest/files/openxwa-quest.cfg is created on
+   first start. Edit it on the PC:
+     adb pull /sdcard/Android/data/org.openxwa.quest/files/openxwa-quest.cfg
+     (remove the '#' in front of a line and change the value)
+     adb push openxwa-quest.cfg /sdcard/Android/data/org.openxwa.quest/files/
+   Most useful:
+     AERON_XR_RESOLUTION_SCALE=0.9   lower (0.7) if it stutters
+     XWA_XR_SHADOWS=1                cockpit shadows (costs GPU time)
+     XWA_XR_STEREO=0                 everything on the flat virtual screen
+     XWA_QUEST_PROFILE=0             use the in-game graphics options as-is
+
+6. Please send back
+     adb pull /sdcard/Android/data/org.openxwa.quest/files/openxwa.log
+   If the app closes immediately or shows nothing, also capture logcat while
+   starting it:
+     adb logcat -c
+     adb logcat > openxwa-logcat.txt      (start the app, wait 20 s, Ctrl+C)
+   The log has a line every 5 s like
+     "perf: 72.0 fps (display 72 Hz), frame work avg ..."
+   For GPU numbers, Meta's "OVR Metrics Tool" overlay is the best source.
+
+Uninstalling
+     adb uninstall org.openxwa.quest
+   WARNING: this also deletes the copied game files in .../files/XWA.
+
+Known limits
+  * Not yet run on a real Quest. The Vulkan/OpenXR path was only tested on PC
+    (Quest Link) and on a simulated headset.
+  * Each eye renders the full scene (no multiview yet), so frame rate on the
+    Quest is the main unknown. The Quest render profile turns off SSAO,
+    FSR, motion blur, HDR and shadows and uses MSAA 4x at 0.9 resolution.
+  * Optional HD texture packs (BC7) are decoded on the CPU at load time
+    (the Quest GPU can't sample BC formats) and capped at 2048 px. That
+    makes loading slower and uses more memory.
+  * Runs at the Quest default of 72 Hz.

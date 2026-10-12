@@ -1,3 +1,4 @@
 [submodule "aeron"]
 	path = aeron
-	url = git@github.com:elyosh/aeron.git
+	url = ../aeron-quest.git
+	branch = openxr-frame-loop
