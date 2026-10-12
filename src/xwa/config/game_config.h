@@ -180,6 +180,12 @@ int Config_Write(void);
 #ifdef XWA_MODERN
 struct XwaModernInputOptions;
 void Config_ApplyModernInputOptions(const struct XwaModernInputOptions* options);
+
+/* In-flight options menu "Exit Mission" row: flight sets Available while
+ * its options modal is open; the menu sets Requested when the row is
+ * chosen, and flight then aborts the mission like the original's Alt+Q. */
+extern int g_configExitMissionAvailable;
+extern int g_configExitMissionRequested;
 #endif
 
 #ifdef __cplusplus

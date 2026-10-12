@@ -10309,6 +10309,10 @@ static __inline int Flight_UpdateEntity_OpenOptions(unsigned int playerIdx) {
 		g_flightOptionsModalPlayerIdx = playerIdx;
 		g_flightOptionsModalPending = 1;
 		g_actionKey = KEY_NONE;
+#ifdef XWA_MODERN
+		g_configExitMissionAvailable = 1;
+		g_configExitMissionRequested = 0;
+#endif
 	}
 
 	exitToFrontend = FlightDisplay_RunRestrictedOptionsModal();
@@ -10318,13 +10322,29 @@ static __inline int Flight_UpdateEntity_OpenOptions(unsigned int playerIdx) {
 	}
 
 	g_flightOptionsModalPending = 0;
+#ifdef XWA_MODERN
+	g_configExitMissionAvailable = 0;
+#endif
 	Flight_ApplyConfigToRuntime(&g_flightOptionsModalOldConfig, &g_gameConfig);
 	Time_GetFrameDelta();
+#ifdef XWA_MODERN
+	if (!exitToFrontend && !g_configExitMissionRequested) {
+#else
 	if (!exitToFrontend) {
+#endif
 		msg_emitInFlightMessage(MSG_MISSION_RESUMED, (int)g_flightOptionsModalPlayerIdx);
 	}
 	g_actionKey = KEY_NONE;
 	sub_4D4640();
+
+#ifdef XWA_MODERN
+	if (g_configExitMissionRequested) {
+		g_configExitMissionRequested = 0;
+		if (!exitToFrontend) {
+			FlightAction_RequestAbortOrDisconnect(g_flightOptionsModalPlayerIdx);
+		}
+	}
+#endif
 
 	if (exitToFrontend) {
 		g_flightReturnToFrontendRequested = 1;
