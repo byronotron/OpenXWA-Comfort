@@ -2,6 +2,7 @@
 #include "aeron/aeron.h"
 #include "host_config.h"
 #include "setup.h"
+#include "setup_screen.h"
 #include "window_icon.h"
 #include "xwa/config/game_config.h"
 #include "xwa_remaster/xwa_remaster.h"
@@ -13,7 +14,28 @@
 #include "xwa_runtime/timing/modern_flight_timing.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+/* OS message boxes are invisible inside an immersive VR app, so the Quest
+ * build (and desktop runs with XWA_INGAME_SETUP=1, for testing) shows setup
+ * problems and fatal errors on an in-game screen instead. */
+static int use_ingame_setup(void) {
+#if defined(SDL_PLATFORM_ANDROID)
+	return 1;
+#else
+	const char* value = getenv("XWA_INGAME_SETUP");
+	return value && value[0] == '1';
+#endif
+}
+
+static void ingame_fatal_error(const char* title, const char* message) {
+	/* Once a fatal error was requested the frame loop is shutting down and
+	 * cannot draw anymore; the log keeps the message. */
+	if (!Aeron_FatalErrorRequested()) {
+		(void)XwaSetupScreen_Run(title, message, NULL);
+	}
+}
 
 enum {
 	XWA_SETUP_CHOOSE_FOLDER = 1,
@@ -213,16 +235,17 @@ static int resolve_game_data(const XwaLaunchOptions* launch, const XwaHostConfig
 	if (launch->game_data_path[0]) {
 		const int ok = XwaSetup_ValidateGameData(vfs, launch->game_data_path, selected, selected_capacity, error,
 												 error_size);
-#if defined(SDL_PLATFORM_ANDROID)
-		if (!ok) {
+		if (!ok && use_ingame_setup()) {
 			char detail[512];
 			snprintf(detail, sizeof detail, "%s", error);
 			snprintf(error, error_size,
-					 "X-Wing Alliance game files not found.\n\nCopy your installed game folder (GOG/Steam) to:\n%s\n\n"
-					 "For example from a PC: adb push \"<XWA folder>/.\" %s\n\n%s",
-					 launch->game_data_path, launch->game_data_path, detail);
+					 "The original X-Wing Alliance game files were not found (%s).\n\n"
+					 "Copy the contents of your installed game folder (GOG or Steam) to:\n%s\n\n"
+					 "From a PC with the headset connected by USB:\n"
+					 "adb push \"<XWA folder>/.\" %s\n\n"
+					 "Then choose Try Again.",
+					 detail, launch->game_data_path, launch->game_data_path);
 		}
-#endif
 		return ok;
 	}
 	if (host_config->game_data_path[0]) {
@@ -311,6 +334,10 @@ static void android_load_settings(void) {
 				  "#AERON_XR_RESOLUTION_SCALE=0.9\n"
 				  "# Directional shadows in the 3D cockpit (1 = on, costs GPU time):\n"
 				  "#XWA_XR_SHADOWS=0\n"
+				  "# 0 = render shadows again for the right eye (default: shared):\n"
+				  "#XWA_XR_SHADOW_REUSE=1\n"
+				  "# 0 = keep the game running while the headset is off / menu open:\n"
+				  "#XWA_XR_AUTO_PAUSE=1\n"
 				  "# 0 = everything on the flat virtual screen (no 3D cockpit):\n"
 				  "#XWA_XR_STEREO=1\n"
 				  "#XWA_XR_WORLD_SCALE=1.0\n"
@@ -460,6 +487,9 @@ int main(int argc, char** argv) {
 	if (!Aeron_Init(&config)) {
 		return 1;
 	}
+	if (use_ingame_setup()) {
+		Aeron_SetFatalErrorHandler(ingame_fatal_error);
+	}
 #if defined(SDL_PLATFORM_ANDROID)
 	android_default_game_data(&launch);
 #endif
@@ -477,8 +507,16 @@ int main(int argc, char** argv) {
 	if (host_config.video_options_override_mask & XWA_MODERN_VIDEO_OVERRIDE_WINDOW_MODE) {
 		initial_window_mode = host_config.video_options.window_mode;
 	}
-	if (!resolve_game_data(&launch, &host_config, selected_game_data, sizeof selected_game_data,
-						   &setup_cancelled, config_error, sizeof config_error)) {
+	while (!resolve_game_data(&launch, &host_config, selected_game_data, sizeof selected_game_data,
+							  &setup_cancelled, config_error, sizeof config_error)) {
+		if (!setup_cancelled && use_ingame_setup() && launch.game_data_path[0]) {
+			Aeron_LogWarn("xwa.config", "%s", config_error);
+			if (XwaSetupScreen_Run("X-Wing Alliance game files needed", config_error, "Try Again") ==
+				XWA_SETUP_SCREEN_RETRY) {
+				continue;
+			}
+			setup_cancelled = 1;
+		}
 		if (!setup_cancelled) {
 			Aeron_LogError("xwa.config", "%s", config_error);
 			Aeron_FatalError("OpenXWA", config_error);
@@ -564,8 +602,19 @@ int main(int argc, char** argv) {
 	{
 		int paused = 0;
 		int last_fullscreen = Aeron_Fullscreen();
+		/* VR: pause while the headset is off or the system menu is open
+		 * (XWA_XR_AUTO_PAUSE=0 keeps the game running). */
+		const char* xr_auto_pause_env = getenv("XWA_XR_AUTO_PAUSE");
+		const int xr_auto_pause = !(xr_auto_pause_env && xr_auto_pause_env[0] == '0');
+		int xr_paused = 0;
 		while (!Aeron_QuitRequested() && !XwaPort_ShouldQuit()) {
 			const int32_t delta_us = Aeron_BeginFrame();
+			const int xr_unfocused = xr_auto_pause && Aeron_XrIsUnfocused();
+			if (xr_unfocused != xr_paused) {
+				xr_paused = xr_unfocused;
+				Aeron_AudioSetPaused(paused || xr_paused);
+				Aeron_LogInfo("xwa", "%s", xr_paused ? "paused (headset not focused)" : "resumed (headset focused)");
+			}
 			const AeronInputSnapshot* in = Aeron_InputSnapshot();
 			int toggled = 0;
 			if (in) {
@@ -591,7 +640,7 @@ int main(int argc, char** argv) {
 			if (gui_mod && in->key_pressed[AERON_KEY_A + ('p' - 'a')]) {
 				paused = !paused;
 				toggled = 1;
-				Aeron_AudioSetPaused(paused);
+				Aeron_AudioSetPaused(paused || xr_paused);
 				Aeron_LogInfo("xwa", "%s", paused ? "paused" : "resumed");
 			}
 			/* Ctrl+Alt+L is a portable alias for the original Scroll Lock cockpit
@@ -615,7 +664,7 @@ int main(int argc, char** argv) {
 			if (Aeron_QuitRequested() || XwaPort_ShouldQuit()) {
 				break;
 			}
-			if (paused || toggled) {
+			if (paused || toggled || xr_paused) {
 				XwaPort_PausedFrame();
 			} else {
 				XwaPort_Tick(delta_us);
@@ -632,7 +681,7 @@ int main(int argc, char** argv) {
 				break;
 			}
 			uint64_t wake_us = presentation_interval_us();
-			if (!paused) {
+			if (!paused && !xr_paused) {
 				const uint64_t task_us = XwaPort_NextWakeDelayUs();
 				if (task_us < wake_us)
 					wake_us = task_us;

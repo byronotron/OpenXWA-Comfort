@@ -4084,7 +4084,8 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	/* Preserve the classic directional fill inside the sealed Death Star,
 	 * but do not let its backdrop light cast exterior shadows in the tunnel. */
 	/* XWA_XR_SHADOWS=0 (Quest profile default) disables directional shadows
-	 * in stereo: each eye would otherwise render the cascades again. */
+	 * in stereo. When enabled, the cascades render once per frame and both
+	 * eyes sample them (AeronScene_SetShadowReuse). */
 	const char* xr_shadows = getenv("XWA_XR_SHADOWS");
 	const int shadows_allowed = !(stereo && xr_shadows && xr_shadows[0] == '0');
 	const int shadows_active =
@@ -4558,7 +4559,11 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 
 	int render_ok = AeronScene_Render(s.scene, cmd);
 	if (render_ok && stereo) {
-		/* Left eye out, then re-render the same submissions for the right eye. */
+		/* Left eye out, then re-render the same submissions for the right eye.
+		 * The right eye reuses the left eye's shadow atlas unless
+		 * XWA_XR_SHADOW_REUSE=0. */
+		const char* shadow_reuse = getenv("XWA_XR_SHADOW_REUSE");
+		AeronScene_SetShadowReuse(s.scene, !(shadow_reuse && shadow_reuse[0] == '0'));
 		render_ok = fl_xr_output_eye(cmd, xr_frame.eye_targets[0], xr_frame.format, NULL) &&
 					AeronScene_SetCamera(s.scene, &xr_eyes[1]) &&
 					(!stars_prepared || XwaRemasterSkyStars_Prepare(s.sky_stars, s.scene, fl_world_to_cube,

@@ -315,6 +315,7 @@ set(XWA_APP_SOURCES
     src/xwa_app/main.c
     src/xwa_app/host_config.c
     src/xwa_app/setup.c
+    src/xwa_app/setup_screen.c
 )
 
 if(ANDROID)
