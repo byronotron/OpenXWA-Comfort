@@ -18,6 +18,34 @@ static AeronDrawList2D* fixed_list;
 static AeronDrawList2D* fixed_world_list;
 static int fixed_world_split;
 static int fixed_world_prepared;
+/* Target-pixel bounds of each widget drawn this frame (VR cockpit panels). */
+static float fixed_widget_bounds[XWA_HUD_WIDGET_COUNT][4];
+static uint8_t fixed_widget_bounds_valid[XWA_HUD_WIDGET_COUNT];
+
+static void fixed_note_bounds(uint16_t widget, float x, float y, float w, float h) {
+	if (widget >= XWA_HUD_WIDGET_COUNT || w <= 0.0f || h <= 0.0f)
+		return;
+	float* b = fixed_widget_bounds[widget];
+	if (!fixed_widget_bounds_valid[widget]) {
+		b[0] = x;
+		b[1] = y;
+		b[2] = x + w;
+		b[3] = y + h;
+		fixed_widget_bounds_valid[widget] = 1;
+		return;
+	}
+	b[0] = fminf(b[0], x);
+	b[1] = fminf(b[1], y);
+	b[2] = fmaxf(b[2], x + w);
+	b[3] = fmaxf(b[3], y + h);
+}
+
+int XwaRemasterHudFixed_WidgetBounds(XwaHudWidgetId widget, float out[4]) {
+	if ((unsigned)widget >= XWA_HUD_WIDGET_COUNT || !fixed_widget_bounds_valid[widget])
+		return 0;
+	memcpy(out, fixed_widget_bounds[widget], sizeof fixed_widget_bounds[widget]);
+	return 1;
+}
 static XwaHudPreparedDrawState fixed_draws;
 static const XwaSnapshot* fixed_snapshot;
 static float fixed_hud_unit_scale = 1.0f;
@@ -1055,6 +1083,7 @@ void XwaRemasterHudFixed_PrepareDrawList(AeronCommandBuffer* cmd, int target_w, 
 		return;
 	const int split = fixed_world_split && fixed_world_list;
 	fixed_world_prepared = 0;
+	memset(fixed_widget_bounds_valid, 0, sizeof fixed_widget_bounds_valid);
 	AeronDrawList_Begin(fixed_list, NULL, target_w, target_h, AERON_DRAWLIST2D_LOAD, NULL);
 	if (split)
 		AeronDrawList_Begin(fixed_world_list, NULL, target_w, target_h, AERON_DRAWLIST2D_LOAD, NULL);
@@ -1094,6 +1123,7 @@ void XwaRemasterHudFixed_PrepareDrawList(AeronCommandBuffer* cmd, int target_w, 
 		sprite.dst_y = out_y + r->center_y_ref * scale - h * 0.5f;
 		sprite.dst_w = w;
 		sprite.dst_h = h;
+		fixed_note_bounds(r->widget, sprite.dst_x, sprite.dst_y, w, h);
 		sprite.tint[0] = XwaRemaster_SrgbToLinear(((r->argb >> 16) & 255) / 255.0f) * a;
 		sprite.tint[1] = XwaRemaster_SrgbToLinear(((r->argb >> 8) & 255) / 255.0f) * a;
 		sprite.tint[2] = XwaRemaster_SrgbToLinear((r->argb & 255) / 255.0f) * a;

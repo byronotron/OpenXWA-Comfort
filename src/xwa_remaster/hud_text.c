@@ -523,6 +523,35 @@ void XwaRemasterHudText_PrepareDrawList(AeronCommandBuffer* cmd, int target_w, i
 	(void)AeronDrawList_Prepare(text_list, cmd);
 }
 
+int XwaRemasterHudText_PaneBounds(uint16_t pane_id, int target_w, int target_h, float out[4]) {
+	const XwaHudLayout* layout = XwaRemasterHud_Layout();
+	if (!text_prepared.valid || !layout || text_prepared.layout_generation != layout->generation ||
+		target_w <= 0 || target_h <= 0 || text_prepared.screen_w == 0 || text_prepared.screen_h == 0)
+		return 0;
+	const XwaHudPane* pane = text_find_pane(pane_id);
+	const XwaHudLayoutProfile* profile = text_profile(layout);
+	if (!pane || !pane->visible || !profile || pane->classic_w == 0 || pane->classic_h == 0)
+		return 0;
+	int out_x, out_y;
+	float output_scale;
+	XwaRemasterHudLayout_OutputTransform(profile, target_w, target_h, &out_x, &out_y, &output_scale);
+	if (output_scale <= 0.0f)
+		return 0;
+	const float source_pixel_scale = (float)profile->reference_h / text_prepared.screen_h;
+	float x0, y0, x1, y1;
+	XwaRemasterHudLayout_MapPoint(text_origin_for_pane(pane->id), text_prepared.screen_w, text_prepared.screen_h,
+								  profile->reference_w, profile->reference_h, source_pixel_scale, pane->origin_x,
+								  pane->origin_y, &x0, &y0);
+	XwaRemasterHudLayout_MapPoint(text_origin_for_pane(pane->id), text_prepared.screen_w, text_prepared.screen_h,
+								  profile->reference_w, profile->reference_h, source_pixel_scale,
+								  pane->origin_x + pane->classic_w, pane->origin_y + pane->classic_h, &x1, &y1);
+	out[0] = out_x + fminf(x0, x1) * output_scale;
+	out[1] = out_y + fminf(y0, y1) * output_scale;
+	out[2] = out_x + fmaxf(x0, x1) * output_scale;
+	out[3] = out_y + fmaxf(y0, y1) * output_scale;
+	return out[2] > out[0] && out[3] > out[1];
+}
+
 void XwaRemasterHudText_Render(AeronCommandBuffer* cmd, AeronRenderPass* pass, AeronRenderTarget* target,
 							   int target_w, int target_h) {
 	if (!cmd || !pass || !target || !text_list || !text_prepared.valid || target_w <= 0 ||

@@ -24,6 +24,9 @@ int XwaRemasterHudFixed_ProjectTargetArrow(const XwaSnapshot* snapshot, XwaHudPr
 										   const XwaRemasterFlightView* flight_view, int target_w,
 										   int target_h, XwaHudProjectedArrow* out);
 const XwaHudProjectedArrow* XwaRemasterHudFixed_TargetArrow(void);
+/* Bounds (x0, y0, x1, y1, target pixels) of everything the widget drew in
+ * the last PrepareDrawList; 0 when it drew nothing. */
+int XwaRemasterHudFixed_WidgetBounds(XwaHudWidgetId widget, float out[4]);
 int XwaRemasterHudFixed_ReticleCenter(float* out_x_ref, float* out_y_ref);
 void XwaRemasterHudFixed_Render(AeronCommandBuffer* cmd, AeronRenderPass* pass,
 								AeronRenderTarget* target, int target_w, int target_h);

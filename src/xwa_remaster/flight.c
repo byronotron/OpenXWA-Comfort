@@ -19,6 +19,7 @@
 #include "xwa_remaster/glow_marks.h"
 #include "xwa_remaster/hud.h"
 #include "xwa_remaster/hud_fixed.h"
+#include "xwa_remaster/vr_cockpit_hud.h"
 #include "xwa_remaster/hyperspace.h"
 #include "xwa_remaster/ship.h"
 #include "xwa_remaster/sky_stars.h"
@@ -3889,7 +3890,7 @@ static int fl_xr_output_eye(AeronCommandBuffer* cmd, AeronRenderTarget* target, 
 	return 1;
 }
 
-static int fl_xr_output_hud(AeronCommandBuffer* cmd, AeronRenderTarget* target, int parts) {
+static int fl_xr_output_hud(AeronCommandBuffer* cmd, AeronRenderTarget* target, int parts, int holo) {
 	AeronRenderPass* pass = Aeron_BeginRenderPass(&(AeronRenderPassDesc) {
 		.color_target = target,
 		.clear_color = 1,
@@ -3903,17 +3904,36 @@ static int fl_xr_output_hud(AeronCommandBuffer* cmd, AeronRenderTarget* target, 
 	const AeronRectI full = { 0, 0, s.rt_w, s.rt_h };
 	Aeron_SetViewport(pass, &full);
 	Aeron_SetScissor(pass, &full);
+	if (holo && !s.suppress_hud) {
+		XwaVrCockpitHud_RenderHolo(cmd, pass, target);
+	}
 	fl_draw_hud_parts(cmd, pass, target, s.rt_w, s.rt_h, parts);
 	Aeron_EndRenderPass(pass);
 	return 1;
 }
 
-/* XWA_XR_HUD_HEADLOCK=0 keeps the whole HUD on one quad fixed in the
- * cockpit (the original VR layout). Default: helmet HUD. */
-static int fl_xr_hud_head_locked(void) {
-	const char* env = getenv("XWA_XR_HUD_HEADLOCK");
-	return !(env && env[0] == '0');
+/* VR HUD layouts (XWA_XR_HUD_LAYOUT):
+ *   cockpit (default): instruments as holographic panels on the cockpit,
+ *   helmet: one sheet that follows the head like a helmet display,
+ *   fixed: the whole HUD on one sheet fixed in the cockpit (the first VR
+ *          layout; XWA_XR_HUD_HEADLOCK=0 also selects it).
+ * Cockpit and helmet keep reticle, brackets and target arrows on the far
+ * world quad. */
+enum { FL_XR_HUD_COCKPIT, FL_XR_HUD_HELMET, FL_XR_HUD_FIXED };
+
+static int fl_xr_hud_layout(void) {
+	const char* layout = getenv("XWA_XR_HUD_LAYOUT");
+	const char* headlock = getenv("XWA_XR_HUD_HEADLOCK");
+	if (layout && strcmp(layout, "helmet") == 0) {
+		return FL_XR_HUD_HELMET;
+	}
+	if ((layout && strcmp(layout, "fixed") == 0) || (headlock && headlock[0] == '0')) {
+		return FL_XR_HUD_FIXED;
+	}
+	return FL_XR_HUD_COCKPIT;
 }
+
+static int fl_xr_hud_head_locked(void) { return fl_xr_hud_layout() != FL_XR_HUD_FIXED; }
 
 /* HUD quads.
  *
@@ -4788,13 +4808,26 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		out = s.present_scene_tex;
 	}
 	if (out && stereo) {
-		const int split = fl_xr_hud_head_locked();
+		const int layout = fl_xr_hud_layout();
+		const int split = layout != FL_XR_HUD_FIXED;
+		const int cockpit = layout == FL_XR_HUD_COCKPIT;
 		AeronXrHudQuad hud;
 		AeronXrHudQuad hud_world;
+		AeronXrPanel panels[AERON_XR_MAX_PANELS];
+		int panel_count = 0;
+		if (cockpit) {
+			panel_count = s.suppress_hud ? 0
+										 : XwaVrCockpitHud_Build(s.rt_w, s.rt_h, fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f),
+																 panels, AERON_XR_MAX_PANELS);
+			XwaVrCockpitHud_PrepareHolo(cmd, s.rt_w, s.rt_h);
+		}
 		if (fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format, s.present_bloom_tex) &&
-			fl_xr_output_hud(cmd, xr_frame.hud_target, split ? FL_HUD_HEAD : FL_HUD_ALL) &&
-			(!split || fl_xr_output_hud(cmd, xr_frame.hud_world_target, FL_HUD_WORLD))) {
-			if (split) {
+			fl_xr_output_hud(cmd, xr_frame.hud_target, split ? FL_HUD_HEAD : FL_HUD_ALL, cockpit) &&
+			(!split || fl_xr_output_hud(cmd, xr_frame.hud_world_target, FL_HUD_WORLD, 0))) {
+			if (cockpit) {
+				fl_xr_hud_quad(&flight_view.camera, &hud_world, 0);
+				Aeron_XrStereoCommitPanels(&hud_world, panels, panel_count);
+			} else if (split) {
 				fl_xr_hud_quad(&flight_view.camera, &hud, 1);
 				fl_xr_hud_quad(&flight_view.camera, &hud_world, 0);
 				Aeron_XrStereoCommitHuds(&hud, &hud_world);
@@ -4813,6 +4846,7 @@ void XwaRemasterFlight_Shutdown(void) {
 		s_xr_present = NULL;
 		s_xr_present_format = AERON_TEXTURE_FORMAT_UNKNOWN;
 	}
+	XwaVrCockpitHud_Shutdown();
 	XwaRemasterFlightMap_Shutdown();
 	XwaRemasterHyperspace_Destroy(s.hyperspace);
 	s.hyperspace = NULL;
