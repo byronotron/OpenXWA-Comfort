@@ -1461,12 +1461,16 @@ void FrontendText_DrawFormattedWrappedText(FrontendRect* rect, const unsigned ch
 
 /* Port addition: incremented whenever an editable field is drawn. */
 unsigned int g_frontendEditFieldSerial;
+int g_frontendEditFieldNoKeyboard;
 
 // FUNCTION: XWA 0x555CF0
 int FrontendText_DrawEditableField(FrontendRect* rect, char* text, int maxChars, int fieldId,
 								   unsigned int fontSize, const char* ignoredChars) {
 	/* Port: lets the VR on-screen keyboard see that a text field is live. */
-	++g_frontendEditFieldSerial;
+	if (!g_frontendEditFieldNoKeyboard) {
+		++g_frontendEditFieldSerial;
+	}
+	g_frontendEditFieldNoKeyboard = 0;
 	FrontendRect savedClip;
 	FrontendRect clipRect;
 	int cursorX;

@@ -33,6 +33,7 @@ enum {
 	VR_SHADOWS,
 	VR_CONSOLE,
 	VR_GLOVES,
+	VR_BUTTON_CARD,
 	VR_ENVIRONMENT,
 	VR_RESOLUTION,
 	VR_COUNT
@@ -61,6 +62,7 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "XWA_XR_SHADOWS", "Cockpit Shadows", k_toggle_texts, k_toggle_values, 2, 0, 85 },
 	{ "XWA_XR_CONSOLE", "Lap Console", k_toggle_texts, k_toggle_values, 2, 1, 88 },
 	{ "XWA_XR_GLOVES", "Pilot Gloves", k_toggle_texts, k_toggle_values, 2, 1, 89 },
+	{ "XWA_XR_BUTTON_CARD", "Button Card", k_toggle_texts, k_toggle_values, 2, 1, 92 },
 	{ "XWA_XR_ENVIRONMENT", "Menu Hangar", k_toggle_texts, k_toggle_values, 2, 1, 90 },
 	{ "AERON_XR_RESOLUTION_SCALE", "Resolution (restart)", k_res_texts, k_res_values, 6, 2, 86 },
 };

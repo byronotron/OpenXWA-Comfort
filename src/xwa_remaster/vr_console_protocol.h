@@ -72,6 +72,9 @@ typedef struct XwaVrConsoleState {
 	int sfoils_closed;
 	int has_target;
 	int memory_set[3];
+	/* Changes when a new mission starts (the button card returns to its
+	 * spot on the right). */
+	unsigned int mission_serial;
 } XwaVrConsoleState;
 
 #ifdef __cplusplus

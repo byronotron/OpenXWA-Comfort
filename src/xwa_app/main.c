@@ -360,6 +360,8 @@ static void android_load_settings(void) {
 				  "#XWA_XR_CONSOLE_DISTANCE=0.52\n"
 				  "# Where you put it with the grip handles (Reset in the VR options):\n"
 				  "#XWA_XR_CONSOLE_POSE=\n"
+				  "# Controls reference card on your right at mission start (0 = off):\n"
+				  "#XWA_XR_BUTTON_CARD=1\n"
 				  "# Pilot gloves on the controllers (0 = off); move them in the\n"
 				  "# controller's frame, metres x,y,z (+x right, +y up, +z back):\n"
 				  "#XWA_XR_GLOVES=1\n"

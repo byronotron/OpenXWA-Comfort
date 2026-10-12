@@ -28,6 +28,7 @@ typedef struct VrKeyboard {
 	int             visible;
 	int             mouse_captured; /* a press started on the keyboard */
 	int             frame_open;
+	int             dismissed; /* closed by the player while this field is up */
 } VrKeyboard;
 
 static VrKeyboard g_vrk;
@@ -136,6 +137,7 @@ void XwaVrKeyboard_BeginFrame(int32_t delta_us) {
 	g_vrk.visible = g_vrk.linger > 0;
 	if (!g_vrk.visible) {
 		g_vrk.mouse_captured = 0;
+		g_vrk.dismissed      = 0; /* the next text field opens it again */
 		return;
 	}
 	if (!vrk_init()) {
@@ -149,13 +151,22 @@ void XwaVrKeyboard_BeginFrame(int32_t delta_us) {
 	memset(ui_input.controllers, 0, sizeof ui_input.controllers);
 
 	AeronUi_BeginFrame(g_vrk.ui, &(AeronUiFrameDesc) { .input = &ui_input, .dt_seconds = (float)delta_us * 1e-6f });
-	if (AeronUi_BeginWindow(g_vrk.ui, "Keyboard",
+	if (g_vrk.dismissed) {
+		/* Closed: a small button where it was brings it back. */
+		if (AeronUi_BeginWindow(g_vrk.ui, "Keyboard (closed)",
+								&(AeronUiWindowDesc) { .width_ref = 300.0f, .x_ref = 260.0f, .y_ref = 120.0f })) {
+			if (AeronUi_Button(g_vrk.ui, "Keyboard")) {
+				g_vrk.dismissed = 0;
+			}
+			AeronUi_EndWindow(g_vrk.ui);
+		}
+	} else if (AeronUi_BeginWindow(g_vrk.ui, "Keyboard",
 							&(AeronUiWindowDesc) { .width_ref = 1400.0f, .x_ref = 260.0f, .y_ref = 120.0f })) {
 		vrk_row("1234567890", 1, "Del", 8);
 		vrk_row("QWERTYUIOP", 0, NULL, 0);
 		vrk_row("ASDFGHJKL", 1, "Enter", 13);
 		vrk_row("ZXCVBNM-.", 0, NULL, 0);
-		AeronUi_BeginColumns(g_vrk.ui, 3, (const float[]) { 1.0f, 3.0f, 1.0f });
+		AeronUi_BeginColumns(g_vrk.ui, 4, (const float[]) { 1.0f, 3.0f, 1.0f, 1.0f });
 		if (AeronUi_Button(g_vrk.ui, g_vrk.shift ? "SHIFT" : "Shift")) {
 			g_vrk.shift = !g_vrk.shift;
 		}
@@ -166,6 +177,11 @@ void XwaVrKeyboard_BeginFrame(int32_t delta_us) {
 		AeronUi_NextColumn(g_vrk.ui);
 		if (AeronUi_Button(g_vrk.ui, "Cancel")) {
 			vrk_type(27);
+		}
+		AeronUi_NextColumn(g_vrk.ui);
+		/* Hides the keyboard only; the text field stays as it is. */
+		if (AeronUi_Button(g_vrk.ui, "Close")) {
+			g_vrk.dismissed = 1;
 		}
 		AeronUi_EndColumns(g_vrk.ui);
 		AeronUi_EndWindow(g_vrk.ui);

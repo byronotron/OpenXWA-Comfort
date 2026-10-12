@@ -293,10 +293,18 @@ static CraftData* XwaPort_VrConsoleCraft(void) {
 }
 
 void XwaPort_GetVrConsoleState(XwaVrConsoleState* out) {
+	static int flight_was_active;
+	static unsigned int mission_serial;
+	const int flight_active = XwaFlightTask_IsActive();
 	const CraftData* craft = XwaPort_VrConsoleCraft();
 	const PlayerData* player = &g_players[g_localPlayer];
 	uint16_t objectType;
+	if (flight_active && !flight_was_active) {
+		++mission_serial;
+	}
+	flight_was_active = flight_active;
 	memset(out, 0, sizeof *out);
+	out->mission_serial = mission_serial;
 	if (!craft) {
 		return;
 	}

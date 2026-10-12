@@ -33,6 +33,14 @@ void XwaVrConsole_SetState(const XwaVrConsoleState* state);
 int XwaVrConsole_Frame(AeronCommandBuffer* cmd, AeronRenderTarget* target, int width, int height,
 					   const AeronXrView views[2], AeronXrPanel* out);
 
+/* The button card: a reference of the controller layout, drawn into the
+ * stereo frame's card target (`out` filled as for the console). It
+ * appears at every mission start to the player's right, just out of view,
+ * and can be picked up by its ends like the console. XWA_XR_BUTTON_CARD=0
+ * turns it off. Call after Frame. */
+int XwaVrConsole_CardFrame(AeronCommandBuffer* cmd, AeronRenderTarget* target, int width, int height,
+						   const AeronXrView views[2], AeronXrPanel* out);
+
 /* Releases the trigger when the console was not shown this frame. */
 void XwaVrConsole_EndFrame(void);
 

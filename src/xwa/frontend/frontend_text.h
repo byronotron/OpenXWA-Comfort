@@ -68,6 +68,9 @@ void FrontendText_DrawFormattedWrappedText(FrontendRect* rect, const unsigned ch
 										   short suppressCenteredHeadings);
 /* Incremented whenever an editable text field is drawn (port addition). */
 extern unsigned int g_frontendEditFieldSerial;
+/* Port addition: set before drawing a field that must not bring up the VR
+ * on-screen keyboard (it covers the screen's other info). One field only. */
+extern int g_frontendEditFieldNoKeyboard;
 
 int FrontendText_DrawEditableField(FrontendRect* rect, char* text, int maxChars, int fieldId,
 								   unsigned int fontSize, const char* ignoredChars);

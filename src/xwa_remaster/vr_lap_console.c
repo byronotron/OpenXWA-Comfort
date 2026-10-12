@@ -37,6 +37,16 @@
 #define VC_GRAB_Y_M 0.05f
 #define VC_GRAB_FRONT_M 0.09f
 #define VC_GRAB_BACK_M 0.07f
+/* Button card: a reference of the controller layout, 40 x 30 cm, that
+ * appears at every mission start to the right, just out of view. */
+#define VC_CARD_W_M 0.40f
+#define VC_CARD_H_M 0.30f
+#define VC_CARD_YAW_DEG 80.0f
+#define VC_CARD_PITCH_DEG -12.0f
+#define VC_CARD_DISTANCE_M 0.60f
+#define VC_CARD_WAKE_DEG 30.0f
+#define VC_CARD_SLEEP_DEG 38.0f
+
 #define VC_GRIP_ON 0.6f
 #define VC_GRIP_OFF 0.35f
 
@@ -98,6 +108,17 @@ typedef struct VcHand {
 	int captured;
 } VcHand;
 
+/* A panel the player can pick up by its ends and put anywhere. */
+typedef struct VcPlace {
+	int custom; /* placed by hand (else the default spot) */
+	float cpos[3], cq[4];
+	int grab_hand; /* hand + 1, 0 = not held */
+	int grab_side;
+	float grab_pos[3], grab_q[4]; /* the panel relative to the holding hand */
+	int hover_side[2];
+	float grip_prev[2];
+} VcPlace;
+
 static struct {
 	float dt;
 	int drawn;
@@ -126,19 +147,27 @@ static struct {
 	AeronXrPanel pose;
 	float ax[3], ay[3], az[3];
 	int logged;
-	/* Placement moved by hand (XWA_XR_CONSOLE_POSE), LOCAL space. */
-	int custom;
-	float cpos[3], cq[4];
+	/* Placements moved by hand, LOCAL space: the lap console (saved as
+	 * XWA_XR_CONSOLE_POSE) and the button card (back on the right at every
+	 * mission start). */
+	VcPlace lap, card;
 	char pose_env[160];
-	/* Grabbing: the hand, the side it holds, and the console relative to
-	 * the hand. */
-	int grab_hand; /* hand + 1, 0 = not held */
-	int grab_side;
-	float grab_pos[3], grab_q[4];
-	int hover_side[2];
-	float grip_prev[2];
 	int placement_dirty;
 	char placement[160];
+	/* The panel being drawn: its list and its size in metres and pixels
+	 * (for the glove cut-outs). */
+	AeronDrawList2D* cur_list;
+	float cur_w_m, cur_h_m, cur_w_px, cur_h_px;
+	/* Button card. */
+	AeronDrawList2D* card_list;
+	int card_awake;
+	float card_alpha;
+	unsigned int card_mission;
+	int card_drawn;
+	int card_logged;
+	/* Grips the panels own this frame (handles reached), applied in
+	 * EndFrame. */
+	int grip_capture[2];
 } s_vc;
 
 /* ---- Small math ------------------------------------------------------- */
@@ -193,28 +222,91 @@ static void vc_read_pose_env(void) {
 	}
 	snprintf(s_vc.pose_env, sizeof s_vc.pose_env, "%s", v);
 	float p[3], q[4];
-	s_vc.custom = sscanf(v, "%f,%f,%f,%f,%f,%f,%f", &p[0], &p[1], &p[2], &q[0], &q[1], &q[2], &q[3]) == 7 &&
-				  fabsf(p[0]) < 2.0f && fabsf(p[1]) < 2.0f && fabsf(p[2]) < 2.0f;
-	if (s_vc.custom) {
-		memcpy(s_vc.cpos, p, sizeof p);
+	s_vc.lap.custom = sscanf(v, "%f,%f,%f,%f,%f,%f,%f", &p[0], &p[1], &p[2], &q[0], &q[1], &q[2], &q[3]) == 7 &&
+					  fabsf(p[0]) < 2.0f && fabsf(p[1]) < 2.0f && fabsf(p[2]) < 2.0f;
+	if (s_vc.lap.custom) {
+		memcpy(s_vc.lap.cpos, p, sizeof p);
 		vc_qnorm(q);
-		memcpy(s_vc.cq, q, sizeof q);
+		memcpy(s_vc.lap.cq, q, sizeof q);
 	}
+}
+
+/* Where the player put a panel: 1 with its pose and axes. */
+static int vc_place_pose(const VcPlace* pl, float w, float h, AeronXrPanel* out, float axis_x[3], float axis_y[3],
+						 float axis_z[3]) {
+	static const float ux[3] = { 1, 0, 0 }, uy[3] = { 0, 1, 0 }, uz[3] = { 0, 0, 1 };
+	if (!pl->custom) {
+		return 0;
+	}
+	memcpy(out->position, pl->cpos, sizeof pl->cpos);
+	memcpy(out->orientation, pl->cq, sizeof pl->cq);
+	vc_rotate(pl->cq, ux, axis_x);
+	vc_rotate(pl->cq, uy, axis_y);
+	vc_rotate(pl->cq, uz, axis_z);
+	out->size[0] = w;
+	out->size[1] = h;
+	return 1;
+}
+
+/* Rotation with columns x, y, z -> quaternion. */
+static void vc_basis_quat(const float x[3], const float y[3], const float z[3], float q[4]) {
+	const float trace = x[0] + y[1] + z[2];
+	if (trace > 0.0f) {
+		const float t = sqrtf(trace + 1.0f) * 2.0f;
+		q[3] = 0.25f * t;
+		q[0] = (y[2] - z[1]) / t;
+		q[1] = (z[0] - x[2]) / t;
+		q[2] = (x[1] - y[0]) / t;
+	} else if (x[0] > y[1] && x[0] > z[2]) {
+		const float t = sqrtf(1.0f + x[0] - y[1] - z[2]) * 2.0f;
+		q[3] = (y[2] - z[1]) / t;
+		q[0] = 0.25f * t;
+		q[1] = (y[0] + x[1]) / t;
+		q[2] = (z[0] + x[2]) / t;
+	} else if (y[1] > z[2]) {
+		const float t = sqrtf(1.0f + y[1] - x[0] - z[2]) * 2.0f;
+		q[3] = (z[0] - x[2]) / t;
+		q[0] = (y[0] + x[1]) / t;
+		q[1] = 0.25f * t;
+		q[2] = (z[1] + y[2]) / t;
+	} else {
+		const float t = sqrtf(1.0f + z[2] - x[0] - y[1]) * 2.0f;
+		q[3] = (x[1] - y[0]) / t;
+		q[0] = (z[0] + x[2]) / t;
+		q[1] = (z[1] + y[2]) / t;
+		q[2] = 0.25f * t;
+	}
+}
+
+/* A quad `d` metres from the seated eye point at yaw (+ right) / pitch
+ * (+ up) degrees, facing it, X kept level. */
+static void vc_facing_pose(float yaw_deg, float pitch_deg, float d, float w, float h, AeronXrPanel* out,
+						   float axis_x[3], float axis_y[3], float axis_z[3]) {
+	const float deg = 3.14159265f / 180.0f;
+	const float yaw = yaw_deg * deg, pitch = pitch_deg * deg;
+	const float dir[3] = { sinf(yaw) * cosf(pitch), sinf(pitch), -cosf(yaw) * cosf(pitch) };
+	for (int k = 0; k < 3; ++k) {
+		out->position[k] = dir[k] * d;
+	}
+	const float z[3] = { -dir[0], -dir[1], -dir[2] };
+	float x[3] = { z[2], 0.0f, -z[0] };
+	const float xl = sqrtf(x[0] * x[0] + x[2] * x[2]);
+	x[0] /= xl;
+	x[2] /= xl;
+	const float y[3] = { z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0] };
+	memcpy(axis_x, x, sizeof x);
+	memcpy(axis_y, y, sizeof y);
+	memcpy(axis_z, z, sizeof z);
+	vc_basis_quat(x, y, z, out->orientation);
+	out->size[0] = w;
+	out->size[1] = h;
 }
 
 /* Quad facing the LOCAL origin (the seated eye point), X kept level; or
  * where the player put it. */
 static void vc_pose(AeronXrPanel* out, float axis_x[3], float axis_y[3], float axis_z[3]) {
 	const float deg = 3.14159265f / 180.0f;
-	if (s_vc.custom) {
-		static const float ux[3] = { 1, 0, 0 }, uy[3] = { 0, 1, 0 }, uz[3] = { 0, 0, 1 };
-		memcpy(out->position, s_vc.cpos, sizeof s_vc.cpos);
-		memcpy(out->orientation, s_vc.cq, sizeof s_vc.cq);
-		vc_rotate(s_vc.cq, ux, axis_x);
-		vc_rotate(s_vc.cq, uy, axis_y);
-		vc_rotate(s_vc.cq, uz, axis_z);
-		out->size[0] = VC_WIDTH_M;
-		out->size[1] = VC_HEIGHT_M;
+	if (vc_place_pose(&s_vc.lap, VC_WIDTH_M, VC_HEIGHT_M, out, axis_x, axis_y, axis_z)) {
 		return;
 	}
 	const float pitch = vc_env("XWA_XR_CONSOLE_PITCH", VC_PITCH_DEG) * deg;
@@ -548,7 +640,7 @@ static void vc_update_hand(int hand, const AeronXrPanel* pose, const float ax[3]
 	const int was_down = h->poke_down || h->trigger_down;
 	h->cursor = 0;
 	h->over_button = -1;
-	if (!s_vc.awake || s_vc.grab_hand == hand + 1 || !Aeron_XrGetHand(hand, &xh)) {
+	if (!s_vc.awake || s_vc.lap.grab_hand == hand + 1 || !Aeron_XrGetHand(hand, &xh)) {
 		if (was_down) {
 			vc_release(hand);
 		}
@@ -644,76 +736,83 @@ static void vc_update_hand(int hand, const AeronXrPanel* pose, const float ax[3]
 
 /* ---- Grabbing --------------------------------------------------------- */
 
-static void vc_grab_end(void) {
-	if (!s_vc.grab_hand) {
+static void vc_grab_end(VcPlace* pl) {
+	if (!pl->grab_hand) {
 		return;
 	}
-	Aeron_XrHapticPulse(s_vc.grab_hand - 1, 0.3f, 20);
-	s_vc.grab_hand = 0;
-	s_vc.grab_side = 0;
-	snprintf(s_vc.placement, sizeof s_vc.placement, "%.4f,%.4f,%.4f,%.5f,%.5f,%.5f,%.5f", s_vc.cpos[0],
-			 s_vc.cpos[1], s_vc.cpos[2], s_vc.cq[0], s_vc.cq[1], s_vc.cq[2], s_vc.cq[3]);
+	Aeron_XrHapticPulse(pl->grab_hand - 1, 0.3f, 20);
+	pl->grab_hand = 0;
+	pl->grab_side = 0;
+	if (pl != &s_vc.lap) {
+		return;
+	}
+	snprintf(s_vc.placement, sizeof s_vc.placement, "%.4f,%.4f,%.4f,%.5f,%.5f,%.5f,%.5f", pl->cpos[0], pl->cpos[1],
+			 pl->cpos[2], pl->cq[0], pl->cq[1], pl->cq[2], pl->cq[3]);
 	setenv("XWA_XR_CONSOLE_POSE", s_vc.placement, 1);
 	snprintf(s_vc.pose_env, sizeof s_vc.pose_env, "%s", s_vc.placement);
 	s_vc.placement_dirty = 1;
 	Aeron_LogInfo("xwa.remaster", "lap console moved to %s", s_vc.placement);
 }
 
-/* Squeezing the grip at either end of the console picks it up; it follows
- * the hand freely (position and turn) until the grip is let go. */
-static void vc_update_grab(const AeronXrPanel* pose, const float ax[3], const float ay[3], const float az[3]) {
+/* Squeezing the grip at either end of a panel (w x h metres) picks it up;
+ * it follows the hand freely (position and turn) until the grip is let go.
+ * A hand holding the `other` panel does not pick this one up. */
+static void vc_update_grab(VcPlace* pl, const VcPlace* other, const AeronXrPanel* pose, const float ax[3],
+						   const float ay[3], const float az[3], float w, float h) {
 	for (int hand = 0; hand < 2; ++hand) {
 		AeronXrHand xh;
-		s_vc.hover_side[hand] = 0;
+		pl->hover_side[hand] = 0;
 		if (!Aeron_XrGetHand(hand, &xh)) {
-			if (s_vc.grab_hand == hand + 1) {
-				vc_grab_end();
+			if (pl->grab_hand == hand + 1) {
+				vc_grab_end(pl);
 			}
-			s_vc.grip_prev[hand] = 0.0f;
-			Aeron_XrCaptureGrip(hand, 0);
+			pl->grip_prev[hand] = 0.0f;
 			continue;
 		}
 		const float rel[3] = { xh.position[0] - pose->position[0], xh.position[1] - pose->position[1],
 							   xh.position[2] - pose->position[2] };
 		const float lx = vc_dot(rel, ax), ly = vc_dot(rel, ay), depth = vc_dot(rel, az);
-		const float edge = fabsf(lx) - 0.5f * VC_WIDTH_M;
-		const int in_zone = edge > -VC_GRAB_X_M && edge < VC_GRAB_X_M && fabsf(ly) < 0.5f * VC_HEIGHT_M + VC_GRAB_Y_M &&
-							depth < VC_GRAB_FRONT_M && depth > -VC_GRAB_BACK_M;
+		const float edge = fabsf(lx) - 0.5f * w;
+		const int in_zone = edge > -VC_GRAB_X_M && edge < VC_GRAB_X_M && fabsf(ly) < 0.5f * h + VC_GRAB_Y_M &&
+							depth < VC_GRAB_FRONT_M && depth > -VC_GRAB_BACK_M &&
+							!(other && other->grab_hand == hand + 1);
 		if (in_zone) {
-			s_vc.hover_side[hand] = lx < 0.0f ? -1 : 1;
+			pl->hover_side[hand] = lx < 0.0f ? -1 : 1;
 		}
-		if (s_vc.grab_hand == hand + 1) {
+		if (pl->grab_hand == hand + 1) {
 			if (xh.grip < VC_GRIP_OFF) {
-				vc_grab_end();
+				vc_grab_end(pl);
 			} else {
-				/* console = hand * relative */
+				/* panel = hand * relative */
 				float off[3];
-				vc_rotate(xh.orientation, s_vc.grab_pos, off);
+				vc_rotate(xh.orientation, pl->grab_pos, off);
 				for (int k = 0; k < 3; ++k) {
-					s_vc.cpos[k] = xh.position[k] + off[k];
+					pl->cpos[k] = xh.position[k] + off[k];
 				}
-				vc_qmul(xh.orientation, s_vc.grab_q, s_vc.cq);
-				vc_qnorm(s_vc.cq);
-				s_vc.custom = 1;
+				vc_qmul(xh.orientation, pl->grab_q, pl->cq);
+				vc_qnorm(pl->cq);
+				pl->custom = 1;
 			}
-		} else if (!s_vc.grab_hand && in_zone && xh.grip >= VC_GRIP_ON && s_vc.grip_prev[hand] < VC_GRIP_OFF) {
-			/* relative = inverse(hand) * console */
+		} else if (!pl->grab_hand && in_zone && xh.grip >= VC_GRIP_ON && pl->grip_prev[hand] < VC_GRIP_OFF) {
+			/* relative = inverse(hand) * panel */
 			const float inv[4] = { -xh.orientation[0], -xh.orientation[1], -xh.orientation[2], xh.orientation[3] };
-			const float to_console[3] = { -rel[0], -rel[1], -rel[2] };
-			vc_rotate(inv, to_console, s_vc.grab_pos);
-			vc_qmul(inv, pose->orientation, s_vc.grab_q);
-			vc_qnorm(s_vc.grab_q);
-			memcpy(s_vc.cpos, pose->position, sizeof s_vc.cpos);
-			memcpy(s_vc.cq, pose->orientation, sizeof s_vc.cq);
-			vc_qnorm(s_vc.cq);
-			s_vc.custom = 1;
-			s_vc.grab_hand = hand + 1;
-			s_vc.grab_side = lx < 0.0f ? -1 : 1;
+			const float to_panel[3] = { -rel[0], -rel[1], -rel[2] };
+			vc_rotate(inv, to_panel, pl->grab_pos);
+			vc_qmul(inv, pose->orientation, pl->grab_q);
+			vc_qnorm(pl->grab_q);
+			memcpy(pl->cpos, pose->position, sizeof pl->cpos);
+			memcpy(pl->cq, pose->orientation, sizeof pl->cq);
+			vc_qnorm(pl->cq);
+			pl->custom = 1;
+			pl->grab_hand = hand + 1;
+			pl->grab_side = lx < 0.0f ? -1 : 1;
 			Aeron_XrHapticPulse(hand, 0.6f, 30);
 		}
-		s_vc.grip_prev[hand] = xh.grip;
-		/* The grip at a grab zone belongs to the console, not the game. */
-		Aeron_XrCaptureGrip(hand, in_zone || s_vc.grab_hand == hand + 1);
+		pl->grip_prev[hand] = xh.grip;
+		/* The grip at a grab zone belongs to the panel, not the game. */
+		if (in_zone || pl->grab_hand == hand + 1) {
+			s_vc.grip_capture[hand] = 1;
+		}
 	}
 }
 
@@ -752,7 +851,7 @@ static void vc_rrect(float x, float y, float w, float h, float radius, float bor
 	if (border) {
 		memcpy(r.border, border, sizeof r.border);
 	}
-	AeronDrawList_AddRRect(s_vc.list, &r);
+	AeronDrawList_AddRRect(s_vc.cur_list, &r);
 }
 
 static void vc_text(float x, float y, const char* text, float size_px, int align, float r, float g, float b,
@@ -769,7 +868,7 @@ static void vc_text(float x, float y, const char* text, float size_px, int align
 	style.tint[2] = b;
 	style.tint[3] = a * s_vc.alpha;
 	style.filter = AERON_BLIT2D_FILTER_LINEAR;
-	AeronText_Draw(s_vc.list, &style, x, y, (AeronTextAlign)align, text, -1, NULL);
+	AeronText_Draw(s_vc.cur_list, &style, x, y, (AeronTextAlign)align, text, -1, NULL);
 }
 
 /* Holo cyan from the console design. */
@@ -858,8 +957,8 @@ static float vc_project(const float p[3], float* px, float* py) {
 	}
 	const float t = dc / dp;
 	const float hit[3] = { ep[0] * t - ec[0], ep[1] * t - ec[1], ep[2] * t - ec[2] };
-	*px = (vc_dot(hit, s_vc.ax) / VC_WIDTH_M + 0.5f) * VC_W;
-	*py = (0.5f - vc_dot(hit, s_vc.ay) / VC_HEIGHT_M) * VC_H;
+	*px = (vc_dot(hit, s_vc.ax) / s_vc.cur_w_m + 0.5f) * s_vc.cur_w_px;
+	*py = (0.5f - vc_dot(hit, s_vc.ay) / s_vc.cur_h_m) * s_vc.cur_h_px;
 	return t;
 }
 
@@ -893,7 +992,7 @@ static void vc_cut_capsule(const XwaVrGloveCapsule* cap) {
 	if (sa <= 0.0f || sb <= 0.0f) {
 		return;
 	}
-	const float px_per_m = VC_W / VC_WIDTH_M;
+	const float px_per_m = s_vc.cur_w_px / s_vc.cur_w_m;
 	const float r = cap->radius * 0.5f * (sa + sb) * px_per_m;
 	/* Extend by the radius at both ends so the caps are covered. */
 	float dx = x1 - x0, dy = y1 - y0;
@@ -905,8 +1004,45 @@ static void vc_cut_capsule(const XwaVrGloveCapsule* cap) {
 		dx = 1.0f;
 		dy = 0.0f;
 	}
-	AeronDrawList_AddLine(s_vc.list, x0 - dx * r * 0.8f, y0 - dy * r * 0.8f, x1 + dx * r * 0.8f, y1 + dy * r * 0.8f,
+	AeronDrawList_AddLine(s_vc.cur_list, x0 - dx * r * 0.8f, y0 - dy * r * 0.8f, x1 + dx * r * 0.8f, y1 + dy * r * 0.8f,
 						  2.0f * r, zero, AERON_BLIT2D_BLEND_NONE, NULL);
+}
+
+/* Grab handles: thick frame bars at both ends of the current panel, bright
+ * while a hand is at them or holds them. */
+static void vc_draw_handles(const VcPlace* pl) {
+	const float W = s_vc.cur_w_px, H = s_vc.cur_h_px;
+	for (int side = -1; side <= 1; side += 2) {
+		int hot = pl->grab_side == side;
+		for (int h = 0; h < 2; ++h) {
+			hot |= pl->hover_side[h] == side;
+		}
+		const float bar_w = 16.0f;
+		const float x = side < 0 ? 9.0f : W - 9.0f - bar_w;
+		float bar[4], rim[4];
+		vc_pma(bar, VC_CYAN, pl->grab_side == side ? 0.85f : hot ? 0.6f : 0.32f);
+		vc_pma(rim, VC_CYAN, hot ? 1.0f : 0.75f);
+		vc_rrect(x, 52.0f, bar_w, H - 104.0f, 8.0f, 2.0f, 1.0f, bar, rim);
+		for (int r = -2; r <= 2; ++r) {
+			float ridge[4];
+			vc_pma(ridge, 0.0f, 0.0f, 0.0f, 0.35f);
+			AeronDrawList_AddFill(s_vc.cur_list, x + 3.0f, H * 0.5f + (float)r * 22.0f - 1.5f, bar_w - 6.0f, 3.0f,
+								  ridge, AERON_BLIT2D_BLEND_PMA, NULL);
+		}
+	}
+}
+
+/* The console is a layer drawn over the 3D view: wherever a glove is
+ * between the eye and the current panel, cut the panel away so the hand
+ * shows in front of it. */
+static void vc_cut_gloves(void) {
+	for (int h = 0; h < 2; ++h) {
+		XwaVrGloveCapsule caps[24];
+		const int n = XwaVrGloves_Capsules(h, caps, 24);
+		for (int c = 0; c < n; ++c) {
+			vc_cut_capsule(&caps[c]);
+		}
+	}
 }
 
 static void vc_draw(void) {
@@ -918,46 +1054,27 @@ static void vc_draw(void) {
 	vc_pma(fill, 0.157f, 0.549f, 0.745f, 0.10f);
 	vc_pma(border, VC_CYAN, 0.6f);
 	vc_rrect(10.0f, 10.0f, VC_W - 20.0f, VC_H - 20.0f, 26.0f, 2.0f, 1.0f, fill, border);
-	/* Grab handles: thick frame bars at both ends, bright while a hand is
-	 * at them or holds them. */
-	for (int side = -1; side <= 1; side += 2) {
-		int hot = s_vc.grab_side == side;
-		for (int h = 0; h < 2; ++h) {
-			hot |= s_vc.hover_side[h] == side;
-		}
-		const float bar_w = 16.0f;
-		const float x = side < 0 ? 9.0f : VC_W - 9.0f - bar_w;
-		float bar[4], rim[4];
-		vc_pma(bar, VC_CYAN, s_vc.grab_side == side ? 0.85f : hot ? 0.6f : 0.32f);
-		vc_pma(rim, VC_CYAN, hot ? 1.0f : 0.75f);
-		vc_rrect(x, 52.0f, bar_w, VC_H - 104.0f, 8.0f, 2.0f, 1.0f, bar, rim);
-		for (int r = -2; r <= 2; ++r) {
-			float ridge[4];
-			vc_pma(ridge, 0.0f, 0.0f, 0.0f, 0.35f);
-			AeronDrawList_AddFill(s_vc.list, x + 3.0f, VC_H * 0.5f + (float)r * 22.0f - 1.5f, bar_w - 6.0f, 3.0f,
-								  ridge, AERON_BLIT2D_BLEND_PMA, NULL);
-		}
-	}
+	vc_draw_handles(&s_vc.lap);
 	/* Scan lines, fixed to the panel. */
 	for (float y = 14.0f; y < VC_H - 14.0f; y += 6.0f) {
 		float line[4];
 		vc_pma(line, VC_CYAN, 0.025f);
-		AeronDrawList_AddFill(s_vc.list, 14.0f, y, VC_W - 28.0f, 2.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
+		AeronDrawList_AddFill(s_vc.cur_list, 14.0f, y, VC_W - 28.0f, 2.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
 	}
 	/* Column dividers. */
 	for (int i = 0; i < 2; ++i) {
 		float line[4];
 		vc_pma(line, VC_CYAN, 0.35f);
 		const float x = i == 0 ? 520.0f : 1015.0f;
-		AeronDrawList_AddFill(s_vc.list, x, 40.0f, 2.0f, VC_H - 80.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
+		AeronDrawList_AddFill(s_vc.cur_list, x, 40.0f, 2.0f, VC_H - 80.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
 	}
 	/* Rules between the stacked sections (targeting / weapons, wingmen /
 	 * ship). */
 	{
 		float line[4];
 		vc_pma(line, VC_CYAN, 0.35f);
-		AeronDrawList_AddFill(s_vc.list, 538.0f, s_vc.divider_y, 460.0f, 2.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
-		AeronDrawList_AddFill(s_vc.list, 1032.0f, 274.0f, 470.0f, 2.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
+		AeronDrawList_AddFill(s_vc.cur_list, 538.0f, s_vc.divider_y, 460.0f, 2.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
+		AeronDrawList_AddFill(s_vc.cur_list, 1032.0f, 274.0f, 470.0f, 2.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
 	}
 	for (int i = 0; i < s_vc.label_count; ++i) {
 		const VcLabel* l = &s_vc.labels[i];
@@ -972,16 +1089,7 @@ static void vc_draw(void) {
 	for (int i = 0; i < s_vc.button_count; ++i) {
 		vc_draw_button(i);
 	}
-	/* The console is a layer drawn over the 3D view: wherever a glove is
-	 * between the eye and the console, cut the console away so the hand
-	 * shows in front of it. */
-	for (int h = 0; h < 2; ++h) {
-		XwaVrGloveCapsule caps[24];
-		const int n = XwaVrGloves_Capsules(h, caps, 24);
-		for (int c = 0; c < n; ++c) {
-			vc_cut_capsule(&caps[c]);
-		}
-	}
+	vc_cut_gloves();
 	/* Cursors: a ring that closes in as the tip nears the surface, or a
 	 * dot where the ray lands. */
 	for (int h = 0; h < 2; ++h) {
@@ -1008,13 +1116,15 @@ static void vc_draw(void) {
 
 static int vc_ensure(void);
 static int vc_enabled(void);
+static int vc_card_enabled(void);
 
 void XwaVrConsole_BeginFrame(float dt_seconds) {
 	s_vc.dt = dt_seconds > 0.0f && dt_seconds < 0.25f ? dt_seconds : 0.0f;
 	s_vc.drawn = 0;
+	s_vc.card_drawn = 0;
 	/* Load the font here, between frames, rather than while the flight
 	 * renderer is recording its command buffer. */
-	if (s_vc.state.valid && s_vc.font_state == 0 && vc_enabled() && Aeron_XrIsPresenting()) {
+	if (s_vc.state.valid && s_vc.font_state == 0 && (vc_enabled() || vc_card_enabled()) && Aeron_XrIsPresenting()) {
 		vc_ensure();
 	}
 }
@@ -1080,11 +1190,11 @@ int XwaVrConsole_Frame(AeronCommandBuffer* cmd, AeronRenderTarget* target, int w
 
 	memset(out, 0, sizeof *out);
 	float ax[3], ay[3], az[3];
-	if (!s_vc.grab_hand) {
+	if (!s_vc.lap.grab_hand) {
 		vc_read_pose_env();
 	}
 	vc_pose(out, ax, ay, az);
-	vc_update_grab(out, ax, ay, az);
+	vc_update_grab(&s_vc.lap, &s_vc.card, out, ax, ay, az, VC_WIDTH_M, VC_HEIGHT_M);
 	vc_pose(out, ax, ay, az); /* moved by the grab */
 	for (int k = 0; k < 3; ++k) {
 		s_vc.eye[k] = 0.5f * (views[0].position[k] + views[1].position[k]);
@@ -1100,7 +1210,7 @@ int XwaVrConsole_Frame(AeronCommandBuffer* cmd, AeronRenderTarget* target, int w
 		const float len = sqrtf(vc_dot(to, to));
 		const float c = len > 1e-4f ? vc_dot(f, to) / len : 1.0f;
 		const float angle = acosf(fmaxf(-1.0f, fminf(1.0f, c))) * 180.0f / 3.14159265f;
-		const int handled = s_vc.grab_hand || s_vc.hover_side[0] || s_vc.hover_side[1];
+		const int handled = s_vc.lap.grab_hand || s_vc.lap.hover_side[0] || s_vc.lap.hover_side[1];
 		if (handled) {
 			s_vc.awake = 1;
 		} else if (s_vc.awake && angle > VC_SLEEP_DEG) {
@@ -1136,9 +1246,229 @@ int XwaVrConsole_Frame(AeronCommandBuffer* cmd, AeronRenderTarget* target, int w
 		Aeron_XrCaptureTrigger(h, s_vc.hands[h].captured);
 	}
 
+	s_vc.cur_list = s_vc.list;
+	s_vc.cur_w_m = VC_WIDTH_M;
+	s_vc.cur_h_m = VC_HEIGHT_M;
+	s_vc.cur_w_px = VC_W;
+	s_vc.cur_h_px = VC_H;
 	AeronDrawList_Begin(s_vc.list, target, width, height, AERON_DRAWLIST2D_CLEAR, NULL);
 	vc_draw();
 	AeronDrawList_Render(s_vc.list, cmd);
+	return 1;
+}
+
+
+/* ---- Button card ------------------------------------------------------- */
+
+/* The controller layout in flight. Keep in step with the VR button
+ * bindings in xwa_runtime/runtime/port.c and the Touch mapping in Aeron's
+ * xr_input_map.h. "grip+" = with the left grip held. */
+typedef struct VcCardRow {
+	int kind; /* 0 trigger, 1 upper button, 2 stick, 3 lower button, 4 menu, 5 grip */
+	const char* action;
+	const char* more;
+} VcCardRow;
+
+static const VcCardRow k_card_left[] = {
+	{ 0, "Cycle warheads (W)", "grip+: dock / board" },
+	{ 1, "Y: match speed (Enter)", "grip+: pick up" },
+	{ 2, "Throttle (fwd/back), roll", "click: fire link (X), grip+: release" },
+	{ 3, "X: countermeasure (C)", "grip+: confirm (Space)" },
+	{ 4, "Pause / menu", NULL },
+	{ 5, "Hold: grip+ layer", "picks panels up by their ends" },
+};
+
+static const VcCardRow k_card_right[] = {
+	{ 0, "Fire", NULL },
+	{ 1, "B: next target (T)", "grip+: previous target (Y)" },
+	{ 2, "Yaw / pitch", "click: my attacker (E), grip+: (A)" },
+	{ 3, "A: nearest enemy (R)", "grip+: nearest objective (O)" },
+	{ 5, "Target in sights", "grip+: incoming warhead (I)" },
+};
+
+static float vc_card_row_y(int kind) {
+	static const float y[6] = { 150.0f, 236.0f, 322.0f, 408.0f, 490.0f, 576.0f };
+	return y[kind];
+}
+
+static void vc_card_element(float cx, int kind) {
+	const float y = vc_card_row_y(kind);
+	float fill[4], rim[4];
+	switch (kind) {
+		case 0:
+			vc_pma(fill, VC_AMBER, 0.35f);
+			vc_pma(rim, VC_AMBER, 0.95f);
+			vc_rrect(cx - 18.0f, y - 9.0f, 36.0f, 18.0f, 6.0f, 2.0f, 1.0f, fill, rim);
+			break;
+		case 1:
+		case 3:
+			vc_pma(fill, VC_CYAN, 0.25f);
+			vc_pma(rim, VC_CYAN, 0.95f);
+			vc_rrect(cx - 13.0f, y - 13.0f, 26.0f, 26.0f, 13.0f, 2.0f, 1.0f, fill, rim);
+			break;
+		case 2:
+			vc_pma(fill, VC_CYAN, 0.12f);
+			vc_pma(rim, VC_CYAN, 0.95f);
+			vc_rrect(cx - 20.0f, y - 20.0f, 40.0f, 40.0f, 20.0f, 3.0f, 1.0f, fill, rim);
+			break;
+		case 4:
+			vc_pma(fill, VC_CYAN, 0.25f);
+			vc_pma(rim, VC_CYAN, 0.8f);
+			vc_rrect(cx - 7.0f, y - 7.0f, 14.0f, 14.0f, 7.0f, 2.0f, 1.0f, fill, rim);
+			break;
+		default:
+			vc_pma(fill, 0.62f, 0.50f, 1.0f, 0.35f);
+			vc_pma(rim, 0.62f, 0.50f, 1.0f, 0.95f);
+			vc_rrect(cx - 15.0f, y - 22.0f, 30.0f, 44.0f, 6.0f, 2.0f, 1.0f, fill, rim);
+			break;
+	}
+}
+
+static void vc_card_side(const VcCardRow* rows, int count, float body_cx, int right) {
+	const float transparent[4] = { 0, 0, 0, 0 };
+	float body[4], line[4];
+	vc_pma(body, 0.62f, 0.85f, 0.92f, 0.55f);
+	vc_rrect(body_cx - 27.0f, 115.0f, 54.0f, 505.0f, 27.0f, 2.0f, 1.0f, transparent, body);
+	vc_pma(line, VC_CYAN, 0.45f);
+	for (int i = 0; i < count; ++i) {
+		const VcCardRow* r = &rows[i];
+		const float y = vc_card_row_y(r->kind);
+		vc_card_element(body_cx, r->kind);
+		const float half = r->kind == 2 ? 20.0f : r->kind == 0 ? 18.0f : r->kind == 5 ? 15.0f : r->kind == 4 ? 7.0f : 13.0f;
+		const float x0 = right ? body_cx + half + 4.0f : body_cx - half - 4.0f;
+		const float x1 = right ? body_cx + 60.0f : body_cx - 60.0f;
+		AeronDrawList_AddLine(s_vc.cur_list, x0, y, x1, y, 2.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
+		const float tx = right ? x1 + 8.0f : x1 - 8.0f;
+		const int align = right ? 0 : 2;
+		if (r->more) {
+			vc_text(tx, y - 26.0f, r->action, 22.0f, align, 0.85f, 0.97f, 1.0f, 1.0f);
+			vc_text(tx, y + 2.0f, r->more, 17.0f, align, 0.62f, 0.85f, 0.92f, 0.85f);
+		} else {
+			vc_text(tx, y - 13.0f, r->action, 22.0f, align, 0.85f, 0.97f, 1.0f, 1.0f);
+		}
+	}
+}
+
+static void vc_card_draw(void) {
+	const float W = s_vc.cur_w_px, H = s_vc.cur_h_px;
+	const float transparent[4] = { 0, 0, 0, 0 };
+	float fill[4], border[4], glow[4];
+	/* The lap console's plate. */
+	vc_pma(glow, VC_CYAN, 0.25f);
+	vc_rrect(4.0f, 4.0f, W - 8.0f, H - 8.0f, 30.0f, 8.0f, 14.0f, transparent, glow);
+	vc_pma(fill, 0.157f, 0.549f, 0.745f, 0.14f);
+	vc_pma(border, VC_CYAN, 0.6f);
+	vc_rrect(10.0f, 10.0f, W - 20.0f, H - 20.0f, 26.0f, 2.0f, 1.0f, fill, border);
+	vc_draw_handles(&s_vc.card);
+	for (float y = 14.0f; y < H - 14.0f; y += 6.0f) {
+		float line[4];
+		vc_pma(line, VC_CYAN, 0.025f);
+		AeronDrawList_AddFill(s_vc.cur_list, 14.0f, y, W - 28.0f, 2.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
+	}
+	vc_text(44.0f, 30.0f, "CONTROLS", 30.0f, 0, VC_CYAN, 1.0f);
+	vc_text(W - 44.0f, 38.0f, "grip+ = while holding the LEFT grip", 18.0f, 2, 0.62f, 0.85f, 0.92f, 0.9f);
+	vc_text(W * 0.5f - 107.0f, 84.0f, "LEFT", 20.0f, 1, VC_CYAN, 0.9f);
+	vc_text(W * 0.5f + 107.0f, 84.0f, "RIGHT", 20.0f, 1, VC_CYAN, 0.9f);
+	vc_card_side(k_card_left, (int)(sizeof k_card_left / sizeof k_card_left[0]), W * 0.5f - 107.0f, 0);
+	vc_card_side(k_card_right, (int)(sizeof k_card_right / sizeof k_card_right[0]), W * 0.5f + 107.0f, 1);
+	vc_text(W * 0.5f, H - 108.0f, "Right stick flicks, grip+:  up  lasers > shields    down  shields > lasers", 18.0f, 1,
+			0.62f, 0.85f, 0.92f, 0.9f);
+	vc_text(W * 0.5f, H - 80.0f, "left  shield balance (S)    right  flagged targets (N)", 18.0f, 1, 0.62f, 0.85f,
+			0.92f, 0.9f);
+	vc_cut_gloves();
+}
+
+static int vc_card_enabled(void) {
+	const char* env = getenv("XWA_XR_BUTTON_CARD");
+	return !(env && env[0] == '0');
+}
+
+int XwaVrConsole_CardFrame(AeronCommandBuffer* cmd, AeronRenderTarget* target, int width, int height,
+						   const AeronXrView views[2], AeronXrPanel* out) {
+	if (!cmd || !target || width <= 0 || height <= 0 || !views || !out || !s_vc.state.valid || !vc_card_enabled() ||
+		s_vc.font_state == 0 || !vc_ensure()) {
+		return 0;
+	}
+	if (!s_vc.card_list) {
+		s_vc.card_list = AeronDrawList_Create(0);
+		if (!s_vc.card_list) {
+			return 0;
+		}
+	}
+	/* Every mission starts with the card back on the right. */
+	if (s_vc.state.mission_serial != s_vc.card_mission) {
+		vc_grab_end(&s_vc.card);
+		s_vc.card.custom = 0;
+		s_vc.card_mission = s_vc.state.mission_serial;
+	}
+	s_vc.card_drawn = 1;
+	if (!s_vc.card_logged) {
+		Aeron_LogInfo("xwa.remaster", "button card: %dx%d layer, %.0f deg right", width, height,
+					  (double)VC_CARD_YAW_DEG);
+		s_vc.card_logged = 1;
+	}
+
+	memset(out, 0, sizeof *out);
+	float ax[3], ay[3], az[3];
+	for (int pass = 0; pass < 2; ++pass) {
+		if (!vc_place_pose(&s_vc.card, VC_CARD_W_M, VC_CARD_H_M, out, ax, ay, az)) {
+			vc_facing_pose(vc_env("XWA_XR_CARD_YAW", VC_CARD_YAW_DEG), VC_CARD_PITCH_DEG, VC_CARD_DISTANCE_M,
+						   VC_CARD_W_M, VC_CARD_H_M, out, ax, ay, az);
+		}
+		if (pass == 0) {
+			vc_update_grab(&s_vc.card, &s_vc.lap, out, ax, ay, az, VC_CARD_W_M, VC_CARD_H_M);
+		}
+	}
+	float eye[3];
+	for (int k = 0; k < 3; ++k) {
+		eye[k] = 0.5f * (views[0].position[k] + views[1].position[k]);
+	}
+	/* Bright while looked at or handled. */
+	{
+		static const float minus_z[3] = { 0.0f, 0.0f, -1.0f };
+		float f[3];
+		vc_rotate(views[0].orientation, minus_z, f);
+		float to[3] = { out->position[0] - eye[0], out->position[1] - eye[1], out->position[2] - eye[2] };
+		const float len = sqrtf(vc_dot(to, to));
+		const float c = len > 1e-4f ? vc_dot(f, to) / len : 1.0f;
+		const float angle = acosf(fmaxf(-1.0f, fminf(1.0f, c))) * 180.0f / 3.14159265f;
+		if (s_vc.card.grab_hand || s_vc.card.hover_side[0] || s_vc.card.hover_side[1]) {
+			s_vc.card_awake = 1;
+		} else if (s_vc.card_awake && angle > VC_CARD_SLEEP_DEG) {
+			s_vc.card_awake = 0;
+		} else if (!s_vc.card_awake && angle < VC_CARD_WAKE_DEG) {
+			s_vc.card_awake = 1;
+		}
+		const float goal = s_vc.card_awake ? 1.0f : VC_SLEEP_ALPHA;
+		const float step = s_vc.dt / 0.2f;
+		s_vc.card_alpha =
+			s_vc.card_alpha < goal ? fminf(goal, s_vc.card_alpha + step) : fmaxf(goal, s_vc.card_alpha - step);
+		if (s_vc.dt <= 0.0f) {
+			s_vc.card_alpha = goal;
+		}
+	}
+	out->rect[0] = 0;
+	out->rect[1] = 0;
+	out->rect[2] = width;
+	out->rect[3] = height;
+
+	/* Draw with the card as the current panel. */
+	s_vc.pose = *out;
+	memcpy(s_vc.ax, ax, sizeof ax);
+	memcpy(s_vc.ay, ay, sizeof ay);
+	memcpy(s_vc.az, az, sizeof az);
+	memcpy(s_vc.eye, eye, sizeof eye);
+	s_vc.cur_list = s_vc.card_list;
+	s_vc.cur_w_m = VC_CARD_W_M;
+	s_vc.cur_h_m = VC_CARD_H_M;
+	s_vc.cur_w_px = (float)width;
+	s_vc.cur_h_px = (float)height;
+	const float lap_alpha = s_vc.alpha;
+	s_vc.alpha = s_vc.card_alpha;
+	AeronDrawList_Begin(s_vc.card_list, target, width, height, AERON_DRAWLIST2D_CLEAR, NULL);
+	vc_card_draw();
+	AeronDrawList_Render(s_vc.card_list, cmd);
+	s_vc.alpha = lap_alpha;
 	return 1;
 }
 
@@ -1153,17 +1483,30 @@ void XwaVrConsole_EndFrame(void) {
 			s_vc.hands[h].trigger_down = 0;
 			s_vc.hands[h].cursor = 0;
 			Aeron_XrCaptureTrigger(h, 0);
-			Aeron_XrCaptureGrip(h, 0);
-			s_vc.hover_side[h] = 0;
+			s_vc.lap.hover_side[h] = 0;
 		}
-		vc_grab_end();
+		vc_grab_end(&s_vc.lap);
 		s_vc.awake = 0;
+	}
+	if (!s_vc.card_drawn) {
+		for (int h = 0; h < 2; ++h) {
+			s_vc.card.hover_side[h] = 0;
+		}
+		vc_grab_end(&s_vc.card);
+		s_vc.card_awake = 0;
+	}
+	for (int h = 0; h < 2; ++h) {
+		Aeron_XrCaptureGrip(h, s_vc.grip_capture[h]);
+		s_vc.grip_capture[h] = 0;
 	}
 }
 
 void XwaVrConsole_Shutdown(void) {
 	if (s_vc.list) {
 		AeronDrawList_Destroy(s_vc.list);
+	}
+	if (s_vc.card_list) {
+		AeronDrawList_Destroy(s_vc.card_list);
 	}
 	if (s_vc.font_state == 1) {
 		AeronFontAtlas_Release(&s_vc.font);

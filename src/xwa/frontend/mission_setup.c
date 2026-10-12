@@ -3666,6 +3666,8 @@ int MissionSetup_DrawSelectedSlotEditPanel(int panelMode) {
 		FrontendText_Draw(10, FrontendString_Get(STR_GAME_GROUP), left, top, g_colorLightBlue);
 		if (canEditSlotName) {
 			FrontendDraw_RectAssign(&rect, labelWidth + left + 7, top - 3, xRight - 10, top + 12);
+			/* Port: the VR keyboard would cover the flight group's settings. */
+			g_frontendEditFieldNoKeyboard = 1;
 			if (FrontendText_DrawEditableField(&rect, g_selectedCombatSimSlotNameEditBuffer, 10, 1, 10,
 											   "\\*$~|:<>?/\t\"")) {
 				g_activeTextFieldId = 0;

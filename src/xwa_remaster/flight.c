@@ -3913,8 +3913,7 @@ static int fl_xr_output_eye(AeronCommandBuffer* cmd, AeronRenderTarget* target, 
 	return 1;
 }
 
-/* holo: 0 none, 1 the head-HUD panel plates, 2 the aux (CMD) plates. */
-static int fl_xr_output_hud(AeronCommandBuffer* cmd, AeronRenderTarget* target, int parts, int holo) {
+static int fl_xr_output_hud(AeronCommandBuffer* cmd, AeronRenderTarget* target, int parts) {
 	AeronRenderPass* pass = Aeron_BeginRenderPass(&(AeronRenderPassDesc) {
 		.color_target = target,
 		.clear_color = 1,
@@ -3928,9 +3927,6 @@ static int fl_xr_output_hud(AeronCommandBuffer* cmd, AeronRenderTarget* target, 
 	const AeronRectI full = { 0, 0, s.rt_w, s.rt_h };
 	Aeron_SetViewport(pass, &full);
 	Aeron_SetScissor(pass, &full);
-	if (holo && !s.suppress_hud) {
-		XwaVrCockpitHud_RenderHolo(cmd, pass, target, holo == 2);
-	}
 	fl_draw_hud_parts(cmd, pass, target, s.rt_w, s.rt_h, parts);
 	Aeron_EndRenderPass(pass);
 	return 1;
@@ -4906,7 +4902,6 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 			panel_count = s.suppress_hud ? 0
 										 : XwaVrCockpitHud_Build(s.rt_w, s.rt_h, fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f),
 																 cmd_split, panels, AERON_XR_MAX_PANELS);
-			XwaVrCockpitHud_PrepareHolo(cmd, s.rt_w, s.rt_h);
 			if (panel_count == 0 && !s.suppress_hud) {
 				/* Nothing recognised in this HUD (e.g. an unusual HUD mode):
 				 * show it as the helmet sheet rather than not at all. */
@@ -4923,9 +4918,9 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		const int cmd_aux = cmd_split && cockpit_active;
 		const int head_parts = split ? (cmd_aux ? FL_HUD_HEAD : FL_HUD_HEAD | FL_HUD_CMD) : FL_HUD_ALL;
 		if (fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format, s.present_bloom_tex) &&
-			fl_xr_output_hud(cmd, xr_frame.hud_target, head_parts, cockpit_active) &&
-			(!cmd_aux || fl_xr_output_hud(cmd, xr_frame.hud_aux_target, FL_HUD_CMD, 2)) &&
-			(!split || fl_xr_output_hud(cmd, xr_frame.hud_world_target, FL_HUD_WORLD, 0))) {
+			fl_xr_output_hud(cmd, xr_frame.hud_target, head_parts) &&
+			(!cmd_aux || fl_xr_output_hud(cmd, xr_frame.hud_aux_target, FL_HUD_CMD)) &&
+			(!split || fl_xr_output_hud(cmd, xr_frame.hud_world_target, FL_HUD_WORLD))) {
 			if (cockpit_active || (cockpit && s.suppress_hud)) {
 				fl_xr_hud_quad(&flight_view.camera, &hud_world, 0);
 				Aeron_XrStereoCommitPanels(&hud_world, panels, panel_count);
@@ -4942,6 +4937,13 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 				if (XwaVrConsole_Frame(cmd, xr_frame.console_target, xr_frame.console_width,
 									   xr_frame.console_height, xr_frame.views, &console)) {
 					Aeron_XrStereoCommitConsole(&console);
+				}
+			}
+			if (xr_frame.card_target) {
+				AeronXrPanel card;
+				if (XwaVrConsole_CardFrame(cmd, xr_frame.card_target, xr_frame.card_width, xr_frame.card_height,
+										   xr_frame.views, &card)) {
+					Aeron_XrStereoCommitCard(&card);
 				}
 			}
 		}
