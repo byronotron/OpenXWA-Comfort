@@ -17,6 +17,7 @@ enum {
 	CK_LEFT_POD,
 	CK_RIGHT_POD,
 	CK_MESSAGES,
+	CK_MESSAGES_LOW,
 	CK_COUNTERS,
 	CK_CHARGE,
 	CK_CMD,
@@ -32,12 +33,20 @@ typedef struct CkSpec {
 	const char* name;
 	float yaw, pitch, distance;
 	float box_w, box_h;
+	/* > 0: fixed size, metres per classic HUD unit (1/480 of the screen
+	 * height), instead of fitting the box: text keeps one size whatever the
+	 * panel's width. */
+	float m_per_unit;
 } CkSpec;
 
 static const CkSpec k_spec[CK_COUNT] = {
 	[CK_LEFT_POD] = { "fore radar pod", -40.0f, 2.0f, 0.75f, 0.17f, 0.21f },
 	[CK_RIGHT_POD] = { "aft radar pod", 40.0f, 2.0f, 0.75f, 0.17f, 0.21f },
-	[CK_MESSAGES] = { "messages", 0.0f, -7.0f, 0.95f, 0.36f, 0.08f },
+	[CK_MESSAGES] = { "messages", 0.0f, -7.0f, 0.95f, 0.36f, 0.08f, 0.0036f },
+	/* The flight-group line sits low on the flat screen (above the
+	 * targeting computer): its own panel, so the two message areas don't
+	 * join into one huge panel. */
+	[CK_MESSAGES_LOW] = { "flight-group messages", 0.0f, -18.5f, 0.95f, 0.36f, 0.08f, 0.0036f },
 	[CK_COUNTERS] = { "counters", 0.0f, -14.0f, 0.85f, 0.15f, 0.04f },
 	[CK_CHARGE] = { "charge", 0.0f, -17.0f, 0.85f, 0.15f, 0.03f },
 	[CK_CMD] = { "targeting computer", 0.0f, -30.0f, 0.62f, 0.20f, 0.16f },
@@ -52,6 +61,7 @@ static const XwaHudWidgetId k_widgets[CK_COUNT][5] = {
 	[CK_RIGHT_POD] = { XWA_HUD_WIDGET_AFT_RADAR_FRAME, XWA_HUD_WIDGET_AFT_RADAR_SCOPE, XWA_HUD_WIDGET_RIGHT_POWER,
 					   XWA_HUD_WIDGET_BEAM, XWA_HUD_WIDGET_COUNT },
 	[CK_MESSAGES] = { XWA_HUD_WIDGET_COUNT },
+	[CK_MESSAGES_LOW] = { XWA_HUD_WIDGET_COUNT },
 	[CK_COUNTERS] = { XWA_HUD_WIDGET_COUNT },
 	/* The charge bars sit inside the targeting computer's frame; a separate
 	 * panel would show the target behind them, so they stay part of it. */
@@ -65,7 +75,8 @@ static const XwaHudWidgetId k_widgets[CK_COUNT][5] = {
 static const uint16_t k_panes[CK_COUNT][4] = {
 	[CK_LEFT_POD] = { XWA_HUD_PANE_TOP_SPEED, XWA_HUD_PANE_TOP_THROTTLE, XWA_HUD_PANE_LEFT_SUBSYSTEM, 0 },
 	[CK_RIGHT_POD] = { XWA_HUD_PANE_TOP_CRAFT_NAME, XWA_HUD_PANE_TOP_CLOCK, XWA_HUD_PANE_RIGHT_SUBSYSTEM, 0 },
-	[CK_MESSAGES] = { XWA_HUD_PANE_MESSAGE_SYSTEM, XWA_HUD_PANE_MESSAGE_FLIGHT_GROUP, XWA_HUD_PANE_MESSAGE_READY, 0 },
+	[CK_MESSAGES] = { XWA_HUD_PANE_MESSAGE_SYSTEM, XWA_HUD_PANE_MESSAGE_READY, 0 },
+	[CK_MESSAGES_LOW] = { XWA_HUD_PANE_MESSAGE_FLIGHT_GROUP, 0 },
 	[CK_COUNTERS] = { XWA_HUD_PANE_TOP_WEAPONS, XWA_HUD_PANE_TOP_COUNTERMEASURE, XWA_HUD_PANE_TOP_PROVING_STATUS, 0 },
 	[CK_CHARGE] = { 0 },
 	[CK_CMD] = { XWA_HUD_PANE_CMD, 0 },
@@ -213,11 +224,6 @@ int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, int cmd
 				ck_piece(p, b);
 			}
 		}
-		if (valid && p == CK_MESSAGES) {
-			/* Messages are centred and vary in length: a fixed-width strip. */
-			acc[0] = fminf(acc[0], 0.18f * (float)target_w);
-			acc[2] = fmaxf(acc[2], 0.82f * (float)target_w);
-		}
 		if (valid) {
 			int latched = s_ck.latched_valid[p];
 			ck_union(s_ck.latched[p], &latched, acc);
@@ -285,7 +291,11 @@ int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, int cmd
 		panel->source = p == CK_CMD && cmd_separate ? 1 : 0;
 		const CkSpec* spec = &k_spec[p];
 		float size_w = spec->box_w, size_h = spec->box_w * h / w;
-		if (size_h > spec->box_h) {
+		if (spec->m_per_unit > 0.0f) {
+			const float m_per_px = spec->m_per_unit * 480.0f / (float)target_h;
+			size_w = w * m_per_px;
+			size_h = h * m_per_px;
+		} else if (size_h > spec->box_h) {
 			size_h = spec->box_h;
 			size_w = spec->box_h * w / h;
 		}
