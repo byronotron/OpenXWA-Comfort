@@ -4861,11 +4861,21 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 										 : XwaVrCockpitHud_Build(s.rt_w, s.rt_h, fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f),
 																 panels, AERON_XR_MAX_PANELS);
 			XwaVrCockpitHud_PrepareHolo(cmd, s.rt_w, s.rt_h);
+			if (panel_count == 0 && !s.suppress_hud) {
+				/* Nothing recognised in this HUD (e.g. an unusual HUD mode):
+				 * show it as the helmet sheet rather than not at all. */
+				static int logged;
+				if (!logged) {
+					Aeron_LogWarn("xwa.remaster", "VR cockpit HUD: no panels found, showing the helmet HUD");
+					logged = 1;
+				}
+			}
 		}
+		const int cockpit_active = cockpit && panel_count > 0;
 		if (fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format, s.present_bloom_tex) &&
-			fl_xr_output_hud(cmd, xr_frame.hud_target, split ? FL_HUD_HEAD : FL_HUD_ALL, cockpit) &&
+			fl_xr_output_hud(cmd, xr_frame.hud_target, split ? FL_HUD_HEAD : FL_HUD_ALL, cockpit_active) &&
 			(!split || fl_xr_output_hud(cmd, xr_frame.hud_world_target, FL_HUD_WORLD, 0))) {
-			if (cockpit) {
+			if (cockpit_active || (cockpit && s.suppress_hud)) {
 				fl_xr_hud_quad(&flight_view.camera, &hud_world, 0);
 				Aeron_XrStereoCommitPanels(&hud_world, panels, panel_count);
 			} else if (split) {
