@@ -3956,6 +3956,97 @@ static void fl_xr_hud_quad(const AeronSceneCamera* base, AeronXrHudQuad* out, in
 	out->position[2] = -d;
 }
 
+/* VR starfield. The procedural star pass (a vertex-pulled scatter draw
+ * before the opaque pass) never showed up on the Quest's GPU, while sky
+ * billboards (backdrops) do; in stereo the same field is evaluated on the
+ * CPU and drawn as additive sky billboards instead. XWA_XR_STARS=shader
+ * restores the GPU pass. */
+static int fl_xr_star_sprites(void) {
+	const char* env = getenv("XWA_XR_STARS");
+	return !(env && strcmp(env, "shader") == 0);
+}
+
+enum { FL_VR_STAR_MAX = 1024 };
+
+static void fl_submit_vr_stars(const XwaRemasterSkyStarsParams* params, const AeronSceneCamera eyes[2],
+							   const float world_to_cube[9]) {
+	static XwaRemasterSkyStarPoint points[FL_VR_STAR_MAX];
+	AeronTexture* dot = XwaRemasterSkyStars_DotTexture(s.sky_stars);
+	if (!dot || s.rt_h <= 0) {
+		return;
+	}
+	/* Cone around the left eye's forward axis wide enough for both eyes'
+	 * (asymmetric) frustums, with a few degrees to spare. */
+	float rows[9];
+	fl_quat_to_mat3(eyes[0].ori, rows); /* world -> eye; rows: right, down, forward */
+	const float* fwd = &rows[6];
+	const float* down = &rows[3];
+	float tx = 0.0f, ty = 0.0f;
+	for (int e = 0; e < 2; e++) {
+		const float th = tanf(eyes[e].h_half_rad), tv = tanf(eyes[e].v_half_rad);
+		tx = fmaxf(tx, th * (1.0f + fabsf(eyes[e].proj_x_offset)));
+		ty = fmaxf(ty, tv * (1.0f + fabsf(eyes[e].proj_y_offset)));
+	}
+	const float cone = atanf(sqrtf(tx * tx + ty * ty)) + 5.0f * 3.14159265f / 180.0f;
+	const float cos_min = cone >= 3.14159265f * 0.5f ? -1.0f : cosf(cone);
+	float fwd_cube[3];
+	for (int i = 0; i < 3; i++) {
+		fwd_cube[i] = world_to_cube[i * 3 + 0] * fwd[0] + world_to_cube[i * 3 + 1] * fwd[1] +
+					  world_to_cube[i * 3 + 2] * fwd[2];
+	}
+	const int count = XwaRemasterSkyStars_Collect(params, fwd_cube, cos_min, points, FL_VR_STAR_MAX);
+	/* Size: the dot texture's solid core is half the quad, so a quad of
+	 * twice the core radius gives the same footprint as the GPU pass. */
+	const float tan_per_px = 2.0f * tanf(eyes[0].v_half_rad) / (float)s.rt_h;
+	const float distance = 1.0e6f; /* local units; far beyond anything else */
+	for (int i = 0; i < count; i++) {
+		const XwaRemasterSkyStarPoint* p = &points[i];
+		float dir[3];
+		/* cube -> world is the transpose of world_to_cube. */
+		for (int a = 0; a < 3; a++) {
+			dir[a] = world_to_cube[0 * 3 + a] * p->dir_cube[0] + world_to_cube[1 * 3 + a] * p->dir_cube[1] +
+					 world_to_cube[2 * 3 + a] * p->dir_cube[2];
+		}
+		/* Quad basis perpendicular to the star direction. */
+		float right[3] = { dir[1] * down[2] - dir[2] * down[1], dir[2] * down[0] - dir[0] * down[2],
+						   dir[0] * down[1] - dir[1] * down[0] };
+		float len = sqrtf(right[0] * right[0] + right[1] * right[1] + right[2] * right[2]);
+		if (len < 1.0e-4f) {
+			right[0] = rows[0];
+			right[1] = rows[1];
+			right[2] = rows[2];
+			len = 1.0f;
+		}
+		for (int a = 0; a < 3; a++) {
+			right[a] /= len;
+		}
+		const float up[3] = { right[1] * dir[2] - right[2] * dir[1], right[2] * dir[0] - right[0] * dir[2],
+							  right[0] * dir[1] - right[1] * dir[0] };
+		const float radius_px = 2.0f * params->core_radius_px * (p->bright ? 1.4f : 1.0f);
+		const float h = distance * tan_per_px * radius_px;
+		AeronSceneBillboardDesc d;
+		memset(&d, 0, sizeof d);
+		d.texture = dot;
+		d.blend = AERON_SCENE_BILLBOARD_BLEND_ADDITIVE;
+		d.stage = AERON_SCENE_BILLBOARD_STAGE_SKY;
+		static const float sr[4] = { -1.0f, 1.0f, 1.0f, -1.0f };
+		static const float su[4] = { -1.0f, -1.0f, 1.0f, 1.0f };
+		const float gain = p->bright ? 1.0f + 0.5f * params->flare_strength : 1.0f;
+		for (int v = 0; v < 4; v++) {
+			for (int a = 0; a < 3; a++) {
+				d.corners[v][a] = s.camera_local[a] + dir[a] * distance + (right[a] * sr[v] + up[a] * su[v]) * h;
+			}
+			d.uv[v][0] = sr[v] > 0.0f ? 1.0f : 0.0f;
+			d.uv[v][1] = su[v] > 0.0f ? 1.0f : 0.0f;
+			d.colors[v][0] = p->color[0] * gain;
+			d.colors[v][1] = p->color[1] * gain;
+			d.colors[v][2] = p->color[2] * gain;
+			d.colors[v][3] = 1.0f;
+		}
+		AeronScene_AddBillboard(s.scene, &d);
+	}
+}
+
 AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapshot* snap,
 									   XwaRemasterAssets* assets, int target_w, int target_h,
 									   int direct_present) {
@@ -4258,6 +4349,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	};
 	XwaRemasterSkyStarsParams stars_params;
 	int stars_prepared = 0;
+	int vr_star_sprites = 0;
 	if (!cam->death_star_mode) {
 		if (s.sky_mode == 1) {
 			/* Classic stars are one flight-viewport pixel; the HD scene
@@ -4286,14 +4378,19 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 				.game_time_ms = (uint32_t)snap->game_time_ms,
 			};
 			stars_params = stars;
-			stars_prepared = 1;
-			if (!XwaRemasterSkyStars_Prepare(s.sky_stars, s.scene, fl_world_to_cube, &stars)) {
-				Aeron_CommandBufferSetFailure(cmd, "Procedural starfield preparation failed");
-				s.snap = NULL;
-				return NULL;
+			if (stereo && fl_xr_star_sprites()) {
+				/* Submitted as sky billboards after the other billboards. */
+				vr_star_sprites = 1;
+			} else {
+				stars_prepared = 1;
+				if (!XwaRemasterSkyStars_Prepare(s.sky_stars, s.scene, fl_world_to_cube, &stars)) {
+					Aeron_CommandBufferSetFailure(cmd, "Procedural starfield preparation failed");
+					s.snap = NULL;
+					return NULL;
+				}
+				s.before_opaque_mode = FL_BEFORE_OPAQUE_SKY_STARS;
+				AeronScene_SetPassHook(s.scene, AERON_SCENE_HOOK_BEFORE_OPAQUE, fl_draw_before_opaque, NULL);
 			}
-			s.before_opaque_mode = FL_BEFORE_OPAQUE_SKY_STARS;
-			AeronScene_SetPassHook(s.scene, AERON_SCENE_HOOK_BEFORE_OPAQUE, fl_draw_before_opaque, NULL);
 		} else if (s.sky_cube) {
 			AeronScene_SetSkyCube(s.scene, s.sky_cube, fl_world_to_cube, s.sky_exposure);
 		}
@@ -4640,6 +4737,10 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	 * (OVERLAY stage, back-to-front; engine glows submit per instance
 	 * above, in the classic per-object order). */
 	fl_submit_billboards();
+	/* VR stars last, so a full billboard pool drops stars, not explosions. */
+	if (vr_star_sprites) {
+		fl_submit_vr_stars(&stars_params, xr_eyes, fl_world_to_cube);
+	}
 	/* Lens-flare trains (LENS stage — the scene draws them after its
 	 * color passes with GPU anchor occlusion, before bloom). */
 	if (!stereo) {
