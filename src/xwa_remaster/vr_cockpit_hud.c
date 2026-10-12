@@ -5,6 +5,7 @@
 #include "aeron/aeron.h"
 #include "aeron/scene/draw_list2d.h"
 #include "xwa_remaster/hud.h"
+#include "xwa_remaster/hud_cmd.h"
 #include "xwa_remaster/hud_fixed.h"
 #include "xwa_remaster/hud_text.h"
 
@@ -34,14 +35,14 @@ typedef struct CkSpec {
 } CkSpec;
 
 static const CkSpec k_spec[CK_COUNT] = {
-	[CK_LEFT_POD] = { "fore radar pod", -40.0f, 2.0f, 0.75f, 0.24f, 0.30f },
-	[CK_RIGHT_POD] = { "aft radar pod", 40.0f, 2.0f, 0.75f, 0.24f, 0.30f },
-	[CK_MESSAGES] = { "messages", 0.0f, -7.0f, 0.95f, 0.45f, 0.10f },
-	[CK_COUNTERS] = { "counters", 0.0f, -14.0f, 0.85f, 0.20f, 0.05f },
-	[CK_CHARGE] = { "charge", 0.0f, -17.0f, 0.85f, 0.20f, 0.035f },
-	[CK_CMD] = { "targeting computer", 0.0f, -30.0f, 0.62f, 0.26f, 0.20f },
-	[CK_MFD_LEFT] = { "left MFD", -31.0f, -41.0f, 0.60f, 0.24f, 0.18f },
-	[CK_MFD_RIGHT] = { "right MFD", 31.0f, -41.0f, 0.60f, 0.24f, 0.18f },
+	[CK_LEFT_POD] = { "fore radar pod", -40.0f, 2.0f, 0.75f, 0.17f, 0.21f },
+	[CK_RIGHT_POD] = { "aft radar pod", 40.0f, 2.0f, 0.75f, 0.17f, 0.21f },
+	[CK_MESSAGES] = { "messages", 0.0f, -7.0f, 0.95f, 0.36f, 0.08f },
+	[CK_COUNTERS] = { "counters", 0.0f, -14.0f, 0.85f, 0.15f, 0.04f },
+	[CK_CHARGE] = { "charge", 0.0f, -17.0f, 0.85f, 0.15f, 0.03f },
+	[CK_CMD] = { "targeting computer", 0.0f, -30.0f, 0.62f, 0.20f, 0.16f },
+	[CK_MFD_LEFT] = { "left MFD", -31.0f, -41.0f, 0.60f, 0.17f, 0.13f },
+	[CK_MFD_RIGHT] = { "right MFD", 31.0f, -41.0f, 0.60f, 0.17f, 0.13f },
 };
 
 static const XwaHudWidgetId k_widgets[CK_COUNT][5] = {
@@ -51,8 +52,11 @@ static const XwaHudWidgetId k_widgets[CK_COUNT][5] = {
 					   XWA_HUD_WIDGET_BEAM, XWA_HUD_WIDGET_COUNT },
 	[CK_MESSAGES] = { XWA_HUD_WIDGET_COUNT },
 	[CK_COUNTERS] = { XWA_HUD_WIDGET_COUNT },
-	[CK_CHARGE] = { XWA_HUD_WIDGET_LASER_CHARGE, XWA_HUD_WIDGET_ION_CHARGE, XWA_HUD_WIDGET_COUNT },
-	[CK_CMD] = { XWA_HUD_WIDGET_CMD_FRAME, XWA_HUD_WIDGET_COUNT },
+	/* The charge bars sit inside the targeting computer's frame; a separate
+	 * panel would show the target behind them, so they stay part of it. */
+	[CK_CHARGE] = { XWA_HUD_WIDGET_COUNT },
+	[CK_CMD] = { XWA_HUD_WIDGET_CMD_FRAME, XWA_HUD_WIDGET_LASER_CHARGE, XWA_HUD_WIDGET_ION_CHARGE,
+				 XWA_HUD_WIDGET_COUNT },
 	[CK_MFD_LEFT] = { XWA_HUD_WIDGET_MFD_LEFT_FRAME, XWA_HUD_WIDGET_COUNT },
 	[CK_MFD_RIGHT] = { XWA_HUD_WIDGET_MFD_RIGHT_FRAME, XWA_HUD_WIDGET_COUNT },
 };
@@ -78,6 +82,10 @@ static struct {
 	/* This frame's final rectangles (after clipping) and visibility. */
 	float rect[CK_COUNT][4];
 	uint8_t visible[CK_COUNT];
+	/* This frame's pieces of each panel, for the holographic plates (so
+	 * empty corners of a panel stay see-through). */
+	float pieces[CK_COUNT][8][4];
+	int piece_count[CK_COUNT];
 	char logged[512];
 	AeronDrawList2D* holo;
 	int holo_ready;
@@ -93,6 +101,12 @@ static void ck_union(float acc[4], int* valid, const float b[4]) {
 	acc[1] = fminf(acc[1], b[1]);
 	acc[2] = fmaxf(acc[2], b[2]);
 	acc[3] = fmaxf(acc[3], b[3]);
+}
+
+static void ck_piece(int panel, const float b[4]) {
+	if (s_ck.piece_count[panel] < 8) {
+		memcpy(s_ck.pieces[panel][s_ck.piece_count[panel]++], b, sizeof(float) * 4);
+	}
 }
 
 static void ck_pose(const CkSpec* spec, float world_scale, AeronXrPanel* out) {
@@ -168,6 +182,7 @@ int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, AeronXr
 	}
 
 	/* What each panel shows this frame. */
+	memset(s_ck.piece_count, 0, sizeof s_ck.piece_count);
 	for (int p = 0; p < CK_COUNT; ++p) {
 		float acc[4];
 		int valid = 0;
@@ -175,13 +190,29 @@ int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, AeronXr
 			float b[4];
 			if (XwaRemasterHudFixed_WidgetBounds(k_widgets[p][i], b)) {
 				ck_union(acc, &valid, b);
+				ck_piece(p, b);
 			}
 		}
 		for (int i = 0; i < 4 && k_panes[p][i]; ++i) {
 			float b[4];
-			if (XwaRemasterHudText_PaneBounds(k_panes[p][i], target_w, target_h, b)) {
+			/* What the text actually drew: the classic pane rectangles are
+			 * often larger (empty corners) or smaller (clipped text). */
+			if (XwaRemasterHudText_PaneGlyphBounds(k_panes[p][i], b)) {
 				ck_union(acc, &valid, b);
+				ck_piece(p, b);
 			}
+		}
+		if (p == CK_CMD) {
+			float b[4];
+			if (XwaRemasterHudCmd_ViewBounds(b)) {
+				ck_union(acc, &valid, b);
+				ck_piece(p, b);
+			}
+		}
+		if (valid && p == CK_MESSAGES) {
+			/* Messages are centred and vary in length: a fixed-width strip. */
+			acc[0] = fminf(acc[0], 0.18f * (float)target_w);
+			acc[2] = fmaxf(acc[2], 0.82f * (float)target_w);
 		}
 		if (valid) {
 			int latched = s_ck.latched_valid[p];
@@ -212,11 +243,16 @@ int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, AeronXr
 			s_ck.rect[CK_RIGHT_POD][0] = c[2];
 		}
 	}
-	if (s_ck.latched_valid[CK_CHARGE] && s_ck.latched_valid[CK_CMD]) {
-		const float* ch = s_ck.rect[CK_CHARGE];
-		float* cmd = s_ck.rect[CK_CMD];
-		if (ch[0] < cmd[2] && ch[2] > cmd[0] && ch[3] > cmd[1] && ch[3] < cmd[3]) {
-			cmd[1] = ch[3];
+	/* The MFD frames reach into the targeting computer's area. */
+	if (s_ck.latched_valid[CK_CMD]) {
+		const float* cmd = s_ck.rect[CK_CMD];
+		if (s_ck.latched_valid[CK_MFD_LEFT] && s_ck.rect[CK_MFD_LEFT][2] > cmd[0] &&
+			s_ck.rect[CK_MFD_LEFT][0] < cmd[0]) {
+			s_ck.rect[CK_MFD_LEFT][2] = cmd[0];
+		}
+		if (s_ck.latched_valid[CK_MFD_RIGHT] && s_ck.rect[CK_MFD_RIGHT][0] < cmd[2] &&
+			s_ck.rect[CK_MFD_RIGHT][2] > cmd[2]) {
+			s_ck.rect[CK_MFD_RIGHT][0] = cmd[2];
 		}
 	}
 
@@ -285,27 +321,35 @@ void XwaVrCockpitHud_PrepareHolo(AeronCommandBuffer* cmd, int target_w, int targ
 			continue;
 		}
 		const float* r = s_ck.rect[p];
-		const float w = r[2] - r[0], h = r[3] - r[1];
-		const float radius = fminf(10.0f, 0.12f * fminf(w, h));
-		/* Translucent violet plate with a glowing rim. */
-		AeronDrawList2DRRect plate;
-		memset(&plate, 0, sizeof plate);
-		plate.dst_x = r[0] + 1.0f;
-		plate.dst_y = r[1] + 1.0f;
-		plate.dst_w = w - 2.0f;
-		plate.dst_h = h - 2.0f;
-		plate.radius_px = radius;
-		plate.soft_px = 1.0f;
-		plate.border_px = 2.0f;
-		ck_pma(plate.fill_top, 0.42f, 0.30f, 0.95f, 0.16f);
-		ck_pma(plate.fill_bottom, 0.30f, 0.22f, 0.80f, 0.10f);
-		ck_pma(plate.border, 0.78f, 0.66f, 1.0f, 0.85f);
-		AeronDrawList_AddRRect(s_ck.holo, &plate);
-		/* Scan lines: faint bands every 4 px, fixed to the panel. */
-		const float line[4] = { 0.55f * 0.06f, 0.45f * 0.06f, 1.0f * 0.06f, 0.06f };
-		const AeronRectI clip = { (int)r[0] + 2, (int)r[1] + 2, (int)w - 4, (int)h - 4 };
-		for (float y = r[1] + 3.0f; y < r[3] - 3.0f; y += 4.0f) {
-			AeronDrawList_AddFill(s_ck.holo, r[0] + 2.0f, y, w - 4.0f, 2.0f, line, AERON_BLIT2D_BLEND_PMA, &clip);
+		for (int k = 0; k < s_ck.piece_count[p]; ++k) {
+			/* A translucent violet plate with a glowing rim behind each piece
+			 * of the panel, clipped to the panel. */
+			const float* b = s_ck.pieces[p][k];
+			const float x0 = fmaxf(r[0] + 1.0f, b[0] - 3.0f), y0 = fmaxf(r[1] + 1.0f, b[1] - 3.0f);
+			const float x1 = fminf(r[2] - 1.0f, b[2] + 3.0f), y1 = fminf(r[3] - 1.0f, b[3] + 3.0f);
+			const float w = x1 - x0, h = y1 - y0;
+			if (w < 6.0f || h < 6.0f) {
+				continue;
+			}
+			AeronDrawList2DRRect plate;
+			memset(&plate, 0, sizeof plate);
+			plate.dst_x = x0;
+			plate.dst_y = y0;
+			plate.dst_w = w;
+			plate.dst_h = h;
+			plate.radius_px = fminf(8.0f, 0.12f * fminf(w, h));
+			plate.soft_px = 1.0f;
+			plate.border_px = 1.5f;
+			ck_pma(plate.fill_top, 0.42f, 0.30f, 0.95f, 0.10f);
+			ck_pma(plate.fill_bottom, 0.30f, 0.22f, 0.80f, 0.06f);
+			ck_pma(plate.border, 0.78f, 0.66f, 1.0f, 0.70f);
+			AeronDrawList_AddRRect(s_ck.holo, &plate);
+			/* Scan lines: faint bands every 4 px, fixed to the panel. */
+			const float line[4] = { 0.55f * 0.05f, 0.45f * 0.05f, 1.0f * 0.05f, 0.05f };
+			const AeronRectI clip = { (int)x0 + 1, (int)y0 + 1, (int)w - 2, (int)h - 2 };
+			for (float y = y0 + 2.0f; y < y1 - 2.0f; y += 4.0f) {
+				AeronDrawList_AddFill(s_ck.holo, x0 + 1.0f, y, w - 2.0f, 2.0f, line, AERON_BLIT2D_BLEND_PMA, &clip);
+			}
 		}
 	}
 	s_ck.holo_ready = AeronDrawList_Prepare(s_ck.holo, cmd);

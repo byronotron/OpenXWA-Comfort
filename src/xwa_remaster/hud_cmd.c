@@ -32,6 +32,18 @@ typedef struct CmdBillboard {
 	XwaAssetRef ref;
 } CmdBillboard;
 
+/* Target-pixel rectangle of the target view drawn by the last
+ * PrepareDrawList (VR cockpit panels). */
+static float s_cmd_view_bounds[4];
+static int s_cmd_view_bounds_valid;
+
+int XwaRemasterHudCmd_ViewBounds(float out[4]) {
+	if (!s_cmd_view_bounds_valid)
+		return 0;
+	memcpy(out, s_cmd_view_bounds, sizeof s_cmd_view_bounds);
+	return 1;
+}
+
 static struct {
 	AeronScene3D* scene;
 	XwaRemasterTrails* trails;
@@ -763,6 +775,7 @@ void XwaRemasterHudCmd_PrepareDrawList(AeronCommandBuffer* cmd, int target_w, in
 	if (!cmd || !s_cmd.draw_list || target_w <= 0 || target_h <= 0)
 		return;
 	AeronDrawList_Begin(s_cmd.draw_list, NULL, target_w, target_h, AERON_DRAWLIST2D_LOAD, NULL);
+	s_cmd_view_bounds_valid = 0;
 	if (!s_cmd.prepared.valid || !s_cmd.output) {
 		(void)AeronDrawList_Prepare(s_cmd.draw_list, cmd);
 		return;
@@ -787,6 +800,11 @@ void XwaRemasterHudCmd_PrepareDrawList(AeronCommandBuffer* cmd, int target_w, in
 	const int scissor_x0 = (int)floorf(x), scissor_y0 = (int)floorf(y);
 	const int scissor_x1 = (int)ceilf(x + w), scissor_y1 = (int)ceilf(y + h);
 	const AeronRectI scissor = { scissor_x0, scissor_y0, scissor_x1 - scissor_x0, scissor_y1 - scissor_y0 };
+	s_cmd_view_bounds[0] = x;
+	s_cmd_view_bounds[1] = y;
+	s_cmd_view_bounds[2] = x + w;
+	s_cmd_view_bounds[3] = y + h;
+	s_cmd_view_bounds_valid = 1;
 	AeronDrawList2DSprite sprite = { 0 };
 	sprite.texture = s_cmd.output;
 	sprite.src_u1 = sprite.src_v1 = 1.0f;

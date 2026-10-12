@@ -16,6 +16,9 @@ void XwaRemasterHudText_Build(const XwaSnapshot* snapshot, XwaHudProfileIndex pr
 							  uint32_t bundle_generation);
 /* Target-pixel bounds (x0, y0, x1, y1) of a visible text pane's classic
  * rectangle; 0 when the pane is not shown. */
+/* Bounds of the glyphs the pane drew in the last PrepareDrawList; 0 when
+ * it drew none. */
+int XwaRemasterHudText_PaneGlyphBounds(uint16_t pane_id, float out[4]);
 int XwaRemasterHudText_PaneBounds(uint16_t pane_id, int target_w, int target_h, float out[4]);
 void XwaRemasterHudText_PrepareDrawList(AeronCommandBuffer* cmd, int target_w, int target_h);
 void XwaRemasterHudText_Render(AeronCommandBuffer* cmd, AeronRenderPass* pass,

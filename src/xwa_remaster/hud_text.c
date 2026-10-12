@@ -32,6 +32,36 @@ typedef struct XwaHudPreparedText {
 
 static AeronDrawList2D* text_list;
 static XwaHudPreparedText text_prepared;
+/* Target-pixel bounds of the glyphs each pane drew in the last
+ * PrepareDrawList (VR cockpit panels). */
+enum { TEXT_PANE_SLOTS = XWA_HUD_PANE_FPS + 1 };
+static float text_glyph_bounds[TEXT_PANE_SLOTS][4];
+static uint8_t text_glyph_bounds_valid[TEXT_PANE_SLOTS];
+
+static void text_note_glyph(uint16_t pane, float x, float y, float w, float h) {
+	if (pane >= TEXT_PANE_SLOTS || w <= 0.0f || h <= 0.0f)
+		return;
+	float* b = text_glyph_bounds[pane];
+	if (!text_glyph_bounds_valid[pane]) {
+		b[0] = x;
+		b[1] = y;
+		b[2] = x + w;
+		b[3] = y + h;
+		text_glyph_bounds_valid[pane] = 1;
+		return;
+	}
+	b[0] = fminf(b[0], x);
+	b[1] = fminf(b[1], y);
+	b[2] = fmaxf(b[2], x + w);
+	b[3] = fmaxf(b[3], y + h);
+}
+
+int XwaRemasterHudText_PaneGlyphBounds(uint16_t pane_id, float out[4]) {
+	if (pane_id >= TEXT_PANE_SLOTS || !text_glyph_bounds_valid[pane_id])
+		return 0;
+	memcpy(out, text_glyph_bounds[pane_id], sizeof text_glyph_bounds[pane_id]);
+	return 1;
+}
 
 static XwaHudLayoutOrigin text_origin_for_pane(uint16_t pane) {
 	switch ((XwaHudPaneId)pane) {
@@ -428,6 +458,7 @@ void XwaRemasterHudText_PrepareDrawList(AeronCommandBuffer* cmd, int target_w, i
 	if (!cmd || !text_list || target_w <= 0 || target_h <= 0)
 		return;
 	AeronDrawList_Begin(text_list, NULL, target_w, target_h, AERON_DRAWLIST2D_LOAD, NULL);
+	memset(text_glyph_bounds_valid, 0, sizeof text_glyph_bounds_valid);
 	if (!text_prepared.valid) {
 		(void)AeronDrawList_Prepare(text_list, cmd);
 		return;
@@ -511,6 +542,7 @@ void XwaRemasterHudText_PrepareDrawList(AeronCommandBuffer* cmd, int target_w, i
 		sprite.dst_y = out_y + mapped.y_ref * output_scale;
 		sprite.dst_w = mapped.w_ref * output_scale;
 		sprite.dst_h = mapped.h_ref * output_scale;
+		text_note_glyph(glyph->pane, sprite.dst_x, sprite.dst_y, sprite.dst_w, sprite.dst_h);
 		sprite.tint[0] = XwaRemaster_SrgbToLinear(((glyph->argb >> 16) & 255) / 255.0f) * a;
 		sprite.tint[1] = XwaRemaster_SrgbToLinear(((glyph->argb >> 8) & 255) / 255.0f) * a;
 		sprite.tint[2] = XwaRemaster_SrgbToLinear((glyph->argb & 255) / 255.0f) * a;
@@ -549,6 +581,14 @@ int XwaRemasterHudText_PaneBounds(uint16_t pane_id, int target_w, int target_h, 
 	out[1] = out_y + fminf(y0, y1) * output_scale;
 	out[2] = out_x + fmaxf(x0, x1) * output_scale;
 	out[3] = out_y + fmaxf(y0, y1) * output_scale;
+	/* Text can run past the pane's classic rectangle. */
+	float glyphs[4];
+	if (XwaRemasterHudText_PaneGlyphBounds(pane_id, glyphs)) {
+		out[0] = fminf(out[0], glyphs[0]);
+		out[1] = fminf(out[1], glyphs[1]);
+		out[2] = fmaxf(out[2], glyphs[2]);
+		out[3] = fmaxf(out[3], glyphs[3]);
+	}
 	return out[2] > out[0] && out[3] > out[1];
 }
 

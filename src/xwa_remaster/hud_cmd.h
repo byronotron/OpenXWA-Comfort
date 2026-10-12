@@ -34,6 +34,9 @@ void XwaRemasterHudCmd_Shutdown(void);
 void XwaRemasterHudCmd_Prepare(AeronCommandBuffer* cmd, const XwaSnapshot* snapshot,
 							   XwaRemasterAssets* assets, XwaHudProfileIndex profile,
 							   int target_w, int target_h);
+/* Rectangle (x0, y0, x1, y1, target pixels) of the target view drawn by the
+ * last PrepareDrawList; 0 when none. */
+int XwaRemasterHudCmd_ViewBounds(float out[4]);
 void XwaRemasterHudCmd_PrepareDrawList(AeronCommandBuffer* cmd, int target_w, int target_h);
 void XwaRemasterHudCmd_Render(AeronCommandBuffer* cmd, AeronRenderPass* pass,
 							  AeronRenderTarget* target, int target_w, int target_h);
