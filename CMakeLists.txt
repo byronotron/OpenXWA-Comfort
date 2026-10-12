@@ -317,8 +317,14 @@ set(XWA_APP_SOURCES
     src/xwa_app/setup.c
 )
 
-add_executable(xwa ${XWA_APP_SOURCES})
-set_target_properties(xwa PROPERTIES OUTPUT_NAME "OpenXWA")
+if(ANDROID)
+    # SDL's Android activity loads the game as libmain.so and calls SDL_main.
+    add_library(xwa SHARED ${XWA_APP_SOURCES})
+    set_target_properties(xwa PROPERTIES OUTPUT_NAME "main")
+else()
+    add_executable(xwa ${XWA_APP_SOURCES})
+    set_target_properties(xwa PROPERTIES OUTPUT_NAME "OpenXWA")
+endif()
 
 target_link_libraries(xwa
     PRIVATE

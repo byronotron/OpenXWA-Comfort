@@ -4083,8 +4083,12 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	float shadow_light_dir[3];
 	/* Preserve the classic directional fill inside the sealed Death Star,
 	 * but do not let its backdrop light cast exterior shadows in the tunnel. */
+	/* XWA_XR_SHADOWS=0 (Quest profile default) disables directional shadows
+	 * in stereo: each eye would otherwise render the cascades again. */
+	const char* xr_shadows = getenv("XWA_XR_SHADOWS");
+	const int shadows_allowed = !(stereo && xr_shadows && xr_shadows[0] == '0');
 	const int shadows_active =
-		!cam->death_star_mode && s.shadows.enabled &&
+		shadows_allowed && !cam->death_star_mode && s.shadows.enabled &&
 		fl_key_directional_light(scene_lighting.lights, scene_lighting.light_count, shadow_light_dir);
 	if (!s.mb_enabled) {
 		uint32_t motion_reset_reasons = 0;

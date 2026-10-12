@@ -5,6 +5,7 @@
 #include "window_icon.h"
 #include "xwa/config/game_config.h"
 #include "xwa_remaster/xwa_remaster.h"
+#include "xwa_runtime/config/modern_video_options.h"
 #include "xwa_runtime/input/controller_mapping.h"
 #include "xwa_runtime/input/mouse_flight.h"
 #include "xwa_runtime/runtime/port.h"
@@ -210,8 +211,19 @@ static int resolve_game_data(const XwaLaunchOptions* launch, const XwaHostConfig
 
 	*cancelled = 0;
 	if (launch->game_data_path[0]) {
-		return XwaSetup_ValidateGameData(vfs, launch->game_data_path, selected, selected_capacity, error,
-										 error_size);
+		const int ok = XwaSetup_ValidateGameData(vfs, launch->game_data_path, selected, selected_capacity, error,
+												 error_size);
+#if defined(SDL_PLATFORM_ANDROID)
+		if (!ok) {
+			char detail[512];
+			snprintf(detail, sizeof detail, "%s", error);
+			snprintf(error, error_size,
+					 "X-Wing Alliance game files not found.\n\nCopy your installed game folder (GOG/Steam) to:\n%s\n\n"
+					 "For example from a PC: adb push \"<XWA folder>/.\" %s\n\n%s",
+					 launch->game_data_path, launch->game_data_path, detail);
+		}
+#endif
+		return ok;
 	}
 	if (host_config->game_data_path[0]) {
 		if (XwaSetup_ValidateGameData(vfs, host_config->game_data_path, selected, selected_capacity, error,
@@ -266,6 +278,141 @@ static int resolve_game_data(const XwaLaunchOptions* launch, const XwaHostConfig
 	return select_game_data(vfs, selected, selected_capacity, cancelled, error, error_size);
 }
 
+#if defined(SDL_PLATFORM_ANDROID)
+#include <SDL3/SDL_system.h>
+#include <sys/stat.h>
+
+/* Quest has no folder picker inside an immersive app. The game data lives in
+ * the app's external files directory, which needs no storage permission and
+ * is reachable with `adb push` or a PC file manager:
+ *   /sdcard/Android/data/<package>/files/XWA
+ * The folder is created on first launch so it shows up for copying. */
+/* Quest settings file: KEY=VALUE lines applied as environment variables
+ * before startup (the headset has no way to set them otherwise). */
+static void android_load_settings(void) {
+	const char* external = SDL_GetAndroidExternalStoragePath();
+	char path[1024];
+	char line[512];
+	FILE* f;
+	if (!external || !external[0]) {
+		return;
+	}
+	if (!SDL_getenv("AERON_LOG_FILE")) {
+		snprintf(path, sizeof path, "%s/openxwa.log", external);
+		SDL_setenv_unsafe("AERON_LOG_FILE", path, 1);
+	}
+	snprintf(path, sizeof path, "%s/openxwa-quest.cfg", external);
+	f = fopen(path, "r");
+	if (!f) {
+		f = fopen(path, "w");
+		if (f) {
+			fputs("# OpenXWA Quest settings. Remove the leading '#' to change a value.\n"
+				  "# Per-eye render resolution (lower = faster):\n"
+				  "#AERON_XR_RESOLUTION_SCALE=0.9\n"
+				  "# Directional shadows in the 3D cockpit (1 = on, costs GPU time):\n"
+				  "#XWA_XR_SHADOWS=0\n"
+				  "# 0 = everything on the flat virtual screen (no 3D cockpit):\n"
+				  "#XWA_XR_STEREO=1\n"
+				  "#XWA_XR_WORLD_SCALE=1.0\n"
+				  "#XWA_XR_HUD_DISTANCE=3.0\n"
+				  "#AERON_XR_SCREEN_DISTANCE=1.6\n"
+				  "#AERON_XR_SCREEN_WIDTH=2.0\n"
+				  "#AERON_XR_THROTTLE_RATE=0.8\n"
+				  "# Skip the Quest render defaults (SSAO/MSAA/... follow the in-game options):\n"
+				  "#XWA_QUEST_PROFILE=0\n",
+				  f);
+			fclose(f);
+		}
+		return;
+	}
+	while (fgets(line, sizeof line, f)) {
+		char* eq;
+		char* end;
+		char* key = line;
+		while (*key == ' ' || *key == '\t') {
+			key++;
+		}
+		if (*key == '#' || *key == '\0' || *key == '\n' || *key == '\r') {
+			continue;
+		}
+		eq = strchr(key, '=');
+		if (!eq) {
+			continue;
+		}
+		*eq = '\0';
+		end = eq + 1 + strcspn(eq + 1, "\r\n");
+		*end = '\0';
+		SDL_setenv_unsafe(key, eq + 1, 1);
+	}
+	fclose(f);
+}
+
+/* Read before Aeron_Init: the XR swapchains are sized at session start. */
+static void android_xr_defaults(void) {
+	const char* profile = SDL_getenv("XWA_QUEST_PROFILE");
+	if (profile && profile[0] == '0') {
+		return;
+	}
+	if (!SDL_getenv("AERON_XR_RESOLUTION_SCALE")) {
+		SDL_setenv_unsafe("AERON_XR_RESOLUTION_SCALE", "0.9", 1);
+	}
+}
+
+static void android_default_game_data(XwaLaunchOptions* launch) {
+	const char* external = SDL_GetAndroidExternalStoragePath();
+	char path[XWA_HOST_CONFIG_PATH_CAPACITY];
+	if (launch->game_data_path[0] || !external || !external[0]) {
+		return;
+	}
+	snprintf(path, sizeof path, "%s/XWA", external);
+	mkdir(path, 0775);
+	snprintf(launch->game_data_path, sizeof launch->game_data_path, "%s", path);
+	Aeron_LogInfo("xwa.config", "Android game-data folder: %s", path);
+}
+#endif
+
+/* Mobile/standalone render defaults. Applied to options the player has not
+ * set explicitly, so the in-game Video Options still win. On by default on
+ * Android; XWA_QUEST_PROFILE=1 previews it on PC VR. */
+static void apply_quest_render_profile(XwaHostConfig* host) {
+	const char* env = SDL_getenv("XWA_QUEST_PROFILE");
+#if defined(SDL_PLATFORM_ANDROID)
+	const int enabled = !(env && env[0] == '0');
+#else
+	const int enabled = env && env[0] == '1';
+#endif
+	unsigned int* mask = &host->video_options_override_mask;
+	if (!enabled) {
+		return;
+	}
+	if (!(*mask & XWA_MODERN_VIDEO_OVERRIDE_SSAO)) {
+		host->video_options.ssao_quality = XWA_MODERN_SSAO_OFF;
+		*mask |= XWA_MODERN_VIDEO_OVERRIDE_SSAO;
+	}
+	if (!(*mask & XWA_MODERN_VIDEO_OVERRIDE_FSR)) {
+		host->video_options.fsr_upscaling = XWA_MODERN_FSR_OFF;
+		*mask |= XWA_MODERN_VIDEO_OVERRIDE_FSR;
+	}
+	if (!(*mask & XWA_MODERN_VIDEO_OVERRIDE_MOTION_BLUR)) {
+		host->video_options.motion_blur_quality = XWA_MODERN_MOTION_BLUR_OFF;
+		*mask |= XWA_MODERN_VIDEO_OVERRIDE_MOTION_BLUR;
+	}
+	if (!(*mask & XWA_MODERN_VIDEO_OVERRIDE_MSAA)) {
+		host->video_options.msaa = XWA_MODERN_MSAA_4X; /* cheap on tile-based mobile GPUs */
+		*mask |= XWA_MODERN_VIDEO_OVERRIDE_MSAA;
+	}
+	if (!(*mask & XWA_MODERN_VIDEO_OVERRIDE_HDR)) {
+		host->video_options.hdr_output = 0;
+		*mask |= XWA_MODERN_VIDEO_OVERRIDE_HDR;
+	}
+	if (!SDL_getenv("XWA_XR_SHADOWS")) {
+		SDL_setenv_unsafe("XWA_XR_SHADOWS", "0", 1);
+	}
+	Aeron_LogInfo("xwa.config", "Quest render profile: SSAO off, FSR off, motion blur off, MSAA %s, HDR off, "
+							   "stereo shadows %s",
+				  host->video_options.msaa == XWA_MODERN_MSAA_4X ? "4x" : "user", SDL_getenv("XWA_XR_SHADOWS"));
+}
+
 int main(int argc, char** argv) {
 	AeronConfig config;
 	XwaHostConfig host_config;
@@ -280,6 +427,10 @@ int main(int argc, char** argv) {
 		Aeron_LogError("xwa.config", "%s", config_error);
 		return 2;
 	}
+#if defined(SDL_PLATFORM_ANDROID)
+	android_load_settings();
+	android_xr_defaults();
+#endif
 	memset(&config, 0, sizeof(config));
 	config.org_name = "TotallyOpen";
 	config.app_name = "OpenXWA";
@@ -301,10 +452,17 @@ int main(int argc, char** argv) {
 	config.clear_color_rgba[2] = 0.0f;
 	config.clear_color_rgba[3] = 1.0f;
 	config.xr_enabled = launch.xr_enabled;
+#if defined(SDL_PLATFORM_ANDROID)
+	/* Meta Quest standalone: always an OpenXR app. */
+	config.xr_enabled = 1;
+#endif
 
 	if (!Aeron_Init(&config)) {
 		return 1;
 	}
+#if defined(SDL_PLATFORM_ANDROID)
+	android_default_game_data(&launch);
+#endif
 	if (!XwaHostConfig_Load(Aeron_GetVfs(), &host_config, config_error, sizeof config_error)) {
 		char message[1536];
 		snprintf(message, sizeof message, "%s\nConfiguration path: %s/config.yaml", config_error,
@@ -314,6 +472,7 @@ int main(int argc, char** argv) {
 		Aeron_Shutdown();
 		return 1;
 	}
+	apply_quest_render_profile(&host_config);
 	initial_window_mode = XWA_MODERN_WINDOW_MODE_FULLSCREEN;
 	if (host_config.video_options_override_mask & XWA_MODERN_VIDEO_OVERRIDE_WINDOW_MODE) {
 		initial_window_mode = host_config.video_options.window_mode;
