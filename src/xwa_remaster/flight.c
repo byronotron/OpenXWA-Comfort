@@ -3777,6 +3777,13 @@ static float fl_xr_env(const char* name, float fallback) {
 	return fallback;
 }
 
+/* XWA_XR_DEPTH_BOOST: eye separation multiplier for the world outside the
+ * cockpit (1 = real). */
+static float fl_xr_depth_boost(void) {
+	const float boost = fl_xr_env("XWA_XR_DEPTH_BOOST", 1.0f);
+	return boost < 1.0f ? 1.0f : (boost > 20.0f ? 20.0f : boost);
+}
+
 static int fl_xr_stereo_eligible(const XwaFlightCamera* cam) {
 	const char* env = getenv("XWA_XR_STEREO");
 	if (env && env[0] == '0') {
@@ -3968,7 +3975,10 @@ static void fl_xr_hud_quad(const AeronSceneCamera* base, AeronXrHudQuad* out, in
 		}
 		return;
 	}
-	const float d = split ? fl_xr_env("XWA_XR_HUD_WORLD_DISTANCE", 500.0f) : fl_xr_env("XWA_XR_HUD_DISTANCE", 3.0f);
+	/* With a depth boost the world reads closer by that factor; keep the
+	 * brackets at a matching depth. */
+	const float d = split ? fl_xr_env("XWA_XR_HUD_WORLD_DISTANCE", 500.0f) / fl_xr_depth_boost()
+						  : fl_xr_env("XWA_XR_HUD_DISTANCE", 3.0f);
 	out->size[0] = 2.0f * d * th;
 	out->size[1] = 2.0f * d * tv;
 	out->position[0] = -base->proj_x_offset * th * d;
@@ -4113,9 +4123,27 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	AeronSceneCamera xr_eyes[2];
 	const int stereo = fl_xr_stereo_eligible(cam) && Aeron_XrStereoBegin(&xr_frame) &&
 					   xr_frame.width == s.rt_w && xr_frame.height == s.rt_h;
+	/* Depth boost: the outside world is seen with the eyes moved apart by
+	 * XWA_XR_DEPTH_BOOST (hyper-stereo), so ships at combat range show depth;
+	 * the cockpit is shifted with each eye to keep its real size. */
+	float cockpit_eye_shift[2][3] = { { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f } };
+	const float depth_boost = stereo ? fl_xr_depth_boost() : 1.0f;
 	if (stereo) {
-		fl_xr_eye_camera(&flight_view.camera, &xr_frame.views[0], &xr_eyes[0]);
-		fl_xr_eye_camera(&flight_view.camera, &xr_frame.views[1], &xr_eyes[1]);
+		AeronXrView boosted[2] = { xr_frame.views[0], xr_frame.views[1] };
+		for (int a = 0; a < 3; a++) {
+			const float centre = 0.5f * (xr_frame.views[0].position[a] + xr_frame.views[1].position[a]);
+			for (int e = 0; e < 2; e++) {
+				boosted[e].position[a] = centre + depth_boost * (xr_frame.views[e].position[a] - centre);
+			}
+		}
+		for (int e = 0; e < 2; e++) {
+			AeronSceneCamera real_eye;
+			fl_xr_eye_camera(&flight_view.camera, &xr_frame.views[e], &real_eye);
+			fl_xr_eye_camera(&flight_view.camera, &boosted[e], &xr_eyes[e]);
+			for (int a = 0; a < 3; a++) {
+				cockpit_eye_shift[e][a] = xr_eyes[e].pos[a] - real_eye.pos[a];
+			}
+		}
 	}
 	/* The hook persists on the scene object; explicitly clear it when
 	 * returning to the ordinary world path. */
@@ -4701,6 +4729,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	 * pan / 16) rotated into eye space (rotation only — the classic
 	 * g_cockpitViewActive override). Turret seats rotate the cockpit's
 	 * rotary meshes by the captured aim. */
+	const AeronSceneMark cockpit_begin = AeronScene_Mark(s.scene);
 	if (fl_cockpit_drawn(snap, cam) && cockpit_anchor) {
 		AeronSceneMesh* cockpit_mesh = XwaRemasterShip_MeshForName(snap->cockpit.model_name);
 		if (cockpit_mesh) {
@@ -4756,6 +4785,8 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		}
 	}
 
+	const AeronSceneMark cockpit_end = AeronScene_Mark(s.scene);
+
 	/* Classic effects order: particles, persistent warhead trails, then
 	 * queued scene billboards. */
 	XwaRemasterParticles_SubmitRegion(s.particles, s.scene, snap, cam->region);
@@ -4771,7 +4802,17 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		fl_submit_lens_flares(snap, &flight_view);
 	}
 
+	const int shift_cockpit = stereo && depth_boost != 1.0f;
+	if (shift_cockpit) {
+		AeronScene_TranslateRange(s.scene, &cockpit_begin, &cockpit_end, cockpit_eye_shift[0]);
+	}
 	int render_ok = AeronScene_Render(s.scene, cmd);
+	if (render_ok && shift_cockpit) {
+		const float to_right[3] = { cockpit_eye_shift[1][0] - cockpit_eye_shift[0][0],
+									cockpit_eye_shift[1][1] - cockpit_eye_shift[0][1],
+									cockpit_eye_shift[1][2] - cockpit_eye_shift[0][2] };
+		AeronScene_TranslateRange(s.scene, &cockpit_begin, &cockpit_end, to_right);
+	}
 	if (render_ok && stereo) {
 		/* Left eye out, then re-render the same submissions for the right eye.
 		 * The right eye reuses the left eye's shadow atlas unless
