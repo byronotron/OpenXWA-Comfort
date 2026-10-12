@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "xwa_remaster/vr_console_protocol.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -25,6 +27,10 @@ void XwaPort_PausedFrame(void);
 /* Queues the original Scroll Lock flight action for keyboards without that key.
  * Returns nonzero when an active flight accepted the request. */
 int XwaPort_QueueMouseLookToggle(void);
+
+/* VR lap console bridge (see xwa_remaster/vr_lap_console.h). */
+void XwaPort_GetVrConsoleState(XwaVrConsoleState* out);
+void XwaPort_VrConsoleAction(XwaVrConsoleAction action, int arg);
 /* Latched release of the flight mouse capture (Ctrl+Alt+M), so the pointer
  * returns to the OS while flight keeps running. Cleared by the hotkey, by a
  * click inside the window, or when the session leaves flight. */

@@ -265,6 +265,133 @@ static void XwaPort_UpdateVrFlightButtons(int enabled) {
 	}
 }
 
+/* VR lap console: live ship state for its buttons, and its presses as the
+ * game's own key actions. */
+static CraftData* XwaPort_VrConsoleCraft(void) {
+	const int flight = XwaFlightTask_IsActive();
+	PlayerData* player;
+	uint16_t objIdx;
+	if (!Aeron_XrIsPresenting() || !flight || g_inHangarReady || FlightDisplay_IsFrontendModalActive() ||
+		XwaFlightPauseTask_IsActive()) {
+		return NULL;
+	}
+	player = &g_players[g_localPlayer];
+	objIdx = (uint16_t)player->objectIndex;
+	if (objIdx == 0xffffu || player->mapCameraState || player->hyperspacePhase ||
+		g_objectTable[objIdx].mobj == NULL) {
+		return NULL;
+	}
+	return g_objectTable[objIdx].mobj->pCraft;
+}
+
+void XwaPort_GetVrConsoleState(XwaVrConsoleState* out) {
+	const CraftData* craft = XwaPort_VrConsoleCraft();
+	const PlayerData* player = &g_players[g_localPlayer];
+	uint16_t objectType;
+	memset(out, 0, sizeof *out);
+	if (!craft) {
+		return;
+	}
+	objectType = g_objectTable[(uint16_t)player->objectIndex].objectType;
+	out->valid = 1;
+	out->laser_level = craft->laserRedirect % 5;
+	out->shield_level = craft->shieldRedirect % 5;
+	out->beam_level = craft->beamLevel % 5;
+	out->has_shields = (craft->systemFlags & 1) != 0;
+	out->has_beam = (craft->systemFlags & 0x100) != 0;
+	out->shield_balance = craft->shieldDistribMode % 3;
+	out->has_sfoils = objectType == OBJ_XWing || objectType == OBJ_BWing;
+	out->sfoils_closed = (craft->sFoilState & 2) != 0;
+	out->has_target = player->currentTargetObjectIdx != 0xffffu;
+	for (int i = 0; i < 3; ++i) {
+		const int slot = player->targetPresetSlot[i];
+		out->memory_set[i] = slot != -1 && g_objectTable[(uint16_t)slot].objectType != OBJ_None;
+	}
+}
+
+static void XwaPort_QueueKeyTimes(uint16_t key, int times) {
+	for (int i = 0; i < times; ++i) {
+		XwaPort_QueueFlightActionKey(key);
+	}
+}
+
+void XwaPort_VrConsoleAction(XwaVrConsoleAction action, int arg) {
+	static const uint16_t simple[XWA_VRC_COUNT] = {
+		[XWA_VRC_LASERS_TO_SHIELDS] = KEY_APOSTROPHE,
+		[XWA_VRC_SHIELDS_TO_LASERS] = KEY_SEMICOLON,
+		[XWA_VRC_TARGET_NEAREST_ENEMY] = KEY_R,
+		[XWA_VRC_TARGET_ATTACKER] = KEY_E,
+		[XWA_VRC_MATCH_SPEED] = KEY_ENTER,
+		[XWA_VRC_TARGET_FRIENDLY] = KEY_F1,
+		[XWA_VRC_TARGET_NEUTRAL] = KEY_F2,
+		[XWA_VRC_TARGET_ENEMY] = KEY_F3,
+		[XWA_VRC_SUBSYSTEM_PREV] = KEY_LESS_THAN,
+		[XWA_VRC_SUBSYSTEM_NEXT] = KEY_COMMA,
+		[XWA_VRC_TARGET_NEWEST] = KEY_U,
+		[XWA_VRC_TARGET_OBJECTIVE] = KEY_O,
+		[XWA_VRC_TARGET_CLEAR] = KEY_ALT_C,
+		[XWA_VRC_FIRE_LINK] = KEY_X,
+		[XWA_VRC_CONVERGENCE] = KEY_Z,
+		[XWA_VRC_SFOILS] = KEY_V,
+		[XWA_VRC_MAP] = KEY_M,
+		[XWA_VRC_DOCK] = KEY_SHIFT_D,
+		[XWA_VRC_PICKUP] = KEY_SHIFT_P,
+		[XWA_VRC_RELEASE] = KEY_SHIFT_R,
+		[XWA_VRC_GUNNER] = KEY_G,
+		[XWA_VRC_AUTO_GUNNER] = KEY_F,
+		[XWA_VRC_COUNTERMEASURE] = KEY_C,
+		[XWA_VRC_EJECT] = KEY_ALT_E,
+		[XWA_VRC_WING_ATTACK] = KEY_SHIFT_A,
+		[XWA_VRC_WING_COVER] = KEY_SHIFT_C,
+		[XWA_VRC_WING_IGNORE] = KEY_SHIFT_I,
+		[XWA_VRC_WING_EVADE] = KEY_SHIFT_E,
+		[XWA_VRC_WING_WAIT] = KEY_SHIFT_W,
+		[XWA_VRC_WING_GO_AHEAD] = KEY_SHIFT_G,
+		[XWA_VRC_WING_HOME] = KEY_SHIFT_H,
+		[XWA_VRC_WING_REPORT] = KEY_SHIFT_U,
+		[XWA_VRC_WING_RESUPPLY] = KEY_SHIFT_B,
+		[XWA_VRC_WING_REINFORCE] = KEY_SHIFT_S,
+	};
+	const CraftData* craft = XwaPort_VrConsoleCraft();
+	if (!craft || (int)action <= XWA_VRC_NONE || (int)action >= XWA_VRC_COUNT) {
+		return;
+	}
+	switch (action) {
+		case XWA_VRC_LASER_LEVEL:
+			/* The game cycles levels one key press at a time. */
+			XwaPort_QueueKeyTimes(KEY_F9, ((arg - craft->laserRedirect) % 5 + 5) % 5);
+			return;
+		case XWA_VRC_SHIELD_LEVEL:
+			XwaPort_QueueKeyTimes(KEY_F10, ((arg - craft->shieldRedirect) % 5 + 5) % 5);
+			return;
+		case XWA_VRC_BEAM_LEVEL:
+			XwaPort_QueueKeyTimes(KEY_F8, ((arg - craft->beamLevel) % 5 + 5) % 5);
+			return;
+		case XWA_VRC_SHIELD_BALANCE:
+			XwaPort_QueueKeyTimes(KEY_S, ((arg - craft->shieldDistribMode) % 3 + 3) % 3);
+			return;
+		case XWA_VRC_PRESET_RECALL:
+			XwaPort_QueueFlightActionKey(arg ? KEY_F12 : KEY_F11);
+			return;
+		case XWA_VRC_PRESET_STORE:
+			XwaPort_QueueFlightActionKey(arg ? KEY_SHIFT_F12 : KEY_SHIFT_F11);
+			return;
+		case XWA_VRC_MEMORY_RECALL:
+			if (arg >= 0 && arg < 3) {
+				XwaPort_QueueFlightActionKey((uint16_t)(KEY_F5 + arg));
+			}
+			return;
+		case XWA_VRC_MEMORY_STORE:
+			if (arg >= 0 && arg < 3) {
+				XwaPort_QueueFlightActionKey((uint16_t)(KEY_SHIFT_F5 + arg));
+			}
+			return;
+		default:
+			XwaPort_QueueFlightActionKey(simple[action]);
+			return;
+	}
+}
+
 /* Picks the VR controller mode for this frame: keyboard-only menus in the
  * hangar, bindable buttons in flight, neither elsewhere (the laser pointer
  * handles the frontend). */

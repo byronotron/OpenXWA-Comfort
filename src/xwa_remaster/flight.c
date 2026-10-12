@@ -20,6 +20,7 @@
 #include "xwa_remaster/hud.h"
 #include "xwa_remaster/hud_fixed.h"
 #include "xwa_remaster/vr_cockpit_hud.h"
+#include "xwa_remaster/vr_lap_console.h"
 #include "xwa_remaster/hyperspace.h"
 #include "xwa_remaster/ship.h"
 #include "xwa_remaster/sky_stars.h"
@@ -4900,6 +4901,13 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 				fl_xr_hud_quad(&flight_view.camera, &hud, 0);
 				Aeron_XrStereoCommit(&hud);
 			}
+			if (xr_frame.console_target) {
+				AeronXrPanel console;
+				if (XwaVrConsole_Frame(cmd, xr_frame.console_target, xr_frame.console_width,
+									   xr_frame.console_height, xr_frame.views, &console)) {
+					Aeron_XrStereoCommitConsole(&console);
+				}
+			}
 		}
 	}
 	return out;
@@ -4912,6 +4920,7 @@ void XwaRemasterFlight_Shutdown(void) {
 		s_xr_present_format = AERON_TEXTURE_FORMAT_UNKNOWN;
 	}
 	XwaVrCockpitHud_Shutdown();
+	XwaVrConsole_Shutdown();
 	XwaRemasterFlightMap_Shutdown();
 	XwaRemasterHyperspace_Destroy(s.hyperspace);
 	s.hyperspace = NULL;

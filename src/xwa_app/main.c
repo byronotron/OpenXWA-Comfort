@@ -6,6 +6,7 @@
 #include "vr_keyboard.h"
 #include "window_icon.h"
 #include "xwa/config/game_config.h"
+#include "xwa_remaster/vr_lap_console.h"
 #include "xwa_remaster/xwa_remaster.h"
 #include "xwa_runtime/config/modern_video_options.h"
 #include "xwa_runtime/input/controller_mapping.h"
@@ -350,6 +351,10 @@ static void android_load_settings(void) {
 				  "#XWA_XR_DEPTH_BOOST=1.0\n"
 				  "# HUD: cockpit (panels on the cockpit), helmet (follows your head), fixed:\n"
 				  "#XWA_XR_HUD_LAYOUT=cockpit\n"
+				  "# Lap console (touch panel below the view; look down to use it):\n"
+				  "#XWA_XR_CONSOLE=1\n"
+				  "#XWA_XR_CONSOLE_PITCH=-52\n"
+				  "#XWA_XR_CONSOLE_DISTANCE=0.52\n"
 				  "# Helmet HUD distance in metres and size:\n"
 				  "#XWA_XR_HUD_DISTANCE=3.0\n"
 				  "#XWA_XR_HUD_SCALE=0.65\n"
@@ -684,15 +689,28 @@ int main(int argc, char** argv) {
 			if (Aeron_QuitRequested() || XwaPort_ShouldQuit()) {
 				break;
 			}
+			XwaVrConsole_BeginFrame((float)delta_us * 1e-6f);
 			if (paused || toggled || xr_paused) {
 				XwaPort_PausedFrame();
 			} else {
+				/* Lap console presses from the last frame become game actions. */
+				XwaVrConsoleAction console_action;
+				int console_arg;
+				while (XwaVrConsole_PollAction(&console_action, &console_arg)) {
+					XwaPort_VrConsoleAction(console_action, console_arg);
+				}
 				XwaPort_Tick(delta_us);
+			}
+			{
+				XwaVrConsoleState console_state;
+				XwaPort_GetVrConsoleState(&console_state);
+				XwaVrConsole_SetState(&console_state);
 			}
 			if (Aeron_QuitRequested() || XwaPort_ShouldQuit()) {
 				break;
 			}
 			XwaRemaster_Frame(delta_us);
+			XwaVrConsole_EndFrame();
 			if (Aeron_QuitRequested() || XwaPort_ShouldQuit()) {
 				break;
 			}

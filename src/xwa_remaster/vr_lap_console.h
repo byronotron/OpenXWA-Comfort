@@ -1,0 +1,47 @@
+#ifndef XWA_REMASTER_VR_LAP_CONSOLE_H
+#define XWA_REMASTER_VR_LAP_CONSOLE_H
+
+/*
+ * VR lap console: a holographic touch panel in front of the player's lap
+ * with the commands that are not on a controller button (energy, targeting,
+ * wingmen, ship). It sleeps (dim, not pressable) while the player looks
+ * forward and wakes when they look down. Buttons are pressed by poking
+ * them with the controller tip, or by pointing the controller at them and
+ * pulling the trigger (the trigger does not fire while it points at the
+ * console).
+ *
+ * Per host frame: BeginFrame, SetState (game state), then the flight
+ * renderer calls Frame while it renders in stereo, then EndFrame. Pressed
+ * buttons come out of PollAction.
+ */
+
+#include "aeron/render.h"
+#include "aeron/xr.h"
+#include "xwa_remaster/vr_console_protocol.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void XwaVrConsole_BeginFrame(float dt_seconds);
+void XwaVrConsole_SetState(const XwaVrConsoleState* state);
+
+/* Handles the hands and draws the console into `target` (the stereo
+ * frame's console target). Fills `out` with its placement and returns 1
+ * when it should be shown. `views` are the stereo frame's eye views. */
+int XwaVrConsole_Frame(AeronCommandBuffer* cmd, AeronRenderTarget* target, int width, int height,
+					   const AeronXrView views[2], AeronXrPanel* out);
+
+/* Releases the trigger when the console was not shown this frame. */
+void XwaVrConsole_EndFrame(void);
+
+/* Pops a pressed console action. Returns 0 when none is queued. */
+int XwaVrConsole_PollAction(XwaVrConsoleAction* action, int* arg);
+
+void XwaVrConsole_Shutdown(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

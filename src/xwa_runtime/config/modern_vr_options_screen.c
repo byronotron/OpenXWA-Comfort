@@ -31,6 +31,7 @@ enum {
 	VR_WORLD_SCALE,
 	VR_POINT_LIGHTS,
 	VR_SHADOWS,
+	VR_CONSOLE,
 	VR_RESOLUTION,
 	VR_COUNT
 };
@@ -56,6 +57,7 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "XWA_XR_WORLD_SCALE", "World Scale", k_scale_texts, k_scale_values, 9, 6, 83 },
 	{ "XWA_POINT_LIGHTS", "Dynamic Lights", k_toggle_texts, k_toggle_values, 2, 0, 84 },
 	{ "XWA_XR_SHADOWS", "Cockpit Shadows", k_toggle_texts, k_toggle_values, 2, 0, 85 },
+	{ "XWA_XR_CONSOLE", "Lap Console", k_toggle_texts, k_toggle_values, 2, 1, 88 },
 	{ "AERON_XR_RESOLUTION_SCALE", "Resolution (restart)", k_res_texts, k_res_values, 6, 2, 86 },
 };
 
