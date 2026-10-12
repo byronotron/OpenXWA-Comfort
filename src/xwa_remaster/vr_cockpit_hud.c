@@ -3,13 +3,17 @@
 #include "xwa_remaster/vr_cockpit_hud.h"
 
 #include "aeron/aeron.h"
+#include "aeron/scene/draw_list2d.h"
+#include "xwa_remaster/vr_lap_console.h"
 #include "xwa_remaster/hud.h"
 #include "xwa_remaster/hud_cmd.h"
 #include "xwa_remaster/hud_fixed.h"
 #include "xwa_remaster/hud_text.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 enum {
@@ -41,13 +45,13 @@ typedef struct CkSpec {
 } CkSpec;
 
 static const CkSpec k_spec[CK_COUNT] = {
-	[CK_LEFT_POD] = { "fore radar pod", -40.0f, 2.0f, 0.75f, 0.17f, 0.21f },
-	[CK_RIGHT_POD] = { "aft radar pod", 40.0f, 2.0f, 0.75f, 0.17f, 0.21f },
+	[CK_LEFT_POD] = { "fore radar pod", -40.0f, 2.0f, 0.75f, 0.1955f, 0.2415f },
+	[CK_RIGHT_POD] = { "aft radar pod", 40.0f, 2.0f, 0.75f, 0.1955f, 0.2415f },
 	[CK_MESSAGES] = { "messages", 0.0f, -7.0f, 0.95f, 0.36f, 0.08f, 0.0036f },
 	/* The flight-group line sits low on the flat screen (above the
 	 * targeting computer): its own panel, so the two message areas don't
 	 * join into one huge panel. */
-	[CK_MESSAGES_LOW] = { "flight-group messages", 0.0f, -16.0f, 0.95f, 0.36f, 0.08f, 0.0027f },
+	[CK_MESSAGES_LOW] = { "flight-group messages", 0.0f, -16.0f, 0.95f, 0.36f, 0.08f, 0.00216f },
 	/* The top-bar readouts sit in a row on the targeting computer's top
 	 * edge (placed by ck_place_row; the pose here is only a fallback). */
 	[CK_COUNTERS] = { "counters", 0.0f, -21.0f, 0.62f, 0.12f, 0.03f },
@@ -104,7 +108,39 @@ static struct {
 	float rect[CK_COUNT][4];
 	uint8_t visible[CK_COUNT];
 	char logged[512];
+	/* Panels placed by hand, per cockpit (XWA_XR_HUD_POSE_<COCKPIT>):
+	 * LOCAL-space poses that replace the defaults. */
+	char cockpit_key[96];
+	char pose_env[1024];
+	uint8_t custom[CK_COUNT];
+	float cpos[CK_COUNT][3], cq[CK_COUNT][4];
+	/* Grabbing: panel held by each hand (-1 none), the panel relative to
+	 * the hand, hovered panel per hand, last grip value. */
+	int grab_panel[2];
+	float grab_pos[2][3], grab_q[2][4];
+	int hover_panel[2];
+	float grip_prev[2];
+	int layout_dirty;
+	char layout_text[1024];
+	/* Outline around hovered / held panels, drawn into the HUD targets. */
+	AeronDrawList2D* outline;
+	AeronDrawList2D* outline_aux;
+	int outline_ready;
+	int cmd_separate;
+	int initialized;
 } s_ck;
+
+/* Short ids for the saved layout. */
+static const char* const k_ids[CK_COUNT] = {
+	[CK_LEFT_POD] = "pod_l",	[CK_RIGHT_POD] = "pod_r", [CK_MESSAGES] = "msg",	[CK_MESSAGES_LOW] = "msg_low",
+	[CK_COUNTERS] = "counters", [CK_SPEED] = "speed",	  [CK_CLOCK] = "clock", [CK_CHARGE] = "charge",
+	[CK_CMD] = "cmd",			[CK_MFD_LEFT] = "mfd_l",  [CK_MFD_RIGHT] = "mfd_r",
+};
+
+#define CK_GRAB_MARGIN_M 0.02f
+#define CK_GRAB_DEPTH_M 0.05f
+#define CK_GRIP_ON 0.6f
+#define CK_GRIP_OFF 0.35f
 
 static void ck_union(float acc[4], int* valid, const float b[4]) {
 	if (!*valid) {
@@ -231,10 +267,214 @@ static void ck_place_row(AeronXrPanel* out, const int* index_of, float world_sca
 	}
 }
 
-int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, int cmd_separate, AeronXrPanel* out,
-						  int max_out) {
+static void ck_qmul(const float a[4], const float b[4], float out[4]) {
+	const float r[4] = {
+		a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+		a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+		a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+		a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+	};
+	memcpy(out, r, sizeof r);
+}
+
+static void ck_qnorm(float q[4]) {
+	const float l = sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+	if (l > 1e-6f) {
+		for (int k = 0; k < 4; ++k) {
+			q[k] /= l;
+		}
+	} else {
+		q[0] = q[1] = q[2] = 0.0f;
+		q[3] = 1.0f;
+	}
+}
+
+/* XWA_XR_HUD_POSE_ + the cockpit's name in capitals. */
+static void ck_layout_key(const char* cockpit, char* out, size_t size) {
+	size_t n = (size_t)snprintf(out, size, "XWA_XR_HUD_POSE_");
+	for (const char* c = cockpit && cockpit[0] ? cockpit : "DEFAULT"; *c && n + 1 < size; ++c) {
+		if (isalnum((unsigned char)*c)) {
+			out[n++] = (char)toupper((unsigned char)*c);
+		}
+	}
+	out[n] = '\0';
+}
+
+/* Reads this cockpit's layout ("id=x,y,z,qx,qy,qz,qw;...") when it changed. */
+static void ck_read_layout(const char* cockpit) {
+	char key[96];
+	ck_layout_key(cockpit, key, sizeof key);
+	const char* v = getenv(key);
+	if (!v) {
+		v = "";
+	}
+	if (strcmp(key, s_ck.cockpit_key) == 0 && strcmp(v, s_ck.pose_env) == 0) {
+		return;
+	}
+	snprintf(s_ck.cockpit_key, sizeof s_ck.cockpit_key, "%s", key);
+	snprintf(s_ck.pose_env, sizeof s_ck.pose_env, "%s", v);
+	memset(s_ck.custom, 0, sizeof s_ck.custom);
+	const char* p = v;
+	while (*p) {
+		char id[24];
+		float f[7];
+		int used = 0;
+		if (sscanf(p, "%23[^=]=%f,%f,%f,%f,%f,%f,%f%n", id, &f[0], &f[1], &f[2], &f[3], &f[4], &f[5], &f[6], &used) ==
+				8 &&
+			used > 0) {
+			for (int i = 0; i < CK_COUNT; ++i) {
+				if (k_ids[i] && strcmp(id, k_ids[i]) == 0 && fabsf(f[0]) < 3.0f && fabsf(f[1]) < 3.0f &&
+					fabsf(f[2]) < 3.0f) {
+					memcpy(s_ck.cpos[i], f, sizeof s_ck.cpos[i]);
+					memcpy(s_ck.cq[i], &f[3], sizeof s_ck.cq[i]);
+					ck_qnorm(s_ck.cq[i]);
+					s_ck.custom[i] = 1;
+				}
+			}
+			p += used;
+		} else {
+			const char* next = strchr(p, ';');
+			if (!next) {
+				break;
+			}
+			p = next;
+		}
+		while (*p == ';' || *p == ' ') {
+			p++;
+		}
+	}
+}
+
+static void ck_save_layout(void) {
+	int n = 0;
+	s_ck.layout_text[0] = '\0';
+	for (int i = 0; i < CK_COUNT; ++i) {
+		if (!s_ck.custom[i] || !k_ids[i]) {
+			continue;
+		}
+		n += snprintf(s_ck.layout_text + n, sizeof s_ck.layout_text - (size_t)n, "%s%s=%.4f,%.4f,%.4f,%.5f,%.5f,%.5f,%.5f",
+					  n ? ";" : "", k_ids[i], s_ck.cpos[i][0], s_ck.cpos[i][1], s_ck.cpos[i][2], s_ck.cq[i][0],
+					  s_ck.cq[i][1], s_ck.cq[i][2], s_ck.cq[i][3]);
+		if (n >= (int)sizeof s_ck.layout_text - 1) {
+			break;
+		}
+	}
+	setenv(s_ck.cockpit_key, s_ck.layout_text, 1);
+	snprintf(s_ck.pose_env, sizeof s_ck.pose_env, "%s", s_ck.layout_text);
+	s_ck.layout_dirty = 1;
+	Aeron_LogInfo("xwa.remaster", "VR HUD layout %s saved", s_ck.cockpit_key);
+}
+
+int XwaVrCockpitHud_TakeLayout(char* key, int key_size, char* value, int value_size) {
+	if (!s_ck.layout_dirty || !key || !value || key_size <= 0 || value_size <= 0) {
+		return 0;
+	}
+	snprintf(key, (size_t)key_size, "%s", s_ck.cockpit_key);
+	snprintf(value, (size_t)value_size, "%s", s_ck.layout_text);
+	s_ck.layout_dirty = 0;
+	return 1;
+}
+
+static void ck_apply_custom(AeronXrPanel* panel, int p) {
+	memcpy(panel->position, s_ck.cpos[p], sizeof panel->position);
+	memcpy(panel->orientation, s_ck.cq[p], sizeof panel->orientation);
+}
+
+/* Squeezing the grip with a hand on a panel picks it up; it follows the
+ * hand freely until the grip is let go, then the layout is saved for this
+ * cockpit. */
+static void ck_update_grab(AeronXrPanel* out, const int* index_of) {
+	static const float ux[3] = { 1, 0, 0 }, uy[3] = { 0, 1, 0 }, uz[3] = { 0, 0, 1 };
+	for (int hand = 0; hand < 2; ++hand) {
+		AeronXrHand xh;
+		s_ck.hover_panel[hand] = -1;
+		if (!Aeron_XrGetHand(hand, &xh)) {
+			if (s_ck.grab_panel[hand] >= 0) {
+				s_ck.grab_panel[hand] = -1;
+				ck_save_layout();
+			}
+			s_ck.grip_prev[hand] = 0.0f;
+			continue;
+		}
+		/* The panel the hand is on (nearest plane). */
+		int best = -1;
+		float best_depth = 1e9f;
+		for (int p = 0; p < CK_COUNT; ++p) {
+			if (index_of[p] < 0) {
+				continue;
+			}
+			const AeronXrPanel* panel = &out[index_of[p]];
+			float ax[3], ay[3], az[3];
+			ck_rotate(panel->orientation, ux, ax);
+			ck_rotate(panel->orientation, uy, ay);
+			ck_rotate(panel->orientation, uz, az);
+			const float rel[3] = { xh.position[0] - panel->position[0], xh.position[1] - panel->position[1],
+								   xh.position[2] - panel->position[2] };
+			const float lx = rel[0] * ax[0] + rel[1] * ax[1] + rel[2] * ax[2];
+			const float ly = rel[0] * ay[0] + rel[1] * ay[1] + rel[2] * ay[2];
+			const float depth = rel[0] * az[0] + rel[1] * az[1] + rel[2] * az[2];
+			if (fabsf(lx) < 0.5f * panel->size[0] + CK_GRAB_MARGIN_M &&
+				fabsf(ly) < 0.5f * panel->size[1] + CK_GRAB_MARGIN_M && fabsf(depth) < CK_GRAB_DEPTH_M &&
+				fabsf(depth) < best_depth) {
+				best = p;
+				best_depth = fabsf(depth);
+			}
+		}
+		const int other = s_ck.grab_panel[1 - hand];
+		if (best >= 0 && best != other) {
+			s_ck.hover_panel[hand] = best;
+		}
+		const int held = s_ck.grab_panel[hand];
+		if (held >= 0) {
+			if (xh.grip < CK_GRIP_OFF) {
+				s_ck.grab_panel[hand] = -1;
+				Aeron_XrHapticPulse(hand, 0.3f, 20);
+				ck_save_layout();
+			} else {
+				float off[3];
+				ck_rotate(xh.orientation, s_ck.grab_pos[hand], off);
+				for (int k = 0; k < 3; ++k) {
+					s_ck.cpos[held][k] = xh.position[k] + off[k];
+				}
+				ck_qmul(xh.orientation, s_ck.grab_q[hand], s_ck.cq[held]);
+				ck_qnorm(s_ck.cq[held]);
+				s_ck.custom[held] = 1;
+			}
+		} else if (s_ck.hover_panel[hand] >= 0 && xh.grip >= CK_GRIP_ON && s_ck.grip_prev[hand] < CK_GRIP_OFF) {
+			const int p = s_ck.hover_panel[hand];
+			const AeronXrPanel* panel = &out[index_of[p]];
+			const float inv[4] = { -xh.orientation[0], -xh.orientation[1], -xh.orientation[2], xh.orientation[3] };
+			const float to_panel[3] = { panel->position[0] - xh.position[0], panel->position[1] - xh.position[1],
+										panel->position[2] - xh.position[2] };
+			ck_rotate(inv, to_panel, s_ck.grab_pos[hand]);
+			ck_qmul(inv, panel->orientation, s_ck.grab_q[hand]);
+			ck_qnorm(s_ck.grab_q[hand]);
+			memcpy(s_ck.cpos[p], panel->position, sizeof s_ck.cpos[p]);
+			memcpy(s_ck.cq[p], panel->orientation, sizeof s_ck.cq[p]);
+			s_ck.custom[p] = 1;
+			s_ck.grab_panel[hand] = p;
+			Aeron_XrHapticPulse(hand, 0.6f, 30);
+		}
+		s_ck.grip_prev[hand] = xh.grip;
+		if (s_ck.hover_panel[hand] >= 0 || s_ck.grab_panel[hand] >= 0) {
+			XwaVrConsole_CaptureGrip(hand); /* the grip moves the panel, not the game */
+		}
+	}
+}
+
+int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, int cmd_separate, const char* cockpit,
+						  AeronXrPanel* out, int max_out) {
 	const XwaHudPreparedDrawState* drawn = XwaRemasterHud_PreparedDrawState();
 	int count = 0;
+	if (!s_ck.initialized) {
+		s_ck.grab_panel[0] = s_ck.grab_panel[1] = -1;
+		s_ck.hover_panel[0] = s_ck.hover_panel[1] = -1;
+		s_ck.initialized = 1;
+	}
+	s_ck.cmd_separate = cmd_separate;
+	if (s_ck.grab_panel[0] < 0 && s_ck.grab_panel[1] < 0) {
+		ck_read_layout(cockpit);
+	}
 	memset(s_ck.visible, 0, sizeof s_ck.visible);
 	if (!out || max_out <= 0 || target_w <= 0 || target_h <= 0 || !drawn || !drawn->valid) {
 		return 0;
@@ -354,7 +594,27 @@ int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, int cmd
 								spec->name, (int)w, (int)h, (int)r[0], (int)r[1]);
 		}
 	}
+	/* Hand-placed panels; the readout row follows the targeting computer
+	 * unless its panels were placed themselves. */
+	for (int p = 0; p < CK_COUNT; ++p) {
+		if (index_of[p] >= 0 && s_ck.custom[p] && p != CK_SPEED && p != CK_COUNTERS && p != CK_CLOCK) {
+			ck_apply_custom(&out[index_of[p]], p);
+		}
+	}
 	ck_place_row(out, index_of, world_scale, target_h);
+	for (int p = CK_COUNTERS; p <= CK_CLOCK; ++p) {
+		if (index_of[p] >= 0 && s_ck.custom[p]) {
+			ck_apply_custom(&out[index_of[p]], p);
+		}
+	}
+	ck_update_grab(out, index_of);
+	/* Show the held panel where the hand put it this frame. */
+	for (int hand = 0; hand < 2; ++hand) {
+		const int p = s_ck.grab_panel[hand];
+		if (p >= 0 && index_of[p] >= 0) {
+			ck_apply_custom(&out[index_of[p]], p);
+		}
+	}
 	if (log_len && strcmp(log, s_ck.logged) != 0) {
 		memcpy(s_ck.logged, log, sizeof s_ck.logged);
 		Aeron_LogInfo("xwa.remaster", "VR cockpit HUD panels (%dx%d HUD): %s", target_w, target_h, log);
@@ -362,6 +622,59 @@ int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, int cmd
 	return count;
 }
 
+void XwaVrCockpitHud_PrepareOverlay(AeronCommandBuffer* cmd, int target_w, int target_h) {
+	s_ck.outline_ready = 0;
+	if (!cmd || target_w <= 0 || target_h <= 0) {
+		return;
+	}
+	if (!s_ck.outline) {
+		s_ck.outline = AeronDrawList_Create(64);
+		s_ck.outline_aux = AeronDrawList_Create(16);
+		if (!s_ck.outline || !s_ck.outline_aux) {
+			return;
+		}
+	}
+	AeronDrawList_Begin(s_ck.outline, NULL, target_w, target_h, AERON_DRAWLIST2D_LOAD, NULL);
+	AeronDrawList_Begin(s_ck.outline_aux, NULL, target_w, target_h, AERON_DRAWLIST2D_LOAD, NULL);
+	for (int p = 0; p < CK_COUNT; ++p) {
+		const int held = s_ck.grab_panel[0] == p || s_ck.grab_panel[1] == p;
+		const int hover = s_ck.hover_panel[0] == p || s_ck.hover_panel[1] == p;
+		if (!s_ck.visible[p] || (!held && !hover)) {
+			continue;
+		}
+		const float* r = s_ck.rect[p];
+		AeronDrawList2DRRect frame;
+		memset(&frame, 0, sizeof frame);
+		frame.dst_x = r[0] + 1.0f;
+		frame.dst_y = r[1] + 1.0f;
+		frame.dst_w = r[2] - r[0] - 2.0f;
+		frame.dst_h = r[3] - r[1] - 2.0f;
+		frame.radius_px = 6.0f;
+		frame.border_px = held ? 3.0f : 2.0f;
+		frame.soft_px = 1.0f;
+		const float a = held ? 0.95f : 0.7f;
+		frame.border[0] = 0.498f * a;
+		frame.border[1] = 0.910f * a;
+		frame.border[2] = 1.0f * a;
+		frame.border[3] = a;
+		AeronDrawList_AddRRect(p == CK_CMD && s_ck.cmd_separate ? s_ck.outline_aux : s_ck.outline, &frame);
+	}
+	s_ck.outline_ready = AeronDrawList_Prepare(s_ck.outline, cmd) && AeronDrawList_Prepare(s_ck.outline_aux, cmd);
+}
+
+void XwaVrCockpitHud_RenderOverlay(AeronCommandBuffer* cmd, AeronRenderPass* pass, AeronRenderTarget* target, int aux) {
+	AeronDrawList2D* list = aux ? s_ck.outline_aux : s_ck.outline;
+	if (list && s_ck.outline_ready && cmd && pass && target) {
+		AeronDrawList_RenderIntoPass(list, cmd, pass, target);
+	}
+}
+
 void XwaVrCockpitHud_Shutdown(void) {
+	if (s_ck.outline) {
+		AeronDrawList_Destroy(s_ck.outline);
+	}
+	if (s_ck.outline_aux) {
+		AeronDrawList_Destroy(s_ck.outline_aux);
+	}
 	memset(&s_ck, 0, sizeof s_ck);
 }

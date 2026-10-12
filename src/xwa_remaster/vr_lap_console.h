@@ -41,6 +41,14 @@ int XwaVrConsole_Frame(AeronCommandBuffer* cmd, AeronRenderTarget* target, int w
 int XwaVrConsole_CardFrame(AeronCommandBuffer* cmd, AeronRenderTarget* target, int width, int height,
 						   const AeronXrView views[2], AeronXrPanel* out);
 
+/* Another VR panel owns hand 0/1's grip this frame (applied with the
+ * console's own in EndFrame). */
+void XwaVrConsole_CaptureGrip(int hand);
+
+/* While hand 0/1 points its ray at the console: the beam from the hand to
+ * where the ray lands (LOCAL space), for a faint pointer beam. */
+int XwaVrConsole_RayBeam(int hand, float start[3], float end[3]);
+
 /* Releases the trigger when the console was not shown this frame. */
 void XwaVrConsole_EndFrame(void);
 

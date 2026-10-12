@@ -576,7 +576,8 @@ static void gl_instance(AeronScene3D* scene, const AeronSceneMesh* mesh, const G
 	memcpy(inst.prev_transform, inst.transform, sizeof inst.transform);
 	inst.zero_velocity = 1;
 	inst.no_local_lights = 1;
-	inst.shadow_flags = AERON_SCENE_INSTANCE_NO_CAST_SHADOW | AERON_SCENE_INSTANCE_NO_RECEIVE_SHADOW;
+	inst.shadow_flags = AERON_SCENE_INSTANCE_NO_CAST_SHADOW | AERON_SCENE_INSTANCE_NO_RECEIVE_SHADOW |
+						AERON_SCENE_INSTANCE_EXCLUDE_FROM_RECEIVER_LOCAL_SHADOW;
 	AeronScene_AddMeshInstance(scene, &inst);
 }
 

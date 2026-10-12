@@ -81,27 +81,41 @@ static void mb_strip(float x, float w, float radius, float soft, const float top
 	AeronDrawList_AddRRect(s_list, &r);
 }
 
-int XwaVrMenuBeam_Frame(AeronCommandBuffer* cmd, AeronRenderTarget* target, int width, int height,
-						const AeronXrView views[2], AeronXrPanel* out) {
-	float hit[3], start[3];
-	if (!cmd || !target || width < MB_TEX_W || height <= 0 || !views || !out || !Aeron_XrPointerHit(hit)) {
+int XwaVrBeam_DrawStrips(AeronCommandBuffer* cmd, AeronRenderTarget* target, int width, int height) {
+	if (!cmd || !target || width < 2 * MB_TEX_W || height <= 0) {
 		return 0;
 	}
-	/* From the glove's fingertip, else from the controller. */
-	int pointing = 1;
-	if (!XwaVrGloves_IndexTip(1, start, &pointing)) {
-		AeronXrHand hand;
-		if (!Aeron_XrGetHand(1, &hand)) {
+	if (!s_list) {
+		s_list = AeronDrawList_Create(0);
+		if (!s_list) {
 			return 0;
 		}
-		memcpy(start, hand.position, sizeof start);
 	}
-	float along[3] = { hit[0] - start[0], hit[1] - start[1], hit[2] - start[2] };
+	AeronDrawList_Begin(s_list, target, width, height, AERON_DRAWLIST2D_CLEAR, NULL);
+	/* Premultiplied: a soft cyan glow and a bright core, strongest at the
+	 * far end. Strip 0 bright, strip 1 faint. */
+	for (int faint = 0; faint < 2; ++faint) {
+		const float k = faint ? 0.35f : 1.0f;
+		const float x = faint ? (float)MB_TEX_W : 0.0f;
+		const float glow_top[4] = { 0.10f * 0.45f * k, 0.65f * 0.45f * k, 0.45f * k, 0.45f * k };
+		const float glow_bottom[4] = { 0.10f * 0.12f * k, 0.65f * 0.12f * k, 0.12f * k, 0.12f * k };
+		const float core_top[4] = { 0.85f * k, 0.97f * k, k, k };
+		const float core_bottom[4] = { 0.85f * 0.35f * k, 0.97f * 0.35f * k, 0.35f * k, 0.35f * k };
+		mb_strip(x + 4.0f, MB_TEX_W - 8.0f, 20.0f, 16.0f, glow_top, glow_bottom, height);
+		mb_strip(x + MB_TEX_W * 0.5f - 6.0f, 12.0f, 6.0f, 3.0f, core_top, core_bottom, height);
+	}
+	AeronDrawList_Render(s_list, cmd);
+	return 1;
+}
+
+int XwaVrBeam_Pose(const float start[3], const float end[3], const AeronXrView views[2], int faint, int height,
+				   AeronXrPanel* out) {
+	float along[3] = { end[0] - start[0], end[1] - start[1], end[2] - start[2] };
 	const float length = sqrtf(mb_dot(along, along));
-	if (length < MB_MIN_LENGTH_M || !mb_norm(along)) {
+	if (!out || !views || height <= 0 || length < MB_MIN_LENGTH_M || !mb_norm(along)) {
 		return 0;
 	}
-	const float mid[3] = { 0.5f * (start[0] + hit[0]), 0.5f * (start[1] + hit[1]), 0.5f * (start[2] + hit[2]) };
+	const float mid[3] = { 0.5f * (start[0] + end[0]), 0.5f * (start[1] + end[1]), 0.5f * (start[2] + end[2]) };
 	/* Turned about its own axis to face the eyes. */
 	float to_eye[3];
 	for (int k = 0; k < 3; ++k) {
@@ -114,34 +128,34 @@ int XwaVrMenuBeam_Frame(AeronCommandBuffer* cmd, AeronRenderTarget* target, int 
 	}
 	float x[3];
 	mb_cross(along, z, x);
-
-	if (!s_list) {
-		s_list = AeronDrawList_Create(0);
-		if (!s_list) {
-			return 0;
-		}
-	}
-	AeronDrawList_Begin(s_list, target, width, height, AERON_DRAWLIST2D_CLEAR, NULL);
-	/* Premultiplied: a soft cyan glow and a bright core, strongest at the
-	 * screen end. */
-	const float glow_top[4] = { 0.10f * 0.45f, 0.65f * 0.45f, 1.0f * 0.45f, 0.45f };
-	const float glow_bottom[4] = { 0.10f * 0.12f, 0.65f * 0.12f, 1.0f * 0.12f, 0.12f };
-	const float core_top[4] = { 0.85f, 0.97f, 1.0f, 1.0f };
-	const float core_bottom[4] = { 0.85f * 0.35f, 0.97f * 0.35f, 0.35f, 0.35f };
-	mb_strip(4.0f, MB_TEX_W - 8.0f, 20.0f, 16.0f, glow_top, glow_bottom, height);
-	mb_strip(MB_TEX_W * 0.5f - 6.0f, 12.0f, 6.0f, 3.0f, core_top, core_bottom, height);
-	AeronDrawList_Render(s_list, cmd);
-
 	memset(out, 0, sizeof *out);
-	out->rect[0] = 0;
+	out->rect[0] = faint ? MB_TEX_W : 0;
 	out->rect[1] = 0;
 	out->rect[2] = MB_TEX_W;
 	out->rect[3] = height;
 	memcpy(out->position, mid, sizeof mid);
 	mb_basis_quat(x, along, z, out->orientation);
-	out->size[0] = MB_WIDTH_M;
+	out->size[0] = faint ? MB_WIDTH_M * 0.75f : MB_WIDTH_M;
 	out->size[1] = length;
 	return 1;
+}
+
+int XwaVrMenuBeam_Frame(AeronCommandBuffer* cmd, AeronRenderTarget* target, int width, int height,
+						const AeronXrView views[2], AeronXrPanel* out) {
+	float hit[3], start[3];
+	if (!cmd || !target || !views || !out || !Aeron_XrPointerHit(hit)) {
+		return 0;
+	}
+	/* From the glove's fingertip, else from the controller. */
+	int pointing = 1;
+	if (!XwaVrGloves_IndexTip(1, start, &pointing)) {
+		AeronXrHand hand;
+		if (!Aeron_XrGetHand(1, &hand)) {
+			return 0;
+		}
+		memcpy(start, hand.position, sizeof start);
+	}
+	return XwaVrBeam_Pose(start, hit, views, 0, height, out) && XwaVrBeam_DrawStrips(cmd, target, width, height);
 }
 
 void XwaVrMenuBeam_Shutdown(void) {

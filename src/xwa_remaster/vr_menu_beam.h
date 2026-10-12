@@ -14,11 +14,18 @@
 extern "C" {
 #endif
 
-/* Draws the beam into `target` (the stereo frame's console target, free in
- * menus) and fills `out` with its quad. Returns 1 when the beam is shown;
- * commit it with Aeron_XrStereoCommitConsole. */
+/* Draws the beam strips into `target` (the stereo frame's beam target)
+ * and fills `out` with the beam's quad. Returns 1 when the beam is shown;
+ * commit it with Aeron_XrStereoCommitBeams. */
 int XwaVrMenuBeam_Frame(AeronCommandBuffer* cmd, AeronRenderTarget* target, int width, int height,
 						const AeronXrView views[2], AeronXrPanel* out);
+
+/* Shared beam pieces: the strips (bright and faint) drawn into a beam
+ * target (at least 96 px wide), and a beam's quad from `start` to `end`
+ * (LOCAL space) facing the eyes. */
+int XwaVrBeam_DrawStrips(AeronCommandBuffer* cmd, AeronRenderTarget* target, int width, int height);
+int XwaVrBeam_Pose(const float start[3], const float end[3], const AeronXrView views[2], int faint, int height,
+				   AeronXrPanel* out);
 
 void XwaVrMenuBeam_Shutdown(void);
 

@@ -3913,7 +3913,8 @@ static int fl_xr_output_eye(AeronCommandBuffer* cmd, AeronRenderTarget* target, 
 	return 1;
 }
 
-static int fl_xr_output_hud(AeronCommandBuffer* cmd, AeronRenderTarget* target, int parts) {
+/* overlay: 0 none, 1 the head HUD's panel outlines, 2 the aux (CMD) ones. */
+static int fl_xr_output_hud(AeronCommandBuffer* cmd, AeronRenderTarget* target, int parts, int overlay) {
 	AeronRenderPass* pass = Aeron_BeginRenderPass(&(AeronRenderPassDesc) {
 		.color_target = target,
 		.clear_color = 1,
@@ -3928,6 +3929,9 @@ static int fl_xr_output_hud(AeronCommandBuffer* cmd, AeronRenderTarget* target, 
 	Aeron_SetViewport(pass, &full);
 	Aeron_SetScissor(pass, &full);
 	fl_draw_hud_parts(cmd, pass, target, s.rt_w, s.rt_h, parts);
+	if (overlay && !s.suppress_hud) {
+		XwaVrCockpitHud_RenderOverlay(cmd, pass, target, overlay == 2);
+	}
 	Aeron_EndRenderPass(pass);
 	return 1;
 }
@@ -4515,10 +4519,13 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	 * is a whole simulation-snapshot displacement, so normalize it to
 	 * XWA's original 32 ms logical frame before applying the shutter
 	 * fraction. This preserves the calibrated step-8 appearance. */
+	/* VR: no screen-space AO unless XWA_XR_SSAO=1 — it darkens the cockpit
+	 * around the gloves like a shadow (and costs per eye). */
+	const int ssao_quality = stereo && fl_xr_env("XWA_XR_SSAO", 0.0f) < 0.5f ? 0 : s.ssao.ssao_quality;
 	const int mb_allow = !paused || s.mb_pause_keep_blur;
 	const float mb_shutter = mb_allow ? fl_mb_logical_frame_shutter() : 0.0f;
 	AeronScene_SetPost(s.scene, &(AeronScenePostDesc) {
-									.ssao_quality = s.ssao.ssao_quality,
+									.ssao_quality = ssao_quality,
 									.ssao_intensity = s.ssao.ssao_intensity,
 									.ssao_power = s.ssao.ssao_power,
 									.ssao_radius_view = s.ssao.ssao_radius_view,
@@ -4548,7 +4555,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		.rt_h = (float)render_h,
 		.direct = s.ssao.ssao_direct,
 	};
-	const int ao_on = s.ssao.ssao_quality > 0 && s.ssao.ssao_intensity > 0.0f;
+	const int ao_on = ssao_quality > 0 && s.ssao.ssao_intensity > 0.0f;
 
 	s.bolt_count = 0;
 	s.table_count = 0;
@@ -4901,7 +4908,9 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		if (cockpit) {
 			panel_count = s.suppress_hud ? 0
 										 : XwaVrCockpitHud_Build(s.rt_w, s.rt_h, fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f),
-																 cmd_split, panels, AERON_XR_MAX_PANELS);
+																 cmd_split, snap->cockpit.model_name, panels,
+																 AERON_XR_MAX_PANELS);
+			XwaVrCockpitHud_PrepareOverlay(cmd, s.rt_w, s.rt_h);
 			if (panel_count == 0 && !s.suppress_hud) {
 				/* Nothing recognised in this HUD (e.g. an unusual HUD mode):
 				 * show it as the helmet sheet rather than not at all. */
@@ -4918,9 +4927,9 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		const int cmd_aux = cmd_split && cockpit_active;
 		const int head_parts = split ? (cmd_aux ? FL_HUD_HEAD : FL_HUD_HEAD | FL_HUD_CMD) : FL_HUD_ALL;
 		if (fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format, s.present_bloom_tex) &&
-			fl_xr_output_hud(cmd, xr_frame.hud_target, head_parts) &&
-			(!cmd_aux || fl_xr_output_hud(cmd, xr_frame.hud_aux_target, FL_HUD_CMD)) &&
-			(!split || fl_xr_output_hud(cmd, xr_frame.hud_world_target, FL_HUD_WORLD))) {
+			fl_xr_output_hud(cmd, xr_frame.hud_target, head_parts, cockpit_active) &&
+			(!cmd_aux || fl_xr_output_hud(cmd, xr_frame.hud_aux_target, FL_HUD_CMD, 2)) &&
+			(!split || fl_xr_output_hud(cmd, xr_frame.hud_world_target, FL_HUD_WORLD, 0))) {
 			if (cockpit_active || (cockpit && s.suppress_hud)) {
 				fl_xr_hud_quad(&flight_view.camera, &hud_world, 0);
 				Aeron_XrStereoCommitPanels(&hud_world, panels, panel_count);
@@ -4944,6 +4953,22 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 				if (XwaVrConsole_CardFrame(cmd, xr_frame.card_target, xr_frame.card_width, xr_frame.card_height,
 										   xr_frame.views, &card)) {
 					Aeron_XrStereoCommitCard(&card);
+				}
+			}
+			/* Faint beams from the hands to where they point on the console. */
+			if (xr_frame.beam_target) {
+				AeronXrPanel beams[2];
+				int beam_count = 0;
+				for (int hand = 0; hand < 2; ++hand) {
+					float from[3], to[3];
+					if (XwaVrConsole_RayBeam(hand, from, to) &&
+						XwaVrBeam_Pose(from, to, xr_frame.views, 1, xr_frame.beam_height, &beams[beam_count])) {
+						beam_count++;
+					}
+				}
+				if (beam_count &&
+					XwaVrBeam_DrawStrips(cmd, xr_frame.beam_target, xr_frame.beam_width, xr_frame.beam_height)) {
+					Aeron_XrStereoCommitBeams(beams, beam_count);
 				}
 			}
 		}
@@ -5058,13 +5083,12 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd) {
 	s_xr_eye_gain = 1.0f;
 	if (ok) {
 		Aeron_XrStereoCommitBackdrop();
-		/* The pointer beam over the screen, in the console layer (unused in
-		 * menus). */
+		/* The pointer beam over the screen (beam layer). */
 		AeronXrPanel beam;
-		if (xr_frame.console_target &&
-			XwaVrMenuBeam_Frame(cmd, xr_frame.console_target, xr_frame.console_width, xr_frame.console_height,
+		if (xr_frame.beam_target &&
+			XwaVrMenuBeam_Frame(cmd, xr_frame.beam_target, xr_frame.beam_width, xr_frame.beam_height,
 								xr_frame.views, &beam)) {
-			Aeron_XrStereoCommitConsole(&beam);
+			Aeron_XrStereoCommitBeams(&beam, 1);
 		}
 	}
 	return ok;

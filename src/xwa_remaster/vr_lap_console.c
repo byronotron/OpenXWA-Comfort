@@ -27,8 +27,8 @@
 
 /* Look-at wake: awake when the gaze comes within WAKE degrees of the
  * console's centre, asleep again beyond SLEEP. */
-#define VC_WAKE_DEG 24.0f
-#define VC_SLEEP_DEG 32.0f
+#define VC_WAKE_DEG 32.0f
+#define VC_SLEEP_DEG 40.0f
 #define VC_SLEEP_ALPHA 0.22f
 
 /* Grab zones: the left and right ends of the console, GRAB_X metres to
@@ -105,6 +105,7 @@ typedef struct VcHand {
 	float cx, cy;    /* cursor in console pixels */
 	float depth;     /* poke: distance in front of the surface, metres */
 	int over_button; /* button under the cursor, -1 none */
+	float ray_start[3], ray_end[3]; /* LOCAL, while the ray is on the console */
 	int captured;
 } VcHand;
 
@@ -458,16 +459,7 @@ static void vc_layout(void) {
 			vc_row(x, 340.0f, w, 54.0f, 2, l, a, row);
 			row[0]->enabled = row[1]->enabled = st->has_shields;
 		}
-		{
-			static const char* const l[2] = { "PRESET 1", "PRESET 2" };
-			static const XwaVrConsoleAction a[2] = { XWA_VRC_PRESET_RECALL, XWA_VRC_PRESET_RECALL };
-			vc_row(x, 404.0f, w, 54.0f, 2, l, a, row);
-			for (int i = 0; i < 2; ++i) {
-				row[i]->arg = i;
-				row[i]->hold_action = XWA_VRC_PRESET_STORE;
-				row[i]->sub = "hold = store";
-			}
-		}
+		/* Rows 404..458: the energy flow gauge (vc_draw_energy). */
 	}
 
 	/* Targeting and weapons */
@@ -710,6 +702,10 @@ static void vc_update_hand(int hand, const AeronXrPanel* pose, const float ax[3]
 				if (rx >= 0.0f && rx < VC_W && ry >= 0.0f && ry < VC_H) {
 					ray_hit = 1;
 					h->cursor = 2;
+					for (int k = 0; k < 3; ++k) {
+						h->ray_start[k] = tip[k];
+						h->ray_end[k] = pose->position[k] + hit[k];
+					}
 					h->cx = rx;
 					h->cy = ry;
 				}
@@ -816,6 +812,21 @@ static void vc_update_grab(VcPlace* pl, const VcPlace* other, const AeronXrPanel
 	}
 }
 
+void XwaVrConsole_CaptureGrip(int hand) {
+	if (hand >= 0 && hand < 2) {
+		s_vc.grip_capture[hand] = 1;
+	}
+}
+
+int XwaVrConsole_RayBeam(int hand, float start[3], float end[3]) {
+	if (hand < 0 || hand > 1 || !s_vc.drawn || !s_vc.awake || s_vc.hands[hand].cursor != 2) {
+		return 0;
+	}
+	memcpy(start, s_vc.hands[hand].ray_start, sizeof s_vc.hands[hand].ray_start);
+	memcpy(end, s_vc.hands[hand].ray_end, sizeof s_vc.hands[hand].ray_end);
+	return 1;
+}
+
 int XwaVrConsole_TakePlacement(char* out, int size) {
 	if (!s_vc.placement_dirty || !out || size <= 0) {
 		return 0;
@@ -896,13 +907,13 @@ static void vc_draw_button(int i) {
 		vc_pma(border, VC_AMBER, 0.85f);
 	} else {
 		const float on = b->lit ? 0.30f : b->level ? 0.16f : 0.08f;
-		vc_pma(fill, VC_CYAN, on + 0.10f * hover + 0.25f * (pressed || flash));
-		vc_pma(border, VC_CYAN, b->lit ? 1.0f : 0.62f + 0.3f * hover);
+		vc_pma(fill, VC_CYAN, on + 0.22f * hover + 0.25f * (pressed || flash));
+		vc_pma(border, hover ? 1.0f : 0.498f, hover ? 1.0f : 0.910f, 1.0f, b->lit || hover ? 1.0f : 0.62f);
 	}
 	if (b->enabled && (b->lit || hover || pressed)) {
 		float glow[4];
 		const float transparent[4] = { 0, 0, 0, 0 };
-		vc_pma(glow, VC_CYAN, b->lit ? 0.45f : 0.3f);
+		vc_pma(glow, VC_CYAN, b->lit ? 0.45f : hover ? 0.55f : 0.3f);
 		vc_rrect(b->x - 6.0f, b->y - 6.0f, b->w + 12.0f, b->h + 12.0f, 12.0f, 6.0f, 10.0f, transparent, glow);
 	}
 	vc_rrect(b->x, b->y, b->w, b->h, 7.0f, 2.0f, 1.0f, fill, border);
@@ -993,7 +1004,8 @@ static void vc_cut_capsule(const XwaVrGloveCapsule* cap) {
 		return;
 	}
 	const float px_per_m = s_vc.cur_w_px / s_vc.cur_w_m;
-	const float r = cap->radius * 0.5f * (sa + sb) * px_per_m;
+	/* A little inside the glove's outline, so no gap shows around it. */
+	const float r = 0.8f * cap->radius * 0.5f * (sa + sb) * px_per_m;
 	/* Extend by the radius at both ends so the caps are covered. */
 	float dx = x1 - x0, dy = y1 - y0;
 	const float len = sqrtf(dx * dx + dy * dy);
@@ -1045,6 +1057,67 @@ static void vc_cut_gloves(void) {
 	}
 }
 
+/* The energy distribution the HUD shows beside the fore radar (laser and
+ * shield pips) and the aft radar (beam pips, reserve): one segmented
+ * gauge in the space under the energy controls. */
+static void vc_draw_energy(float x, float y, float w, float h) {
+	const XwaVrConsoleState* st = &s_vc.state;
+	const int lasers = st->laser_level;
+	const int shields = st->has_shields ? st->shield_level : 0;
+	const int beam = st->has_beam ? st->beam_level : 0;
+	/* The HUD's reserve: 8 units, 12 with a beam. */
+	int reserve = 8 - lasers;
+	if (st->has_beam) {
+		if (st->has_shields) {
+			reserve += 2 - shields;
+		}
+		reserve += 2 - beam;
+	} else {
+		reserve -= shields;
+	}
+	if (reserve < 0) {
+		reserve = 0;
+	}
+	const int total = lasers + shields + beam + reserve;
+	vc_text(x, y, "ENERGY FLOW", 18.0f, 0, 0.62f, 0.85f, 0.92f, 0.95f);
+	if (total <= 0) {
+		return;
+	}
+	const float bar_y = y + 22.0f, bar_h = 16.0f, gap = 3.0f;
+	const float cell = (w - gap * (float)(total - 1)) / (float)total;
+	static const float colors[4][3] = {
+		{ 1.0f, 0.36f, 0.25f }, /* lasers */
+		{ 1.0f, 0.86f, 0.25f }, /* shields */
+		{ 0.85f, 0.35f, 1.0f }, /* beam */
+		{ 0.85f, 0.92f, 0.95f }, /* reserve */
+	};
+	const int counts[4] = { lasers, shields, beam, reserve };
+	float cx = x;
+	for (int g = 0; g < 4; ++g) {
+		for (int i = 0; i < counts[g]; ++i) {
+			float fill[4], rim[4];
+			vc_pma(fill, colors[g][0], colors[g][1], colors[g][2], g == 3 ? 0.18f : 0.55f);
+			vc_pma(rim, colors[g][0], colors[g][1], colors[g][2], 0.95f);
+			vc_rrect(cx, bar_y, cell, bar_h, 3.0f, 1.5f, 1.0f, fill, rim);
+			cx += cell + gap;
+		}
+	}
+	/* Legend under the gauge. */
+	char text[96];
+	snprintf(text, sizeof text, "LASERS %d", lasers);
+	vc_text(x, y + h - 14.0f, text, 15.0f, 0, colors[0][0], colors[0][1], colors[0][2], 0.95f);
+	if (st->has_shields) {
+		snprintf(text, sizeof text, "SHIELDS %d", shields);
+		vc_text(x + w * 0.27f, y + h - 14.0f, text, 15.0f, 0, colors[1][0], colors[1][1], colors[1][2], 0.95f);
+	}
+	if (st->has_beam) {
+		snprintf(text, sizeof text, "BEAM %d", beam);
+		vc_text(x + w * 0.56f, y + h - 14.0f, text, 15.0f, 0, colors[2][0], colors[2][1], colors[2][2], 0.95f);
+	}
+	snprintf(text, sizeof text, "RESERVE %d", reserve);
+	vc_text(x + w, y + h - 14.0f, text, 15.0f, 2, colors[3][0], colors[3][1], colors[3][2], 0.95f);
+}
+
 static void vc_draw(void) {
 	const float transparent[4] = { 0, 0, 0, 0 };
 	float fill[4], border[4], glow[4];
@@ -1055,6 +1128,7 @@ static void vc_draw(void) {
 	vc_pma(border, VC_CYAN, 0.6f);
 	vc_rrect(10.0f, 10.0f, VC_W - 20.0f, VC_H - 20.0f, 26.0f, 2.0f, 1.0f, fill, border);
 	vc_draw_handles(&s_vc.lap);
+	vc_draw_energy(34.0f, 404.0f, 470.0f, 60.0f);
 	/* Scan lines, fixed to the panel. */
 	for (float y = 14.0f; y < VC_H - 14.0f; y += 6.0f) {
 		float line[4];
@@ -1098,11 +1172,7 @@ static void vc_draw(void) {
 			continue;
 		}
 		if (hand->cursor == 1) {
-			const float r = 7.0f + fmaxf(0.0f, hand->depth) * 260.0f;
-			float c[4];
-			vc_pma(c, 1.0f, 1.0f, 1.0f, hand->poke_down ? 1.0f : 0.85f);
-			vc_rrect(hand->cx - r, hand->cy - r, 2.0f * r, 2.0f * r, r, hand->poke_down ? r : 3.0f, 1.5f,
-					 transparent, c);
+			/* Touch: no pointer, the button under the finger lights up. */
 		} else {
 			float c[4], ring[4];
 			vc_pma(c, 1.0f, 1.0f, 1.0f, 0.95f);

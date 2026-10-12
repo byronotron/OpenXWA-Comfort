@@ -241,6 +241,30 @@ static void vr_persist(void) {
 	memset(g_vr.dirty, 0, sizeof g_vr.dirty);
 }
 
+/* Clears every cockpit's hand-placed HUD layout (XWA_XR_HUD_POSE_*). */
+extern char** environ;
+static void vr_reset_hud_layouts(void) {
+	static const char prefix[] = "XWA_XR_HUD_POSE_";
+	char keys[16][96];
+	const char* key_ptrs[16];
+	const char* empty[16];
+	int n = 0;
+	for (char** e = environ; e && *e && n < 16; ++e) {
+		const char* eq = strchr(*e, '=');
+		if (eq && strncmp(*e, prefix, sizeof prefix - 1) == 0 && (size_t)(eq - *e) < sizeof keys[0]) {
+			snprintf(keys[n], sizeof keys[n], "%.*s", (int)(eq - *e), *e);
+			n++;
+		}
+	}
+	for (int i = 0; i < n; ++i) {
+		SDL_setenv_unsafe(keys[i], "", 1);
+		key_ptrs[i] = keys[i];
+		empty[i] = "";
+	}
+	vr_write_cfg(key_ptrs, empty, n);
+	Aeron_LogInfo("xwa.config", "VR HUD panels back at their default spots (%d cockpit layouts cleared)", n);
+}
+
 int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 	XwaModernOptionsMenu menu;
 	int back;
@@ -249,7 +273,7 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 		return 0;
 	}
 	vr_load();
-	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 140, cursor_row, VR_COUNT + 2);
+	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 130, cursor_row, VR_COUNT + 3);
 	XwaModernOptionsMenu_DrawTitle(&menu, "OpenXWA VR Options");
 
 	for (int i = 0; i < VR_COUNT; i++) {
@@ -267,6 +291,9 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 		}
 	}
 
+	if (XwaModernOptionsMenu_DrawAction(&menu, "Reset HUD Panel Positions", 93, 0)) {
+		vr_reset_hud_layouts();
+	}
 	if (XwaModernOptionsMenu_DrawAction(&menu, "Reset Lap Console Position", 91, 0)) {
 		SDL_setenv_unsafe("XWA_XR_CONSOLE_POSE", "", 1);
 		XwaModernVrOptions_SaveValue("XWA_XR_CONSOLE_POSE", "");

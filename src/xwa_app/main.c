@@ -6,6 +6,7 @@
 #include "vr_keyboard.h"
 #include "window_icon.h"
 #include "xwa/config/game_config.h"
+#include "xwa_remaster/vr_cockpit_hud.h"
 #include "xwa_remaster/vr_lap_console.h"
 #include "xwa_runtime/config/modern_vr_options_screen.h"
 #include "xwa_remaster/xwa_remaster.h"
@@ -318,7 +319,7 @@ static int resolve_game_data(const XwaLaunchOptions* launch, const XwaHostConfig
 static void android_load_settings(void) {
 	const char* external = SDL_GetAndroidExternalStoragePath();
 	char path[1024];
-	char line[512];
+	char line[2048]; /* HUD layouts are long lines */
 	FILE* f;
 	if (!external || !external[0]) {
 		return;
@@ -362,6 +363,10 @@ static void android_load_settings(void) {
 				  "#XWA_XR_CONSOLE_POSE=\n"
 				  "# Controls reference card on your right at mission start (0 = off):\n"
 				  "#XWA_XR_BUTTON_CARD=1\n"
+				  "# HUD panels you move with the grip are kept per cockpit as\n"
+				  "# XWA_XR_HUD_POSE_<COCKPIT>=... (Reset in the VR options).\n"
+				  "# 1 = screen-space ambient occlusion in VR (darkens around the hands):\n"
+				  "#XWA_XR_SSAO=0\n"
 				  "# Pilot gloves on the controllers (0 = off); move them in the\n"
 				  "# controller's frame, metres x,y,z (+x right, +y up, +z back):\n"
 				  "#XWA_XR_GLOVES=1\n"
@@ -737,6 +742,12 @@ int main(int argc, char** argv) {
 				char placement[160];
 				if (XwaVrConsole_TakePlacement(placement, (int)sizeof placement)) {
 					XwaModernVrOptions_SaveValue("XWA_XR_CONSOLE_POSE", placement);
+				}
+				/* A HUD panel moved: this cockpit's layout. */
+				char layout_key[96];
+				char layout[1024];
+				if (XwaVrCockpitHud_TakeLayout(layout_key, (int)sizeof layout_key, layout, (int)sizeof layout)) {
+					XwaModernVrOptions_SaveValue(layout_key, layout);
 				}
 			}
 			if (Aeron_QuitRequested() || XwaPort_ShouldQuit()) {
