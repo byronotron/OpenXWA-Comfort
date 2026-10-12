@@ -40,6 +40,9 @@ AeronSceneMesh* XwaRemasterShip_MeshForName(const char* name);
  * in-memory OPT conversion, never for an authored GLB. */
 AeronSceneMesh* XwaRemasterShip_MeshForNameWithSource(const char* name, int* out_runtime_opt);
 float XwaRemasterShip_OptProjectileEmissiveStrength(void);
+/* Builds the game's OPT `name` (e.g. "Hangar.opt" or "hangar") as a model
+ * with the configured OPT smoothing; free with Aeron_FlightModelFree. */
+int XwaRemasterShip_BuildOptModel(const char* name, AeronFlightModel* out);
 void XwaRemasterShip_Shutdown(void);
 void XwaRemasterShip_Configure(float opt_smooth_angle_degrees, float opt_emissive_strength,
 							   float opt_projectile_emissive_strength, float engine_emissive_strength,

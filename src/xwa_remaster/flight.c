@@ -20,6 +20,7 @@
 #include "xwa_remaster/hud.h"
 #include "xwa_remaster/hud_fixed.h"
 #include "xwa_remaster/vr_cockpit_hud.h"
+#include "xwa_remaster/vr_env.h"
 #include "xwa_remaster/vr_gloves.h"
 #include "xwa_remaster/vr_lap_console.h"
 #include "xwa_remaster/hyperspace.h"
@@ -4943,7 +4944,115 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	return out;
 }
 
+/* VR environment around the 2D screens: the carrier hangar in stereo as
+ * the backdrop of the virtual screen (see vr_env.h). Reuses the flight
+ * scene, which is idle outside flight. */
+int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd) {
+	AeronXrStereoFrame xr_frame;
+	if (!cmd || !XwaVrEnv_Enabled() || !Aeron_XrStereoBegin(&xr_frame)) {
+		XwaVrGloves_Idle();
+		return 0;
+	}
+	if (!fl_ensure(xr_frame.width, xr_frame.height) || !XwaVrEnv_Prepare(cmd)) {
+		XwaVrGloves_Idle();
+		return 0;
+	}
+	/* Seated viewer in the hangar; the head pose comes on top. */
+	AeronSceneCamera base;
+	memset(&base, 0, sizeof base);
+	float rows[9];
+	XwaVrEnv_View(base.pos, rows);
+	fl_rows_to_quat(rows, base.ori);
+	base.h_half_rad = 0.8f;
+	base.v_half_rad = 0.8f;
+	base.near_z = FL_NEAR_Z;
+	AeronSceneCamera eyes[2];
+	for (int e = 0; e < 2; e++) {
+		fl_xr_eye_camera(&base, &xr_frame.views[e], &eyes[e]);
+	}
+	memcpy(s.crows, rows, sizeof s.crows);
+	memset(s.origin_world, 0, sizeof s.origin_world);
+	memcpy(s.camera_local, base.pos, sizeof s.camera_local);
+
+	AeronScene_SetPassHook(s.scene, AERON_SCENE_HOOK_BEFORE_OPAQUE, NULL, NULL);
+	s.before_opaque_mode = FL_BEFORE_OPAQUE_NONE;
+	fl_set_temporal(XwaTime_GetElapsedUs(), 0);
+	if (!AeronScene_Begin(s.scene, &eyes[0])) {
+		return 0;
+	}
+	AeronScene_SetPost(s.scene, &(AeronScenePostDesc) { 0 });
+	AeronScene_SetMotionContext(s.scene, NULL, 0);
+	s.bb_count = 0;
+
+	/* Stars through the open bay. */
+	if (s.sky_mode == 1 && s.sky_stars) {
+		static const float world_to_cube[9] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, -1.0f, 0.0f };
+		const XwaRemasterSkyStarsParams stars = {
+			.exposure = s.sky_exposure,
+			.brightness = s.star_brightness,
+			.density = s.star_density,
+			.grid_n = s.star_grid,
+			.core_radius_px = s.star_core_px * fl_xr_env("XWA_XR_STAR_MIN_SCALE", 2.5f),
+			.feather_px = s.star_feather * fl_xr_env("XWA_XR_STAR_MIN_SCALE", 2.5f),
+			.pixel_pitch_px = fl_xr_env("XWA_XR_STAR_MIN_SCALE", 2.5f),
+			.flare_strength = s.star_flare,
+			.game_time_ms = 0,
+		};
+		fl_submit_vr_stars(&stars, eyes, world_to_cube);
+	}
+
+	XwaVrEnv_Submit(s.scene);
+	XwaVrGloves_Submit(s.scene, cmd, rows, base.pos,
+					   AERON_OPT_UNITS_PER_METER * fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f));
+
+	/* The configured hangar relight: key light + ambient cube. */
+	XwaDirLight key;
+	memset(&key, 0, sizeof key);
+	memcpy(key.world_dir, s.hangar_lighting.direction, sizeof key.world_dir);
+	key.intensity = s.hangar_lighting.intensity;
+	memcpy(key.color, s.hangar_lighting.color, sizeof key.color);
+	if (key.intensity <= 0.0f || (key.world_dir[0] == 0.0f && key.world_dir[1] == 0.0f && key.world_dir[2] == 0.0f)) {
+		key.world_dir[0] = 0.25f;
+		key.world_dir[1] = -0.35f;
+		key.world_dir[2] = 0.9f;
+		key.intensity = 1.0f;
+		key.color[0] = key.color[1] = key.color[2] = 1.0f;
+	}
+	{
+		const float l = sqrtf(key.world_dir[0] * key.world_dir[0] + key.world_dir[1] * key.world_dir[1] +
+							  key.world_dir[2] * key.world_dir[2]);
+		for (int a = 0; a < 3; a++) {
+			key.world_dir[a] /= l;
+		}
+	}
+	XwaShipAmbientCube ambient;
+	const float sides = s.hangar_lighting.ambient_sides > 0.0f ? s.hangar_lighting.ambient_sides : 0.25f;
+	const float ceiling = s.hangar_lighting.ambient_ceiling > 0.0f ? s.hangar_lighting.ambient_ceiling : 0.3f;
+	const float floor = s.hangar_lighting.ambient_floor > 0.0f ? s.hangar_lighting.ambient_floor : 0.15f;
+	for (int c = 0; c < 3; c++) {
+		ambient.pos_x[c] = ambient.neg_x[c] = ambient.pos_y[c] = ambient.neg_y[c] = sides;
+		ambient.pos_z[c] = ceiling;
+		ambient.neg_z[c] = floor;
+	}
+	if (!fl_configure_clustered_lights(s.scene)) {
+		return 0;
+	}
+	XwaRemasterShip_SetPbrEnv(s.scene, &key, 1, NULL, s.camera_local, NULL, NULL, &ambient, NULL);
+
+	int ok = AeronScene_Render(s.scene, cmd) &&
+			 fl_xr_output_eye(cmd, xr_frame.eye_targets[0], xr_frame.format, NULL) &&
+			 AeronScene_SetCamera(s.scene, &eyes[1]) && AeronScene_Render(s.scene, cmd) &&
+			 fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format, NULL);
+	if (ok) {
+		Aeron_XrStereoCommitBackdrop();
+	}
+	return ok;
+}
+
+void XwaRemasterFlight_ReleaseVrEnvironment(void) { XwaVrEnv_Release(); }
+
 void XwaRemasterFlight_Shutdown(void) {
+	XwaVrEnv_Release();
 	if (s_xr_present) {
 		AeronScenePresentChain_Destroy(s_xr_present);
 		s_xr_present = NULL;

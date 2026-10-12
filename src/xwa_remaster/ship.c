@@ -319,6 +319,21 @@ AeronSceneMesh* XwaRemasterShip_MeshForName(const char* name) {
 
 float XwaRemasterShip_OptProjectileEmissiveStrength(void) { return s_opt_projectile_emissive_strength; }
 
+int XwaRemasterShip_BuildOptModel(const char* name, AeronFlightModel* out) {
+	char key[XWA_SNAP_OPT_NAME_MAX];
+	char error[256];
+	ship_mesh_key(name, key);
+	if (!key[0] || !out) {
+		return 0;
+	}
+	if (!XwaRemasterOptMesh_Build(Aeron_GetVfs(), key, s_opt_smooth_angle_degrees, s_opt_emissive_strength, out,
+								  error, sizeof error)) {
+		Aeron_LogWarn("xwa.remaster", "OPT '%s' unavailable: %s", key, error);
+		return 0;
+	}
+	return 1;
+}
+
 void XwaRemasterShip_Shutdown(void) {
 	ship_pending_discard();
 	for (uint32_t i = 0; i < s_mesh_count; i++) {

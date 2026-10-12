@@ -84,6 +84,7 @@ static struct {
 	int force_scene_render;
 	int flight_render_suspended;
 	int hyperspace_preview_last;
+	int vr_env_used; /* the VR environment's meshes may be loaded */
 	AeronSampleCount msaa_samples;
 } g;
 
@@ -555,6 +556,24 @@ void XwaRemaster_Frame(int32_t delta_us) {
 	/* VR: the right controller is a mouse pointer on the virtual screen in
 	 * menus/briefings; in flight its trigger fires instead. */
 	Aeron_XrSetPointerEnabled(snap->scene_kind != XWA_SCENE_FLIGHT);
+	/* VR: the 2D screens float in the carrier hangar (every headset frame,
+	 * head tracked); flight frees it again for its own hangar. */
+	if (snap->scene_kind != XWA_SCENE_FLIGHT) {
+		AeronCommandBuffer* env_cmd = Aeron_XrIsPresenting() ? Aeron_AcquireCommandBuffer() : NULL;
+		if (env_cmd) {
+			Aeron_GpuDebugPush(env_cmd, "OpenXWA VR environment");
+			(void)XwaRemasterFlight_RenderVrEnvironment(env_cmd);
+			g.vr_env_used = 1;
+			Aeron_GpuDebugPop(env_cmd);
+			if (!Aeron_SubmitCommandBuffer(env_cmd)) {
+				XwaRemaster_FatalGpu("VR environment submission");
+				return;
+			}
+		}
+	} else if (g.vr_env_used) {
+		XwaRemasterFlight_ReleaseVrEnvironment();
+		g.vr_env_used = 0;
+	}
 	const int hyperspace_preview = XwaRemasterFlight_HyperspaceTunnelPreviewEnabled();
 	const int hyperspace_preview_visible = hyperspace_preview && snap->scene_kind == XWA_SCENE_FLIGHT &&
 										   snap->flight_camera_valid && !snap->flight_camera.map_mode &&

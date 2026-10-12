@@ -233,6 +233,14 @@ void XwaRemasterFlight_CommitProcessAssets(void);
  * renders in stereo this host frame (pass that size to Render). */
 int XwaRemasterFlight_StereoSize(const XwaSnapshot* snap, int* width, int* height);
 
+/* VR: renders the hangar environment around the 2D screens into both eyes
+ * and commits it as the virtual screen's backdrop. Returns 0 (nothing
+ * committed) when not presenting in stereo or the environment is off or
+ * not loaded yet. `cmd` must have no open pass. */
+int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd);
+/* Frees the environment's meshes (on entering flight). */
+void XwaRemasterFlight_ReleaseVrEnvironment(void);
+
 /* Returns whether the current full-frame output can use Aeron's direct
  * swapchain render layer at the requested dimensions. */
 int XwaRemasterFlight_CanDirectPresent(int target_w, int target_h);
