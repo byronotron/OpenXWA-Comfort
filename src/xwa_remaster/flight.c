@@ -21,6 +21,7 @@
 #include "xwa_remaster/hud_fixed.h"
 #include "xwa_remaster/vr_cockpit_hud.h"
 #include "xwa_remaster/vr_env.h"
+#include "xwa_remaster/vr_menu_beam.h"
 #include "xwa_remaster/vr_gloves.h"
 #include "xwa_remaster/vr_lap_console.h"
 #include "xwa_remaster/hyperspace.h"
@@ -5055,6 +5056,14 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd) {
 	s_xr_eye_gain = 1.0f;
 	if (ok) {
 		Aeron_XrStereoCommitBackdrop();
+		/* The pointer beam over the screen, in the console layer (unused in
+		 * menus). */
+		AeronXrPanel beam;
+		if (xr_frame.console_target &&
+			XwaVrMenuBeam_Frame(cmd, xr_frame.console_target, xr_frame.console_width, xr_frame.console_height,
+								xr_frame.views, &beam)) {
+			Aeron_XrStereoCommitConsole(&beam);
+		}
 	}
 	return ok;
 }
@@ -5063,6 +5072,7 @@ void XwaRemasterFlight_ReleaseVrEnvironment(void) { XwaVrEnv_Release(); }
 
 void XwaRemasterFlight_Shutdown(void) {
 	XwaVrEnv_Release();
+	XwaVrMenuBeam_Shutdown();
 	if (s_xr_present) {
 		AeronScenePresentChain_Destroy(s_xr_present);
 		s_xr_present = NULL;

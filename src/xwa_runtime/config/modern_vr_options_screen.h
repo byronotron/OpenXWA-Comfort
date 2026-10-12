@@ -18,6 +18,9 @@ int XwaModernVrOptions_Available(void);
  * return to the parent video menu. */
 int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row);
 
+/* Writes KEY=value into openxwa-quest.cfg (Android; elsewhere a no-op). */
+void XwaModernVrOptions_SaveValue(const char* key, const char* value);
+
 #ifdef __cplusplus
 }
 #endif

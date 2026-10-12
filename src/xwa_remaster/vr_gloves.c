@@ -247,6 +247,13 @@ static struct {
 	int logged;
 } s_gl;
 
+/* XWA_XR_GLOVE_SCALE: glove size (1 = the model's own, a large hand). */
+static float gl_scale(void) {
+	const char* env = getenv("XWA_XR_GLOVE_SCALE");
+	const float v = env && env[0] ? (float)atof(env) : 0.85f;
+	return v > 0.3f && v < 2.0f ? v : 0.85f;
+}
+
 static int gl_enabled(void) {
 	const char* env = getenv("XWA_XR_GLOVES");
 	return !(env && env[0] == '0');
@@ -448,12 +455,16 @@ static void gl_pose(const GlHand* h, float (*rot)[4]) {
 	for (int j = 0; j < XWA_VR_GLOVE_JOINTS; ++j) {
 		memcpy(rot[j], m->joints[j].r, sizeof rot[j]);
 	}
-	static const float bend[3] = { 1.30f, 1.65f, 1.05f }; /* proximal, intermediate, distal at full curl */
+	/* Proximal, intermediate, distal bend at full curl. The index wraps a
+	 * trigger, not a fist: less. */
+	static const float bend[3] = { 1.30f, 1.65f, 1.05f };
+	static const float index_bend[3] = { 0.85f, 0.95f, 0.55f };
 	for (int f = 0; f < GL_FINGERS; ++f) {
 		for (int k = 0; k < 3; ++k) {
 			const int j = m->finger[f][1 + k];
-			/* Right fingers curl about +Z, left about -Z. */
-			const float angle = -m->rest_curl[j] + m->side * h->curl[f] * bend[k];
+			const float b = f == 0 ? index_bend[k] : bend[k];
+			/* Right fingers curl about +Z, left about -Z; curl 0 is straight. */
+			const float angle = -m->rest_curl[j] + m->side * h->curl[f] * b;
 			float q[4];
 			q_axis(0.0f, 0.0f, 1.0f, angle, q);
 			q_mul(m->joints[j].r, q, rot[j]);
@@ -523,7 +534,7 @@ static float gl_ease(float v, float goal, float dt) {
 /* A transform from hand space (the glove's model space) to LOCAL space and
  * on to the scene, as row-major 4x4 for an instance. */
 typedef struct GlToScene {
-	M3 hand_rot;      /* aim orientation */
+	M3 hand_rot;      /* aim orientation, times the glove scale */
 	float hand_pos[3]; /* aim position + glove offset, LOCAL */
 	M3 rt_c;          /* world <- ship eye <- LOCAL axes */
 	float cam[3];
@@ -565,7 +576,7 @@ static void gl_instance(AeronScene3D* scene, const AeronSceneMesh* mesh, const G
 	memcpy(inst.prev_transform, inst.transform, sizeof inst.transform);
 	inst.zero_velocity = 1;
 	inst.no_local_lights = 1;
-	inst.shadow_flags = AERON_SCENE_INSTANCE_NO_CAST_SHADOW;
+	inst.shadow_flags = AERON_SCENE_INSTANCE_NO_CAST_SHADOW | AERON_SCENE_INSTANCE_NO_RECEIVE_SHADOW;
 	AeronScene_AddMeshInstance(scene, &inst);
 }
 
@@ -602,11 +613,11 @@ void XwaVrGloves_Submit(AeronScene3D* scene, AeronCommandBuffer* cmd, const floa
 		 * that tightens with the pull; lifted -> pointing. */
 		float index_goal;
 		if (xh.index_touch == 1) {
-			index_goal = 0.40f + 0.5f * xh.trigger;
+			index_goal = 0.35f + 0.6f * xh.trigger;
 		} else if (xh.index_touch == 0) {
-			index_goal = 0.0f;
+			index_goal = 0.0f; /* pointing: straight */
 		} else {
-			index_goal = 0.25f + 0.65f * xh.trigger;
+			index_goal = 0.9f * xh.trigger;
 		}
 		const float grip_goal = 0.30f + 0.65f * xh.grip;
 		float thumb_goal = 0.0f;
@@ -627,15 +638,21 @@ void XwaVrGloves_Submit(AeronScene3D* scene, AeronCommandBuffer* cmd, const floa
 		AeronScene_MeshUpdateVertices(cmd, h->mesh, h->source.vertices, h->source.vertex_count);
 
 		/* Hand space -> LOCAL -> scene. */
+		/* Scaled about the controller: the hand keeps its grip on it. */
+		const float scale = gl_scale();
 		GlToScene x;
 		x.hand_rot = m3_from_quat(xh.orientation);
 		{
-			const float offset[3] = { 0.03f * m->side + extra[0] * m->side, -0.05f + extra[1], 0.15f + extra[2] };
+			const float offset[3] = { (0.03f * m->side + extra[0] * m->side) * scale, (-0.05f + extra[1]) * scale,
+									  (0.15f + extra[2]) * scale };
 			float o[3];
 			m3_apply(&x.hand_rot, offset, o);
 			for (int k = 0; k < 3; ++k) {
 				x.hand_pos[k] = xh.position[k] + o[k];
 			}
+		}
+		for (int k = 0; k < 9; ++k) {
+			x.hand_rot.m[k] *= scale;
 		}
 		for (int i = 0; i < 3; ++i) {
 			x.rt_c.m[i * 3 + 0] = crows[0 * 3 + i];
@@ -662,7 +679,7 @@ void XwaVrGloves_Submit(AeronScene3D* scene, AeronCommandBuffer* cmd, const floa
 				gl_local_point(&x, p, a);
 				m4_point(&h->global[m->finger[f][k + 1]], zero, p);
 				gl_local_point(&x, p, b);
-				gl_capsule(h, a, b, f == 3 ? 0.0095f : 0.0105f);
+				gl_capsule(h, a, b, (f == 3 ? 0.0085f : 0.0095f) * scale);
 			}
 		}
 		for (int k = 0; k < 3; ++k) {
@@ -671,7 +688,7 @@ void XwaVrGloves_Submit(AeronScene3D* scene, AeronCommandBuffer* cmd, const floa
 			gl_local_point(&x, p, a);
 			m4_point(&h->global[m->thumb[k + 1]], zero, p);
 			gl_local_point(&x, p, b);
-			gl_capsule(h, a, b, 0.012f);
+			gl_capsule(h, a, b, 0.011f * scale);
 		}
 		{
 			float a[3], b[3];
@@ -679,7 +696,7 @@ void XwaVrGloves_Submit(AeronScene3D* scene, AeronCommandBuffer* cmd, const floa
 			gl_local_point(&x, p, a);
 			m4_point(&h->global[m->finger[1][1]], zero, p);
 			gl_local_point(&x, p, b);
-			gl_capsule(h, a, b, 0.032f);
+			gl_capsule(h, a, b, 0.028f * scale);
 		}
 		h->shown = 1;
 	}

@@ -119,24 +119,20 @@ int XwaModernVrOptions_Available(void) {
 #endif
 }
 
-/* Writes the changed settings into openxwa-quest.cfg: an active KEY= line
- * is replaced, else the template's commented #KEY= line is activated, else
- * the line is appended. Other lines are kept as they are. */
-static void vr_persist(void) {
+/* Writes KEY=value lines into openxwa-quest.cfg: an active KEY= line is
+ * replaced, else the template's commented #KEY= line is activated, else the
+ * line is appended. Other lines are kept as they are. */
+static void vr_write_cfg(const char* const* keys, const char* const* values, int count) {
 #if defined(SDL_PLATFORM_ANDROID)
 	const char* external = SDL_GetAndroidExternalStoragePath();
 	char path[1024];
 	char* text = NULL;
 	size_t length = 0;
 	FILE* f;
-	int any = 0;
-	int has_active[VR_COUNT] = { 0 };
-	int written[VR_COUNT] = { 0 };
+	int has_active[16] = { 0 };
+	int written[16] = { 0 };
 
-	for (int i = 0; i < VR_COUNT; i++) {
-		any |= g_vr.dirty[i];
-	}
-	if (!any || !external || !external[0]) {
+	if (count <= 0 || count > 16 || !external || !external[0]) {
 		return;
 	}
 	snprintf(path, sizeof path, "%s/openxwa-quest.cfg", external);
@@ -156,8 +152,6 @@ static void vr_persist(void) {
 		fclose(f);
 	}
 
-	/* Lines as [start, end) ranges; a key matches "KEY=" after optional
-	 * whitespace and (for the commented form) one '#'. */
 	for (int pass = 0; pass < 2; pass++) {
 		FILE* out = NULL;
 		const char* p = text ? text : "";
@@ -182,9 +176,9 @@ static void vr_persist(void) {
 				commented = 1;
 				q++;
 			}
-			for (int i = 0; i < VR_COUNT; i++) {
-				const size_t n = strlen(k_settings[i].key);
-				if (g_vr.dirty[i] && strncmp(q, k_settings[i].key, n) == 0 && q[n] == '=') {
+			for (int i = 0; i < count; i++) {
+				const size_t n = strlen(keys[i]);
+				if (strncmp(q, keys[i], n) == 0 && q[n] == '=') {
 					match = i;
 					break;
 				}
@@ -194,8 +188,7 @@ static void vr_persist(void) {
 					has_active[match] = 1;
 				}
 			} else if (match >= 0 && !written[match] && (!commented || !has_active[match])) {
-				fprintf(out, "%s=%s\n", k_settings[match].key,
-						k_settings[match].values[g_vr.index[match]]);
+				fprintf(out, "%s=%s\n", keys[match], values[match]);
 				written[match] = 1;
 			} else if (match >= 0 && !commented) {
 				/* a later duplicate of a key already written: drop it */
@@ -208,17 +201,41 @@ static void vr_persist(void) {
 			p = next;
 		}
 		if (pass == 1) {
-			for (int i = 0; i < VR_COUNT; i++) {
-				if (g_vr.dirty[i] && !written[i]) {
-					fprintf(out, "%s=%s\n", k_settings[i].key, k_settings[i].values[g_vr.index[i]]);
+			for (int i = 0; i < count; i++) {
+				if (!written[i]) {
+					fprintf(out, "%s=%s\n", keys[i], values[i]);
 				}
 			}
 			fclose(out);
 		}
 	}
 	free(text);
-	Aeron_LogInfo("xwa.config", "VR options saved to %s", path);
+	Aeron_LogInfo("xwa.config", "VR settings saved to %s", path);
+#else
+	(void)keys;
+	(void)values;
+	(void)count;
 #endif
+}
+
+void XwaModernVrOptions_SaveValue(const char* key, const char* value) {
+	if (key && value) {
+		vr_write_cfg(&key, &value, 1);
+	}
+}
+
+static void vr_persist(void) {
+	const char* keys[VR_COUNT];
+	const char* values[VR_COUNT];
+	int n = 0;
+	for (int i = 0; i < VR_COUNT; i++) {
+		if (g_vr.dirty[i]) {
+			keys[n] = k_settings[i].key;
+			values[n] = k_settings[i].values[g_vr.index[i]];
+			n++;
+		}
+	}
+	vr_write_cfg(keys, values, n);
 	memset(g_vr.dirty, 0, sizeof g_vr.dirty);
 }
 
@@ -230,7 +247,7 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 		return 0;
 	}
 	vr_load();
-	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 150, cursor_row, VR_COUNT + 1);
+	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 140, cursor_row, VR_COUNT + 2);
 	XwaModernOptionsMenu_DrawTitle(&menu, "OpenXWA VR Options");
 
 	for (int i = 0; i < VR_COUNT; i++) {
@@ -248,6 +265,11 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 		}
 	}
 
+	if (XwaModernOptionsMenu_DrawAction(&menu, "Reset Lap Console Position", 91, 0)) {
+		SDL_setenv_unsafe("XWA_XR_CONSOLE_POSE", "", 1);
+		XwaModernVrOptions_SaveValue("XWA_XR_CONSOLE_POSE", "");
+		Aeron_LogInfo("xwa.config", "lap console back at its default spot");
+	}
 	back = XwaModernOptionsMenu_DrawAction(&menu, FrontendString_Get(STR_BACK), 87, 0);
 	back |= XwaModernOptionsMenu_TakeEscape(&menu);
 	if (!back) {

@@ -8,7 +8,8 @@
  * forward and wakes when they look down. Buttons are pressed by poking
  * them with the controller tip, or by pointing the controller at them and
  * pulling the trigger (the trigger does not fire while it points at the
- * console).
+ * console). Squeezing the grip at either end picks it up: it can be put
+ * anywhere in the cockpit, turned any way, and stays there.
  *
  * Per host frame: BeginFrame, SetState (game state), then the flight
  * renderer calls Frame while it renders in stereo, then EndFrame. Pressed
@@ -34,6 +35,10 @@ int XwaVrConsole_Frame(AeronCommandBuffer* cmd, AeronRenderTarget* target, int w
 
 /* Releases the trigger when the console was not shown this frame. */
 void XwaVrConsole_EndFrame(void);
+
+/* After the player moved the console by its handles (grip at either end):
+ * copies the new XWA_XR_CONSOLE_POSE value to `out` once, to be saved. */
+int XwaVrConsole_TakePlacement(char* out, int size);
 
 /* Pops a pressed console action. Returns 0 when none is queued. */
 int XwaVrConsole_PollAction(XwaVrConsoleAction* action, int* arg);

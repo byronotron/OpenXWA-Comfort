@@ -46,7 +46,7 @@ static const CkSpec k_spec[CK_COUNT] = {
 	/* The flight-group line sits low on the flat screen (above the
 	 * targeting computer): its own panel, so the two message areas don't
 	 * join into one huge panel. */
-	[CK_MESSAGES_LOW] = { "flight-group messages", 0.0f, -18.5f, 0.95f, 0.36f, 0.08f, 0.0036f },
+	[CK_MESSAGES_LOW] = { "flight-group messages", 0.0f, -18.5f, 0.95f, 0.36f, 0.08f, 0.0027f },
 	[CK_COUNTERS] = { "counters", 0.0f, -14.0f, 0.85f, 0.15f, 0.04f },
 	[CK_CHARGE] = { "charge", 0.0f, -17.0f, 0.85f, 0.15f, 0.03f },
 	[CK_CMD] = { "targeting computer", 0.0f, -30.0f, 0.62f, 0.20f, 0.16f },

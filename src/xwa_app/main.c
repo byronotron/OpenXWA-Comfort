@@ -7,6 +7,7 @@
 #include "window_icon.h"
 #include "xwa/config/game_config.h"
 #include "xwa_remaster/vr_lap_console.h"
+#include "xwa_runtime/config/modern_vr_options_screen.h"
 #include "xwa_remaster/xwa_remaster.h"
 #include "xwa_runtime/config/modern_video_options.h"
 #include "xwa_runtime/input/controller_mapping.h"
@@ -357,10 +358,14 @@ static void android_load_settings(void) {
 				  "#XWA_XR_CONSOLE=1\n"
 				  "#XWA_XR_CONSOLE_PITCH=-52\n"
 				  "#XWA_XR_CONSOLE_DISTANCE=0.52\n"
+				  "# Where you put it with the grip handles (Reset in the VR options):\n"
+				  "#XWA_XR_CONSOLE_POSE=\n"
 				  "# Pilot gloves on the controllers (0 = off); move them in the\n"
 				  "# controller's frame, metres x,y,z (+x right, +y up, +z back):\n"
 				  "#XWA_XR_GLOVES=1\n"
 				  "#XWA_XR_GLOVE_OFFSET=0,0,0\n"
+				  "# Glove size (1 = the model's own large hand):\n"
+				  "#XWA_XR_GLOVE_SCALE=0.85\n"
 				  "# Menus, briefings and films float in the carrier hangar (0 = off).\n"
 				  "# View: x,y (hangar units, ~41 per metre), turn in degrees, eye\n"
 				  "# height in metres; parked craft OPT name (0 = none):\n"
@@ -725,6 +730,13 @@ int main(int argc, char** argv) {
 			}
 			XwaRemaster_Frame(delta_us);
 			XwaVrConsole_EndFrame();
+			{
+				/* The player put the lap console somewhere new: keep it there. */
+				char placement[160];
+				if (XwaVrConsole_TakePlacement(placement, (int)sizeof placement)) {
+					XwaModernVrOptions_SaveValue("XWA_XR_CONSOLE_POSE", placement);
+				}
+			}
 			if (Aeron_QuitRequested() || XwaPort_ShouldQuit()) {
 				break;
 			}
