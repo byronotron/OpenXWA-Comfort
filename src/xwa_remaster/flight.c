@@ -3874,11 +3874,15 @@ static AeronScenePresentChain* fl_xr_chain(AeronTextureFormat format) {
 }
 
 /* Bloom + tonemap of the current scene RT into one eye target. */
+/* Scale of the eye output after tonemapping (linear light); the menu
+ * environment dims itself with it. */
+static float s_xr_eye_gain = 1.0f;
+
 static int fl_xr_output_eye(AeronCommandBuffer* cmd, AeronRenderTarget* target, AeronTextureFormat format,
 							AeronTexture* bloom_tex) {
 	AeronScenePresentChain* chain = fl_xr_chain(format);
 	AeronTexture* scene_tex = Aeron_RenderTargetGetTexture(AeronScene_SceneRt(s.scene));
-	static const float tint[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+	const float tint[4] = { s_xr_eye_gain, s_xr_eye_gain, s_xr_eye_gain, 1.0f };
 	if (!chain || !scene_tex || !s.present_sampler) {
 		return 0;
 	}
@@ -5039,10 +5043,16 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd) {
 	}
 	XwaRemasterShip_SetPbrEnv(s.scene, &key, 1, NULL, s.camera_local, NULL, NULL, &ambient, NULL);
 
+	/* Dimmed so the hangar does not compete with the screen:
+	 * XWA_XR_ENV_BRIGHTNESS is the displayed brightness (0.4 = 60 % darker),
+	 * applied in linear light. */
+	const float brightness = fminf(fmaxf(fl_xr_env("XWA_XR_ENV_BRIGHTNESS", 0.4f), 0.0f), 1.0f);
+	s_xr_eye_gain = powf(brightness, 2.2f);
 	int ok = AeronScene_Render(s.scene, cmd) &&
 			 fl_xr_output_eye(cmd, xr_frame.eye_targets[0], xr_frame.format, NULL) &&
 			 AeronScene_SetCamera(s.scene, &eyes[1]) && AeronScene_Render(s.scene, cmd) &&
 			 fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format, NULL);
+	s_xr_eye_gain = 1.0f;
 	if (ok) {
 		Aeron_XrStereoCommitBackdrop();
 	}

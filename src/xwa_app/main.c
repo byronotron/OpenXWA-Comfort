@@ -367,6 +367,8 @@ static void android_load_settings(void) {
 				  "#XWA_XR_ENVIRONMENT=1\n"
 				  "#XWA_XR_ENV_VIEW=-500,-1150,0,1.7\n"
 				  "#XWA_XR_ENV_CRAFT=Xwing\n"
+				  "# Hangar brightness behind the screen (1 = full, 0.4 = 60 % darker):\n"
+				  "#XWA_XR_ENV_BRIGHTNESS=0.4\n"
 				  "# Helmet HUD distance in metres and size:\n"
 				  "#XWA_XR_HUD_DISTANCE=3.0\n"
 				  "#XWA_XR_HUD_SCALE=0.65\n"
