@@ -207,6 +207,7 @@ set(XWA_RUNTIME_SOURCES
     src/xwa_runtime/config/modern_pilot_profiles_screen.c
     src/xwa_runtime/config/modern_video_options.c
     src/xwa_runtime/config/modern_video_options_screen.c
+    src/xwa_runtime/config/modern_vr_options_screen.c
     src/xwa_runtime/hooks/orientation_hook.c
     src/xwa_runtime/input/input_bridge.c
     src/xwa_runtime/input/controller_mapping.c

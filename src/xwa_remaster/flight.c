@@ -4078,6 +4078,19 @@ static void fl_submit_vr_stars(const XwaRemasterSkyStarsParams* params, const Ae
 	}
 }
 
+/* XWA_POINT_LIGHTS can change at runtime (VR options screen): follow it. */
+static void fl_point_lights_env_refresh(void) {
+	static char last;
+	const char* env = getenv("XWA_POINT_LIGHTS");
+	const char c = env && (env[0] == '0' || env[0] == '1') ? env[0] : 0;
+	if (c != last) {
+		last = c;
+		if (c) {
+			s.plight.enabled = c == '1';
+		}
+	}
+}
+
 AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapshot* snap,
 									   XwaRemasterAssets* assets, int target_w, int target_h,
 									   int direct_present) {
@@ -4088,6 +4101,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	if (!fl_ensure(target_w, target_h)) {
 		return NULL;
 	}
+	fl_point_lights_env_refresh();
 	XwaRemasterFlightView flight_view;
 	if (!XwaRemasterFlight_BuildView(cam, s.rt_w, s.rt_h, &flight_view)) {
 		return NULL;
