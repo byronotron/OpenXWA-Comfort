@@ -7,9 +7,9 @@
  * touch sensors (index off the trigger = pointing). The right glove wears
  * the family crest pin on the back of the hand above the thumb.
  *
- * The gloves are built from rigid pieces (palm, cuff, finger segments and
- * joints) drawn as scene mesh instances with the cockpit, so they are lit
- * and seen in stereo like it.
+ * The gloves are the CC0 Godot XR Tools glove meshes (vr_glove_mesh.h),
+ * skinned on the CPU each frame and drawn as scene mesh instances with the
+ * cockpit, so they are lit and seen in stereo like it.
  */
 
 #include "aeron/render.h"
