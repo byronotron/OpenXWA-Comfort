@@ -211,6 +211,13 @@ const XwaRemasterHudPreparedAssets* XwaRemasterHud_PreparedAssets(void);
  * XwaRemasterHudFixed_RenderWorld, so they can sit on a far quad while the
  * rest of the HUD follows the head. Applies from the next PrepareFrame. */
 void XwaRemasterHud_SetWorldSplit(int enabled);
+/* CMD split (VR cockpit HUD): the targeting computer (frame, charge bars,
+ * target view, CMD text) leaves the head HUD and is drawn by
+ * XwaRemasterHud_RenderCmdGroup instead, so it can go to its own target.
+ * Set before XwaRemasterHud_PrepareFrame. */
+void XwaRemasterHud_SetCmdSplit(int enabled);
+void XwaRemasterHud_RenderCmdGroup(AeronCommandBuffer* cmd, AeronRenderPass* pass, AeronRenderTarget* target,
+								   int target_w, int target_h);
 void XwaRemasterHud_BeginRenderPhase(void);
 void XwaRemasterHud_EndRenderPhase(void);
 const XwaAssetRef* XwaRemasterHud_AssetFrame(int object_type, int classic_frame_1based);

@@ -351,6 +351,8 @@ static void android_load_settings(void) {
 				  "#XWA_XR_DEPTH_BOOST=1.0\n"
 				  "# HUD: cockpit (panels on the cockpit), helmet (follows your head), fixed:\n"
 				  "#XWA_XR_HUD_LAYOUT=cockpit\n"
+				  "# Star dot size (1 = flat-screen stars magnified; default 0.33):\n"
+				  "#XWA_XR_STAR_SIZE=0.33\n"
 				  "# Lap console (touch panel below the view; look down to use it):\n"
 				  "#XWA_XR_CONSOLE=1\n"
 				  "#XWA_XR_CONSOLE_PITCH=-52\n"

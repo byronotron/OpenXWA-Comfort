@@ -32,6 +32,9 @@ void XwaRemasterHudFixed_Render(AeronCommandBuffer* cmd, AeronRenderPass* pass,
 								AeronRenderTarget* target, int target_w, int target_h);
 /* The world-split elements (see XwaRemasterHud_SetWorldSplit); nothing
  * when the split is off. */
+int XwaRemasterHud_CmdSplit(void);
+void XwaRemasterHudFixed_RenderCmdGroup(AeronCommandBuffer* cmd, AeronRenderPass* pass, AeronRenderTarget* target,
+										int target_w, int target_h);
 void XwaRemasterHudFixed_RenderWorld(AeronCommandBuffer* cmd, AeronRenderPass* pass,
 									 AeronRenderTarget* target, int target_w, int target_h);
 

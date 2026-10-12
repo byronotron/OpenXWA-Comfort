@@ -21,6 +21,8 @@ void XwaRemasterHudText_Build(const XwaSnapshot* snapshot, XwaHudProfileIndex pr
 int XwaRemasterHudText_PaneGlyphBounds(uint16_t pane_id, float out[4]);
 int XwaRemasterHudText_PaneBounds(uint16_t pane_id, int target_w, int target_h, float out[4]);
 void XwaRemasterHudText_PrepareDrawList(AeronCommandBuffer* cmd, int target_w, int target_h);
+void XwaRemasterHudText_RenderCmdGroup(AeronCommandBuffer* cmd, AeronRenderPass* pass, AeronRenderTarget* target,
+									   int target_w, int target_h);
 void XwaRemasterHudText_Render(AeronCommandBuffer* cmd, AeronRenderPass* pass,
 							   AeronRenderTarget* target, int target_w, int target_h);
 int XwaRemasterHudText_MapGlyph(const XwaHudPane* pane, const XwaHudGlyph* glyph, XwaHudProfileIndex profile,

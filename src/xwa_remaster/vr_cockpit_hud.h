@@ -20,15 +20,17 @@ extern "C" {
 
 /* Finds the panel rectangles in this frame's prepared HUD (call after
  * XwaRemasterHud_PrepareFrame for a target_w x target_h HUD) and fills
- * `out` with their cockpit placements. `world_scale` is XWA_XR_WORLD_SCALE:
+ * `out` with their cockpit placements. With `cmd_separate` the targeting
+ * computer was drawn to the aux HUD target (XwaRemasterHud_SetCmdSplit). `world_scale` is XWA_XR_WORLD_SCALE:
  * panels move and scale with the cockpit. Returns the panel count. */
-int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, AeronXrPanel* out, int max_out);
+int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, int cmd_separate, AeronXrPanel* out,
+						  int max_out);
 
 /* Holographic backplates for the panels found by the last Build, drawn
  * into the head HUD target under the HUD. Prepare outside a render pass;
  * Render inside the HUD pass, before the HUD itself. */
 void XwaVrCockpitHud_PrepareHolo(AeronCommandBuffer* cmd, int target_w, int target_h);
-void XwaVrCockpitHud_RenderHolo(AeronCommandBuffer* cmd, AeronRenderPass* pass, AeronRenderTarget* target);
+void XwaVrCockpitHud_RenderHolo(AeronCommandBuffer* cmd, AeronRenderPass* pass, AeronRenderTarget* target, int aux);
 
 void XwaVrCockpitHud_Shutdown(void);
 

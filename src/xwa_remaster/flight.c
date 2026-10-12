@@ -3310,7 +3310,9 @@ static void fl_draw_present(AeronCommandBuffer* cmd, AeronRenderPass* pass, Aero
  * part (target brackets, reticle, threat and target arrows) has to line up
  * with the 3D view, the "head" part (radar, MFDs, CMD, text) follows the
  * head like a helmet display. Flat output draws everything. */
-enum { FL_HUD_HEAD = 1, FL_HUD_WORLD = 2, FL_HUD_ALL = FL_HUD_HEAD | FL_HUD_WORLD };
+/* FL_HUD_CMD: the targeting computer when the CMD split is on (VR cockpit
+ * HUD); otherwise it is part of the head. */
+enum { FL_HUD_HEAD = 1, FL_HUD_WORLD = 2, FL_HUD_CMD = 4, FL_HUD_ALL = FL_HUD_HEAD | FL_HUD_WORLD | FL_HUD_CMD };
 
 static void fl_draw_hud_parts(AeronCommandBuffer* cmd, AeronRenderPass* pass, AeronRenderTarget* target,
 							  int target_w, int target_h, int parts) {
@@ -3335,9 +3337,15 @@ static void fl_draw_hud_parts(AeronCommandBuffer* cmd, AeronRenderPass* pass, Ae
 		XwaRemasterHud_RenderTargetBoxes(cmd, pass, target, target_w, target_h,
 										 XWA_HUD_TARGET_BOX_AFTER_FIXED);
 	}
+	if ((parts & FL_HUD_CMD) && XwaRemasterHud_CmdSplit()) {
+		Aeron_GpuDebugMarker(cmd, "HUD CMD group");
+		XwaRemasterHud_RenderCmdGroup(cmd, pass, target, target_w, target_h);
+	}
 	if (parts & FL_HUD_HEAD) {
-		Aeron_GpuDebugMarker(cmd, "HUD CMD");
-		XwaRemasterHud_RenderCmd(cmd, pass, target, target_w, target_h);
+		if (!XwaRemasterHud_CmdSplit()) {
+			Aeron_GpuDebugMarker(cmd, "HUD CMD");
+			XwaRemasterHud_RenderCmd(cmd, pass, target, target_w, target_h);
+		}
 		Aeron_GpuDebugMarker(cmd, "HUD text");
 		XwaRemasterHud_RenderText(cmd, pass, target, target_w, target_h);
 		if (s.map_present) {
@@ -3898,6 +3906,7 @@ static int fl_xr_output_eye(AeronCommandBuffer* cmd, AeronRenderTarget* target, 
 	return 1;
 }
 
+/* holo: 0 none, 1 the head-HUD panel plates, 2 the aux (CMD) plates. */
 static int fl_xr_output_hud(AeronCommandBuffer* cmd, AeronRenderTarget* target, int parts, int holo) {
 	AeronRenderPass* pass = Aeron_BeginRenderPass(&(AeronRenderPassDesc) {
 		.color_target = target,
@@ -3913,7 +3922,7 @@ static int fl_xr_output_hud(AeronCommandBuffer* cmd, AeronRenderTarget* target, 
 	Aeron_SetViewport(pass, &full);
 	Aeron_SetScissor(pass, &full);
 	if (holo && !s.suppress_hud) {
-		XwaVrCockpitHud_RenderHolo(cmd, pass, target);
+		XwaVrCockpitHud_RenderHolo(cmd, pass, target, holo == 2);
 	}
 	fl_draw_hud_parts(cmd, pass, target, s.rt_w, s.rt_h, parts);
 	Aeron_EndRenderPass(pass);
@@ -4031,6 +4040,9 @@ static void fl_submit_vr_stars(const XwaRemasterSkyStarsParams* params, const Ae
 	 * twice the core radius gives the same footprint as the GPU pass. */
 	const float tan_per_px = 2.0f * tanf(eyes[0].v_half_rad) / (float)s.rt_h;
 	const float distance = 1.0e6f; /* local units; far beyond anything else */
+	/* XWA_XR_STAR_SIZE scales the dots (1 = the size of the flat-screen
+	 * stars magnified to the headset; the default is a third of that). */
+	const float size_factor = fl_xr_env("XWA_XR_STAR_SIZE", 0.33f);
 	for (int i = 0; i < count; i++) {
 		const XwaRemasterSkyStarPoint* p = &points[i];
 		float dir[3];
@@ -4054,7 +4066,7 @@ static void fl_submit_vr_stars(const XwaRemasterSkyStarsParams* params, const Ae
 		}
 		const float up[3] = { right[1] * dir[2] - right[2] * dir[1], right[2] * dir[0] - right[0] * dir[2],
 							  right[0] * dir[1] - right[1] * dir[0] };
-		const float radius_px = 2.0f * params->core_radius_px * (p->bright ? 1.4f : 1.0f);
+		const float radius_px = 2.0f * params->core_radius_px * (p->bright ? 1.4f : 1.0f) * size_factor;
 		const float h = distance * tan_per_px * radius_px;
 		AeronSceneBillboardDesc d;
 		memset(&d, 0, sizeof d);
@@ -4116,6 +4128,9 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		const int stereo_probe = fl_xr_stereo_eligible(cam) && Aeron_XrStereoBegin(&probe) &&
 								 probe.width == s.rt_w && probe.height == s.rt_h;
 		XwaRemasterHud_SetWorldSplit(stereo_probe && fl_xr_hud_head_locked());
+		/* Cockpit panels: the targeting computer overlaps the MFDs on the
+		 * flat HUD at the eye's aspect, so it is drawn to its own target. */
+		XwaRemasterHud_SetCmdSplit(stereo_probe && probe.hud_aux_target && fl_xr_hud_layout() == FL_XR_HUD_COCKPIT);
 	}
 	XwaRemasterHud_PrepareFrame(cmd, snap, assets, &flight_view, s.rt_w, s.rt_h);
 	fl_quat_to_mat3(flight_view.camera.ori, s.crows);
@@ -4871,10 +4886,11 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		AeronXrHudQuad hud_world;
 		AeronXrPanel panels[AERON_XR_MAX_PANELS];
 		int panel_count = 0;
+		const int cmd_split = XwaRemasterHud_CmdSplit() && xr_frame.hud_aux_target;
 		if (cockpit) {
 			panel_count = s.suppress_hud ? 0
 										 : XwaVrCockpitHud_Build(s.rt_w, s.rt_h, fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f),
-																 panels, AERON_XR_MAX_PANELS);
+																 cmd_split, panels, AERON_XR_MAX_PANELS);
 			XwaVrCockpitHud_PrepareHolo(cmd, s.rt_w, s.rt_h);
 			if (panel_count == 0 && !s.suppress_hud) {
 				/* Nothing recognised in this HUD (e.g. an unusual HUD mode):
@@ -4887,8 +4903,13 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 			}
 		}
 		const int cockpit_active = cockpit && panel_count > 0;
+		/* With the CMD split the targeting computer goes to the aux target,
+		 * unless the cockpit panels are not shown (then it stays in the head). */
+		const int cmd_aux = cmd_split && cockpit_active;
+		const int head_parts = split ? (cmd_aux ? FL_HUD_HEAD : FL_HUD_HEAD | FL_HUD_CMD) : FL_HUD_ALL;
 		if (fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format, s.present_bloom_tex) &&
-			fl_xr_output_hud(cmd, xr_frame.hud_target, split ? FL_HUD_HEAD : FL_HUD_ALL, cockpit_active) &&
+			fl_xr_output_hud(cmd, xr_frame.hud_target, head_parts, cockpit_active) &&
+			(!cmd_aux || fl_xr_output_hud(cmd, xr_frame.hud_aux_target, FL_HUD_CMD, 2)) &&
 			(!split || fl_xr_output_hud(cmd, xr_frame.hud_world_target, FL_HUD_WORLD, 0))) {
 			if (cockpit_active || (cockpit && s.suppress_hud)) {
 				fl_xr_hud_quad(&flight_view.camera, &hud_world, 0);

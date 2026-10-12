@@ -31,6 +31,9 @@ typedef struct XwaHudPreparedText {
 } XwaHudPreparedText;
 
 static AeronDrawList2D* text_list;
+/* CMD pane text when the CMD split is on (XwaRemasterHud_SetCmdSplit). */
+static AeronDrawList2D* text_cmd_list;
+static int text_cmd_prepared;
 static XwaHudPreparedText text_prepared;
 /* Target-pixel bounds of the glyphs each pane drew in the last
  * PrepareDrawList (VR cockpit panels). */
@@ -406,12 +409,16 @@ int XwaRemasterHudText_Init(void) {
 	if (text_list)
 		return 1;
 	text_list = AeronDrawList_Create(XWA_SNAP_MAX_HUD_GLYPHS + 128);
-	return text_list != NULL;
+	if (!text_cmd_list)
+		text_cmd_list = AeronDrawList_Create(XWA_SNAP_MAX_HUD_GLYPHS + 128);
+	return text_list != NULL && text_cmd_list != NULL;
 }
 
 void XwaRemasterHudText_Shutdown(void) {
 	AeronDrawList_Destroy(text_list);
 	text_list = NULL;
+	AeronDrawList_Destroy(text_cmd_list);
+	text_cmd_list = NULL;
 	memset(&text_prepared, 0, sizeof text_prepared);
 }
 
@@ -459,18 +466,30 @@ void XwaRemasterHudText_PrepareDrawList(AeronCommandBuffer* cmd, int target_w, i
 		return;
 	AeronDrawList_Begin(text_list, NULL, target_w, target_h, AERON_DRAWLIST2D_LOAD, NULL);
 	memset(text_glyph_bounds_valid, 0, sizeof text_glyph_bounds_valid);
+	const int cmd_split = XwaRemasterHud_CmdSplit() && text_cmd_list;
+	text_cmd_prepared = 0;
+	if (cmd_split) {
+		AeronDrawList_Begin(text_cmd_list, NULL, target_w, target_h, AERON_DRAWLIST2D_LOAD, NULL);
+		text_cmd_prepared = 1; /* prepared at every exit below */
+	}
 	if (!text_prepared.valid) {
 		(void)AeronDrawList_Prepare(text_list, cmd);
+		if (cmd_split)
+			(void)AeronDrawList_Prepare(text_cmd_list, cmd);
 		return;
 	}
 	const XwaHudLayout* layout = XwaRemasterHud_Layout();
 	if (!layout || text_prepared.layout_generation != layout->generation) {
 		(void)AeronDrawList_Prepare(text_list, cmd);
+		if (cmd_split)
+			(void)AeronDrawList_Prepare(text_cmd_list, cmd);
 		return;
 	}
 	const XwaHudLayoutProfile* profile = text_profile(layout);
 	if (!profile) {
 		(void)AeronDrawList_Prepare(text_list, cmd);
+		if (cmd_split)
+			(void)AeronDrawList_Prepare(text_cmd_list, cmd);
 		return;
 	}
 	int out_x, out_y;
@@ -478,6 +497,8 @@ void XwaRemasterHudText_PrepareDrawList(AeronCommandBuffer* cmd, int target_w, i
 	XwaRemasterHudLayout_OutputTransform(profile, target_w, target_h, &out_x, &out_y, &output_scale);
 	if (output_scale <= 0.0f) {
 		(void)AeronDrawList_Prepare(text_list, cmd);
+		if (cmd_split)
+			(void)AeronDrawList_Prepare(text_cmd_list, cmd);
 		return;
 	}
 	XwaRemasterHud_BeginRenderPhase();
@@ -549,10 +570,20 @@ void XwaRemasterHudText_PrepareDrawList(AeronCommandBuffer* cmd, int target_w, i
 		sprite.tint[3] = a;
 		sprite.blend = AERON_BLIT2D_BLEND_PMA;
 		sprite.filter = AERON_BLIT2D_FILTER_LINEAR;
-		AeronDrawList_AddSprite(text_list, &sprite);
+		AeronDrawList_AddSprite(cmd_split && glyph->pane == XWA_HUD_PANE_CMD ? text_cmd_list : text_list, &sprite);
 	}
 	XwaRemasterHud_EndRenderPhase();
 	(void)AeronDrawList_Prepare(text_list, cmd);
+	if (cmd_split)
+		(void)AeronDrawList_Prepare(text_cmd_list, cmd);
+}
+
+void XwaRemasterHudText_RenderCmdGroup(AeronCommandBuffer* cmd, AeronRenderPass* pass, AeronRenderTarget* target,
+									   int target_w, int target_h) {
+	if (!cmd || !pass || !target || !text_cmd_list || !text_cmd_prepared || !text_prepared.valid ||
+		target_w <= 0 || target_h <= 0)
+		return;
+	AeronDrawList_RenderIntoPass(text_cmd_list, cmd, pass, target);
 }
 
 int XwaRemasterHudText_PaneBounds(uint16_t pane_id, int target_w, int target_h, float out[4]) {
