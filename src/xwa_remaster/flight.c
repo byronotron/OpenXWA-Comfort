@@ -20,6 +20,7 @@
 #include "xwa_remaster/hud.h"
 #include "xwa_remaster/hud_fixed.h"
 #include "xwa_remaster/vr_cockpit_hud.h"
+#include "xwa_remaster/vr_gloves.h"
 #include "xwa_remaster/vr_lap_console.h"
 #include "xwa_remaster/hyperspace.h"
 #include "xwa_remaster/ship.h"
@@ -4815,6 +4816,14 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		}
 	}
 
+	/* VR gloves: near-field like the cockpit, so inside its range (the
+	 * depth boost moves them with each eye). */
+	if (stereo) {
+		XwaVrGloves_Submit(s.scene, cmd, s.crows, flight_view.camera.pos,
+						   AERON_OPT_UNITS_PER_METER * fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f));
+	} else {
+		XwaVrGloves_Idle();
+	}
 	const AeronSceneMark cockpit_end = AeronScene_Mark(s.scene);
 
 	/* Classic effects order: particles, persistent warhead trails, then
@@ -4942,6 +4951,7 @@ void XwaRemasterFlight_Shutdown(void) {
 	}
 	XwaVrCockpitHud_Shutdown();
 	XwaVrConsole_Shutdown();
+	XwaVrGloves_Shutdown();
 	XwaRemasterFlightMap_Shutdown();
 	XwaRemasterHyperspace_Destroy(s.hyperspace);
 	s.hyperspace = NULL;

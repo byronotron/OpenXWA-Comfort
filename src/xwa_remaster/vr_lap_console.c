@@ -8,6 +8,7 @@
 #include "aeron/scene/font_atlas.h"
 #include "aeron/scene/text2d.h"
 #include "aeron/vfs.h"
+#include "xwa_remaster/vr_gloves.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -110,6 +111,10 @@ static struct {
 	AeronFontAtlas font;
 	int font_state; /* 0 not tried, 1 loaded, -1 failed */
 	float divider_y; /* horizontal rule above the stacked sections */
+	/* This frame's eye point and placement, for cutting the gloves out. */
+	float eye[3];
+	AeronXrPanel pose;
+	float ax[3], ay[3], az[3];
 	int logged;
 } s_vc;
 
@@ -477,8 +482,17 @@ static void vc_update_hand(int hand, const AeronXrPanel* pose, const float ax[3]
 	static const float minus_z[3] = { 0.0f, 0.0f, -1.0f };
 	float fwd[3];
 	vc_rotate(xh.orientation, minus_z, fwd);
-	const float tip[3] = { xh.position[0] + fwd[0] * VC_TIP_M, xh.position[1] + fwd[1] * VC_TIP_M,
-						   xh.position[2] + fwd[2] * VC_TIP_M };
+	float tip[3] = { xh.position[0] + fwd[0] * VC_TIP_M, xh.position[1] + fwd[1] * VC_TIP_M,
+					 xh.position[2] + fwd[2] * VC_TIP_M };
+	/* With the gloves the glove's index fingertip pokes, and only while
+	 * the finger is lifted off the trigger (pointing). */
+	int can_poke = 1;
+	{
+		int pointing = 1;
+		if (XwaVrGloves_IndexTip(hand, tip, &pointing)) {
+			can_poke = pointing;
+		}
+	}
 	const float rel[3] = { tip[0] - pose->position[0], tip[1] - pose->position[1], tip[2] - pose->position[2] };
 	const float lx = vc_dot(rel, ax), ly = vc_dot(rel, ay), depth = vc_dot(rel, az);
 	const float px = (lx / VC_WIDTH_M + 0.5f) * VC_W;
@@ -491,7 +505,7 @@ static void vc_update_hand(int hand, const AeronXrPanel* pose, const float ax[3]
 			h->poke_down = 0;
 			vc_release(hand);
 		}
-	} else if (inside && depth < -VC_PRESS_M && !h->blocked && !h->trigger_down) {
+	} else if (inside && depth < -VC_PRESS_M && !h->blocked && !h->trigger_down && can_poke) {
 		if (depth < -VC_BLOCK_M) {
 			h->blocked = 1; /* arrived from behind or far too deep */
 		} else {
@@ -502,7 +516,7 @@ static void vc_update_hand(int hand, const AeronXrPanel* pose, const float ax[3]
 	if (h->blocked && (depth > 0.0f || !inside)) {
 		h->blocked = 0;
 	}
-	const int poking = inside && depth < VC_HOVER_M && depth > -VC_BLOCK_M;
+	const int poking = can_poke && inside && depth < VC_HOVER_M && depth > -VC_BLOCK_M;
 	if (poking) {
 		h->cursor = 1;
 		h->cx = px;
@@ -669,6 +683,70 @@ static void vc_draw_button(int i) {
 	}
 }
 
+/* Point in LOCAL space -> console pixels, seen from the eye: the point
+ * projected onto the console plane. Returns the scale (projected size per
+ * metre at the point), or 0 when behind the eye. */
+static float vc_project(const float p[3], float* px, float* py) {
+	const float* c = s_vc.pose.position;
+	const float ep[3] = { p[0] - s_vc.eye[0], p[1] - s_vc.eye[1], p[2] - s_vc.eye[2] };
+	const float ec[3] = { c[0] - s_vc.eye[0], c[1] - s_vc.eye[1], c[2] - s_vc.eye[2] };
+	const float dp = vc_dot(ep, s_vc.az), dc = vc_dot(ec, s_vc.az);
+	if (dp > -1e-4f) {
+		return 0.0f; /* not in front of the eye */
+	}
+	const float t = dc / dp;
+	const float hit[3] = { ep[0] * t - ec[0], ep[1] * t - ec[1], ep[2] * t - ec[2] };
+	*px = (vc_dot(hit, s_vc.ax) / VC_WIDTH_M + 0.5f) * VC_W;
+	*py = (0.5f - vc_dot(hit, s_vc.ay) / VC_HEIGHT_M) * VC_H;
+	return t;
+}
+
+static void vc_cut_capsule(const XwaVrGloveCapsule* cap) {
+	static const float zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	float a[3], b[3];
+	memcpy(a, cap->a, sizeof a);
+	memcpy(b, cap->b, sizeof b);
+	/* Height above the console plane (towards the eye). */
+	const float ra[3] = { a[0] - s_vc.pose.position[0], a[1] - s_vc.pose.position[1], a[2] - s_vc.pose.position[2] };
+	const float rb[3] = { b[0] - s_vc.pose.position[0], b[1] - s_vc.pose.position[1], b[2] - s_vc.pose.position[2] };
+	float ha = vc_dot(ra, s_vc.az) + cap->radius, hb = vc_dot(rb, s_vc.az) + cap->radius;
+	if (ha <= 0.0f && hb <= 0.0f) {
+		return; /* behind the console: the console covers it, correctly */
+	}
+	if (ha <= 0.0f || hb <= 0.0f) {
+		/* Keep the part in front. */
+		const float t = ha / (ha - hb);
+		float m[3];
+		for (int k = 0; k < 3; ++k) {
+			m[k] = a[k] + (b[k] - a[k]) * t;
+		}
+		if (ha <= 0.0f) {
+			memcpy(a, m, sizeof a);
+		} else {
+			memcpy(b, m, sizeof b);
+		}
+	}
+	float x0, y0, x1, y1;
+	const float sa = vc_project(a, &x0, &y0), sb = vc_project(b, &x1, &y1);
+	if (sa <= 0.0f || sb <= 0.0f) {
+		return;
+	}
+	const float px_per_m = VC_W / VC_WIDTH_M;
+	const float r = cap->radius * 0.5f * (sa + sb) * px_per_m;
+	/* Extend by the radius at both ends so the caps are covered. */
+	float dx = x1 - x0, dy = y1 - y0;
+	const float len = sqrtf(dx * dx + dy * dy);
+	if (len > 1e-3f) {
+		dx /= len;
+		dy /= len;
+	} else {
+		dx = 1.0f;
+		dy = 0.0f;
+	}
+	AeronDrawList_AddLine(s_vc.list, x0 - dx * r * 0.8f, y0 - dy * r * 0.8f, x1 + dx * r * 0.8f, y1 + dy * r * 0.8f,
+						  2.0f * r, zero, AERON_BLIT2D_BLEND_NONE, NULL);
+}
+
 static void vc_draw(void) {
 	const float transparent[4] = { 0, 0, 0, 0 };
 	float fill[4], border[4], glow[4];
@@ -711,6 +789,16 @@ static void vc_draw(void) {
 	}
 	for (int i = 0; i < s_vc.button_count; ++i) {
 		vc_draw_button(i);
+	}
+	/* The console is a layer drawn over the 3D view: wherever a glove is
+	 * between the eye and the console, cut the console away so the hand
+	 * shows in front of it. */
+	for (int h = 0; h < 2; ++h) {
+		XwaVrGloveCapsule caps[24];
+		const int n = XwaVrGloves_Capsules(h, caps, 24);
+		for (int c = 0; c < n; ++c) {
+			vc_cut_capsule(&caps[c]);
+		}
 	}
 	/* Cursors: a ring that closes in as the tip nears the surface, or a
 	 * dot where the ray lands. */
@@ -835,6 +923,13 @@ int XwaVrConsole_Frame(AeronCommandBuffer* cmd, AeronRenderTarget* target, int w
 	out->rect[2] = width;
 	out->rect[3] = height;
 
+	s_vc.pose = *out;
+	memcpy(s_vc.ax, ax, sizeof ax);
+	memcpy(s_vc.ay, ay, sizeof ay);
+	memcpy(s_vc.az, az, sizeof az);
+	for (int k = 0; k < 3; ++k) {
+		s_vc.eye[k] = 0.5f * (views[0].position[k] + views[1].position[k]);
+	}
 	vc_layout();
 	for (int i = 0; i < VC_MAX_BUTTONS; ++i) {
 		if (s_vc.flash[i] > 0.0f) {
