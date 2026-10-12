@@ -109,6 +109,7 @@ static struct {
 	AeronDrawList2D* list;
 	AeronFontAtlas font;
 	int font_state; /* 0 not tried, 1 loaded, -1 failed */
+	float divider_y; /* horizontal rule above the stacked sections */
 	int logged;
 } s_vc;
 
@@ -297,32 +298,32 @@ static void vc_layout(void) {
 	/* Targeting and weapons */
 	{
 		const float x = 538.0f, w = 460.0f;
-		vc_label(x, 22.0f, "TARGET & WEAPONS", 28, 0, 1, 0);
+		vc_label(x, 22.0f, "TARGET COMPUTER", 28, 0, 1, 0);
 		{
-			static const char* const l[3] = { "NEAREST ENEMY", "ATTACKING ME", "MATCH SPEED" };
+			static const char* const l[3] = { "LOCK NEAREST\nENEMY", "LOCK ENEMY\nATTACKING ME", "MATCH SPEED" };
 			static const XwaVrConsoleAction a[3] = { XWA_VRC_TARGET_NEAREST_ENEMY, XWA_VRC_TARGET_ATTACKER,
 													 XWA_VRC_MATCH_SPEED };
-			vc_row(x, 64.0f, w, 66.0f, 3, l, a, row);
+			vc_row(x, 62.0f, w, 66.0f, 3, l, a, row);
 			row[2]->enabled = st->has_target;
 		}
 		{
 			static const char* const l[3] = { "FRIENDLY", "NEUTRAL", "ENEMY" };
 			static const XwaVrConsoleAction a[3] = { XWA_VRC_TARGET_FRIENDLY, XWA_VRC_TARGET_NEUTRAL,
 													 XWA_VRC_TARGET_ENEMY };
-			vc_row(x, 140.0f, w, 52.0f, 3, l, a, NULL);
+			vc_row(x, 136.0f, w, 48.0f, 3, l, a, NULL);
 		}
 		{
-			VcButton* prev = vc_button(x, 202.0f, 70.0f, 52.0f, "<", XWA_VRC_SUBSYSTEM_PREV, 0);
-			VcButton* next = vc_button(x + w - 70.0f, 202.0f, 70.0f, 52.0f, ">", XWA_VRC_SUBSYSTEM_NEXT, 0);
+			VcButton* prev = vc_button(x, 192.0f, 70.0f, 48.0f, "<", XWA_VRC_SUBSYSTEM_PREV, 0);
+			VcButton* next = vc_button(x + w - 70.0f, 192.0f, 70.0f, 48.0f, ">", XWA_VRC_SUBSYSTEM_NEXT, 0);
 			prev->enabled = next->enabled = st->has_target;
-			vc_label(x + w * 0.5f, 214.0f, "SUBSYSTEM", 22, 1, 0, !st->has_target);
+			vc_label(x + w * 0.5f, 202.0f, "SUBSYSTEM", 22, 1, 0, !st->has_target);
 		}
 		{
-			vc_label(x, 278.0f, "MEMORY", 20, 0, 0, 0);
+			vc_label(x, 262.0f, "MEMORY", 20, 0, 0, 0);
 			static const char* const l[3] = { "1", "2", "3" };
 			static const XwaVrConsoleAction a[3] = { XWA_VRC_MEMORY_RECALL, XWA_VRC_MEMORY_RECALL,
 													 XWA_VRC_MEMORY_RECALL };
-			vc_row(x + 110.0f, 264.0f, w - 110.0f, 52.0f, 3, l, a, row);
+			vc_row(x + 110.0f, 248.0f, w - 110.0f, 48.0f, 3, l, a, row);
 			for (int i = 0; i < 3; ++i) {
 				row[i]->arg = i;
 				row[i]->hold_action = XWA_VRC_MEMORY_STORE;
@@ -334,13 +335,16 @@ static void vc_layout(void) {
 			static const char* const l[3] = { "NEWEST", "OBJECTIVE", "CLEAR" };
 			static const XwaVrConsoleAction a[3] = { XWA_VRC_TARGET_NEWEST, XWA_VRC_TARGET_OBJECTIVE,
 													 XWA_VRC_TARGET_CLEAR };
-			vc_row(x, 326.0f, w, 52.0f, 3, l, a, row);
+			vc_row(x, 304.0f, w, 48.0f, 3, l, a, row);
 			row[2]->enabled = st->has_target;
 		}
+		/* Weapons: its own section under the targeting computer. */
 		{
+			s_vc.divider_y = 366.0f;
+			vc_label(x, 376.0f, "WEAPONS", 28, 0, 1, 0);
 			static const char* const l[3] = { "FIRE-LINK", "CONVERGE", "S-FOILS" };
 			static const XwaVrConsoleAction a[3] = { XWA_VRC_FIRE_LINK, XWA_VRC_CONVERGENCE, XWA_VRC_SFOILS };
-			vc_row(x, 388.0f, w, 70.0f, 3, l, a, row);
+			vc_row(x, 412.0f, w, 58.0f, 3, l, a, row);
 			row[2]->enabled = st->has_sfoils;
 			row[2]->sub = !st->has_sfoils ? NULL : st->sfoils_closed ? "closed" : "open (attack)";
 			row[2]->lit = st->has_sfoils && !st->sfoils_closed;
@@ -350,7 +354,7 @@ static void vc_layout(void) {
 	/* Wingmen and ship */
 	{
 		const float x = 1032.0f, w = 470.0f;
-		vc_label(x, 22.0f, "WINGMEN & SHIP", 28, 0, 1, 0);
+		vc_label(x, 22.0f, "WINGMEN", 28, 0, 1, 0);
 		{
 			static const char* const l[2] = { "ATTACK MY TARGET", "COVER ME" };
 			static const XwaVrConsoleAction a[2] = { XWA_VRC_WING_ATTACK, XWA_VRC_WING_COVER };
@@ -371,15 +375,16 @@ static void vc_layout(void) {
 			vc_row(x, 202.0f, w, 52.0f, 4, l, a, NULL);
 		}
 		{
+			vc_label(x, 286.0f, "SHIP", 28, 0, 1, 0);
 			static const char* const l[4] = { "MAP", "DOCK", "PICK UP", "RELEASE" };
 			static const XwaVrConsoleAction a[4] = { XWA_VRC_MAP, XWA_VRC_DOCK, XWA_VRC_PICKUP, XWA_VRC_RELEASE };
-			vc_row(x, 276.0f, w, 52.0f, 4, l, a, NULL);
+			vc_row(x, 326.0f, w, 52.0f, 4, l, a, NULL);
 		}
 		{
 			static const char* const l[4] = { "GUNNER", "AUTO-GUN", "FLARE", "EJECT" };
 			static const XwaVrConsoleAction a[4] = { XWA_VRC_GUNNER, XWA_VRC_AUTO_GUNNER, XWA_VRC_COUNTERMEASURE,
 													 XWA_VRC_NONE };
-			vc_row(x, 338.0f, w, 52.0f, 4, l, a, row);
+			vc_row(x, 388.0f, w, 52.0f, 4, l, a, row);
 			row[3]->hold_action = XWA_VRC_EJECT;
 			row[3]->hold_only = 1;
 			row[3]->danger = 1;
@@ -631,18 +636,31 @@ static void vc_draw_button(int i) {
 	const float tb = !b->enabled ? 0.55f : b->danger ? 0.80f : 1.0f;
 	const float text_a = b->lit || pressed ? 1.0f : 0.9f;
 	float size = b->h >= 60.0f ? 22.0f : 20.0f;
+	/* "LINE ONE\nLINE TWO": two centred lines. */
+	char line1[48], line2[48];
+	const char* nl = strchr(b->label, '\n');
+	line2[0] = '\0';
+	if (nl) {
+		snprintf(line1, sizeof line1, "%.*s", (int)(nl - b->label), b->label);
+		snprintf(line2, sizeof line2, "%s", nl + 1);
+	} else {
+		snprintf(line1, sizeof line1, "%s", b->label);
+	}
 	if (s_vc.font_state == 1) {
 		/* Shrink long labels to fit. */
 		AeronTextStyle probe;
 		memset(&probe, 0, sizeof probe);
 		probe.font = &s_vc.font;
 		probe.scale = size / (float)s_vc.font.cell_h;
-		const float width = AeronText_MeasureWidth(&probe, b->label, -1);
+		const float width = fmaxf(AeronText_MeasureWidth(&probe, line1, -1), AeronText_MeasureWidth(&probe, line2, -1));
 		if (width > b->w - 14.0f && width > 0.0f) {
 			size *= (b->w - 14.0f) / width;
 		}
 	}
-	if (b->sub) {
+	if (line2[0]) {
+		vc_text(b->x + b->w * 0.5f, b->y + b->h * 0.5f - size * 1.05f, line1, size, 1, tr, tg, tb, text_a);
+		vc_text(b->x + b->w * 0.5f, b->y + b->h * 0.5f + size * 0.02f, line2, size, 1, tr, tg, tb, text_a);
+	} else if (b->sub) {
 		vc_text(b->x + b->w * 0.5f, b->y + b->h * 0.5f - size * 0.95f, b->label, size, 1, tr, tg, tb, text_a);
 		vc_text(b->x + b->w * 0.5f, b->y + b->h * 0.5f + 2.0f, b->sub, 15.0f, 1, tr, tg, tb, 0.65f);
 	} else {
@@ -671,6 +689,14 @@ static void vc_draw(void) {
 		vc_pma(line, VC_CYAN, 0.35f);
 		const float x = i == 0 ? 520.0f : 1015.0f;
 		AeronDrawList_AddFill(s_vc.list, x, 40.0f, 2.0f, VC_H - 80.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
+	}
+	/* Rules between the stacked sections (targeting / weapons, wingmen /
+	 * ship). */
+	{
+		float line[4];
+		vc_pma(line, VC_CYAN, 0.35f);
+		AeronDrawList_AddFill(s_vc.list, 538.0f, s_vc.divider_y, 460.0f, 2.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
+		AeronDrawList_AddFill(s_vc.list, 1032.0f, 274.0f, 470.0f, 2.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
 	}
 	for (int i = 0; i < s_vc.label_count; ++i) {
 		const VcLabel* l = &s_vc.labels[i];
