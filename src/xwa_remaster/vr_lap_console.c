@@ -736,9 +736,17 @@ static void vc_draw(void) {
 
 /* ---- Frame ------------------------------------------------------------ */
 
+static int vc_ensure(void);
+static int vc_enabled(void);
+
 void XwaVrConsole_BeginFrame(float dt_seconds) {
 	s_vc.dt = dt_seconds > 0.0f && dt_seconds < 0.25f ? dt_seconds : 0.0f;
 	s_vc.drawn = 0;
+	/* Load the font here, between frames, rather than while the flight
+	 * renderer is recording its command buffer. */
+	if (s_vc.state.valid && s_vc.font_state == 0 && vc_enabled() && Aeron_XrIsPresenting()) {
+		vc_ensure();
+	}
 }
 
 void XwaVrConsole_SetState(const XwaVrConsoleState* state) {
@@ -789,8 +797,8 @@ static int vc_ensure(void) {
 int XwaVrConsole_Frame(AeronCommandBuffer* cmd, AeronRenderTarget* target, int width, int height,
 					   const AeronXrView views[2], AeronXrPanel* out) {
 	if (!cmd || !target || width <= 0 || height <= 0 || !views || !out || !s_vc.state.valid || !vc_enabled() ||
-		!vc_ensure()) {
-		return 0;
+		s_vc.font_state == 0 || !vc_ensure()) {
+		return 0; /* the font loads in BeginFrame first */
 	}
 	s_vc.drawn = 1;
 	if (!s_vc.logged) {

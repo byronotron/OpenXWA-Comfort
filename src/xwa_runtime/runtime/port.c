@@ -13,6 +13,7 @@
 #include "xwa/flight/flight.h"
 #include "xwa/flight/flight_display.h"
 #include "xwa/flight/hangar.h"
+#include "xwa/flight/mission/mission.h"
 #include "xwa/frontend/flight_loading.h"
 #include "xwa/frontend/frontend_display.h"
 #include "xwa/frontend/frontend_flight.h"
@@ -275,10 +276,17 @@ static CraftData* XwaPort_VrConsoleCraft(void) {
 		XwaFlightPauseTask_IsActive()) {
 		return NULL;
 	}
+	/* While a mission loads the flight task is already active but the object
+	 * storage is not (or still holds the last mission's stale pointers):
+	 * gate on the storage handle like the snapshot does. */
+	if (!g_objectTable || g_objectTableHandle == 0 || g_localPlayer < 0 || g_localPlayer >= XWA_PLAYER_COUNT) {
+		return NULL;
+	}
 	player = &g_players[g_localPlayer];
 	objIdx = (uint16_t)player->objectIndex;
-	if (objIdx == 0xffffu || player->mapCameraState || player->hyperspacePhase ||
-		g_objectTable[objIdx].mobj == NULL) {
+	if (objIdx == 0xffffu || objIdx >= g_objectTableSlotCount || player->mapCameraState || player->hyperspacePhase ||
+		g_objectTable[objIdx].objectType == OBJ_None ||
+		g_objectTable[objIdx].objectSignature != player->boundObjectSignature || g_objectTable[objIdx].mobj == NULL) {
 		return NULL;
 	}
 	return g_objectTable[objIdx].mobj->pCraft;
@@ -305,7 +313,8 @@ void XwaPort_GetVrConsoleState(XwaVrConsoleState* out) {
 	out->has_target = player->currentTargetObjectIdx != 0xffffu;
 	for (int i = 0; i < 3; ++i) {
 		const int slot = player->targetPresetSlot[i];
-		out->memory_set[i] = slot != -1 && g_objectTable[(uint16_t)slot].objectType != OBJ_None;
+		out->memory_set[i] = slot >= 0 && (uint32_t)slot < g_objectTableSlotCount &&
+							 g_objectTable[slot].objectType != OBJ_None;
 	}
 }
 
