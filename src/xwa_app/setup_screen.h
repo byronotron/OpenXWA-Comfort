@@ -8,13 +8,15 @@
  * immersive OpenXR app with no 2D window.
  */
 
-#define XWA_SETUP_SCREEN_QUIT  0
-#define XWA_SETUP_SCREEN_RETRY 1
+#define XWA_SETUP_SCREEN_FAILED (-1) /* could not be shown (font, UI or renderer failure) */
+#define XWA_SETUP_SCREEN_QUIT   0
+#define XWA_SETUP_SCREEN_RETRY  1
 
 /* Shows `title` and the word-wrapped `message` until the user picks a button.
- * `retry_label` NULL shows only "Quit". Returns XWA_SETUP_SCREEN_RETRY or
- * XWA_SETUP_SCREEN_QUIT (also on quit requests and when the screen cannot be
- * drawn). Requires Aeron_Init. */
+ * `retry_label` NULL shows only "Quit". Returns XWA_SETUP_SCREEN_RETRY,
+ * XWA_SETUP_SCREEN_QUIT (also on an app quit request), or
+ * XWA_SETUP_SCREEN_FAILED when the screen could not be drawn. Requires
+ * Aeron_Init. */
 int XwaSetupScreen_Run(const char* title, const char* message, const char* retry_label);
 
 #endif

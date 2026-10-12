@@ -4123,6 +4123,22 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		s.snap = NULL;
 		return NULL;
 	}
+	if (stereo) {
+		/* One shadow atlas serves both eyes: fit it to a view between the
+		 * eyes whose field of view spans both (eye FOVs are asymmetric). */
+		AeronXrView both = xr_frame.views[0];
+		const AeronXrView* r = &xr_frame.views[1];
+		for (int axis = 0; axis < 3; ++axis) {
+			both.position[axis] = 0.5f * (both.position[axis] + r->position[axis]);
+		}
+		both.fov[0] = fminf(both.fov[0], r->fov[0]);
+		both.fov[1] = fmaxf(both.fov[1], r->fov[1]);
+		both.fov[2] = fmaxf(both.fov[2], r->fov[2]);
+		both.fov[3] = fminf(both.fov[3], r->fov[3]);
+		AeronSceneCamera shadow_fit;
+		fl_xr_eye_camera(&flight_view.camera, &both, &shadow_fit);
+		AeronScene_SetShadowFitCamera(s.scene, &shadow_fit);
+	}
 	if (shadows_active) {
 		const AeronSceneDirectionalShadowDesc shadow = {
 			.enabled = 1,

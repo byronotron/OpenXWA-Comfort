@@ -40,12 +40,12 @@ int XwaSetupScreen_Run(const char* title, const char* message, const char* retry
 	memset(&atlas, 0, sizeof atlas);
 	if (!setup_load_font(&atlas)) {
 		Aeron_LogError("xwa.setup", "could not load the setup font '%s'", XWA_SETUP_FONT_BASENAME);
-		return XWA_SETUP_SCREEN_QUIT;
+		return XWA_SETUP_SCREEN_FAILED;
 	}
 	ui = AeronUi_Create(NULL);
 	if (!ui) {
 		AeronFontAtlas_Release(&atlas);
-		return XWA_SETUP_SCREEN_QUIT;
+		return XWA_SETUP_SCREEN_FAILED;
 	}
 	AeronUi_SetFonts(ui, &(AeronUiFontSet) { .regular = &atlas });
 	{
@@ -108,5 +108,8 @@ int XwaSetupScreen_Run(const char* title, const char* message, const char* retry
 
 	AeronUi_Destroy(ui);
 	AeronFontAtlas_Release(&atlas);
-	return result == XWA_SETUP_SCREEN_RETRY ? XWA_SETUP_SCREEN_RETRY : XWA_SETUP_SCREEN_QUIT;
+	if (result < 0) {
+		return Aeron_FatalErrorRequested() ? XWA_SETUP_SCREEN_FAILED : XWA_SETUP_SCREEN_QUIT;
+	}
+	return result;
 }

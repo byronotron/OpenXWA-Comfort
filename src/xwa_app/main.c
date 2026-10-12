@@ -512,11 +512,12 @@ int main(int argc, char** argv) {
 							  &setup_cancelled, config_error, sizeof config_error)) {
 		if (!setup_cancelled && use_ingame_setup() && launch.game_data_path[0]) {
 			Aeron_LogWarn("xwa.config", "%s", config_error);
-			if (XwaSetupScreen_Run("X-Wing Alliance game files needed", config_error, "Try Again") ==
-				XWA_SETUP_SCREEN_RETRY) {
+			const int choice = XwaSetupScreen_Run("X-Wing Alliance game files needed", config_error, "Try Again");
+			if (choice == XWA_SETUP_SCREEN_RETRY) {
 				continue;
 			}
-			setup_cancelled = 1;
+			/* FAILED falls through to the fatal-error path (logged, exit 1). */
+			setup_cancelled = choice == XWA_SETUP_SCREEN_QUIT;
 		}
 		if (!setup_cancelled) {
 			Aeron_LogError("xwa.config", "%s", config_error);
