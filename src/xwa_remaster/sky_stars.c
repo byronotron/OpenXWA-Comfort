@@ -344,7 +344,8 @@ AeronTexture* XwaRemasterSkyStars_DotTexture(XwaRemasterSkyStars* stars) {
 		.height = DOT,
 		.mip_count = 1,
 		.format = AERON_TEXTURE_FORMAT_RGBA8_UNORM,
-		.usage = AERON_TEXTURE_USAGE_SAMPLED,
+		/* TRANSFER_DST: Aeron rejects uploads into textures without it. */
+		.usage = AERON_TEXTURE_USAGE_SAMPLED | AERON_TEXTURE_USAGE_TRANSFER_DST,
 		.debug_name = "xwa.sky_star_dot",
 	});
 	if (!stars->dot_texture || !Aeron_UploadTextureData(&(AeronTextureUploadDesc) {
