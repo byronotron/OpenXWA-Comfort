@@ -333,6 +333,8 @@ static void android_load_settings(void) {
 			fputs("# OpenXWA Quest settings. Remove the leading '#' to change a value.\n"
 				  "# Per-eye render resolution (lower = faster):\n"
 				  "#AERON_XR_RESOLUTION_SCALE=0.9\n"
+				  "# 1 = dynamic lights from lasers/explosions (costs GPU time in combat):\n"
+				  "#XWA_POINT_LIGHTS=0\n"
 				  "# Directional shadows in the 3D cockpit (1 = on, costs GPU time):\n"
 				  "#XWA_XR_SHADOWS=0\n"
 				  "# 0 = render shadows again for the right eye (default: shared):\n"
@@ -341,8 +343,12 @@ static void android_load_settings(void) {
 				  "#XWA_XR_AUTO_PAUSE=1\n"
 				  "# 0 = everything on the flat virtual screen (no 3D cockpit):\n"
 				  "#XWA_XR_STEREO=1\n"
+				  "# Lower = cockpit and ships feel bigger (try 0.8):\n"
 				  "#XWA_XR_WORLD_SCALE=1.0\n"
+				  "# Helmet HUD: distance in metres, size, 0 = fixed in the cockpit:\n"
 				  "#XWA_XR_HUD_DISTANCE=3.0\n"
+				  "#XWA_XR_HUD_SCALE=0.65\n"
+				  "#XWA_XR_HUD_HEADLOCK=1\n"
 				  "#AERON_XR_SCREEN_DISTANCE=1.6\n"
 				  "#AERON_XR_SCREEN_WIDTH=2.0\n"
 				  "#AERON_XR_THROTTLE_RATE=0.8\n"
@@ -436,9 +442,15 @@ static void apply_quest_render_profile(XwaHostConfig* host) {
 	if (!SDL_getenv("XWA_XR_SHADOWS")) {
 		SDL_setenv_unsafe("XWA_XR_SHADOWS", "0", 1);
 	}
+	/* Laser and explosion point lights are what saturates the Quest GPU in
+	 * dogfights (each one is shaded per pixel, per eye). */
+	if (!SDL_getenv("XWA_POINT_LIGHTS")) {
+		SDL_setenv_unsafe("XWA_POINT_LIGHTS", "0", 1);
+	}
 	Aeron_LogInfo("xwa.config", "Quest render profile: SSAO off, FSR off, motion blur off, MSAA %s, HDR off, "
-							   "stereo shadows %s",
-				  host->video_options.msaa == XWA_MODERN_MSAA_4X ? "4x" : "user", SDL_getenv("XWA_XR_SHADOWS"));
+							   "stereo shadows %s, point lights %s",
+				  host->video_options.msaa == XWA_MODERN_MSAA_4X ? "4x" : "user", SDL_getenv("XWA_XR_SHADOWS"),
+				  SDL_getenv("XWA_POINT_LIGHTS"));
 }
 
 int main(int argc, char** argv) {

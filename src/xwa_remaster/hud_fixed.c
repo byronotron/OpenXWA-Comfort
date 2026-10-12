@@ -14,6 +14,10 @@
 #include <string.h>
 
 static AeronDrawList2D* fixed_list;
+/* VR world split: elements tied to the 3D view go here instead. */
+static AeronDrawList2D* fixed_world_list;
+static int fixed_world_split;
+static int fixed_world_prepared;
 static XwaHudPreparedDrawState fixed_draws;
 static const XwaSnapshot* fixed_snapshot;
 static float fixed_hud_unit_scale = 1.0f;
@@ -57,6 +61,13 @@ static XwaHudLayoutOrigin fixed_scale_origin(XwaHudWidgetId widget) {
 			return XWA_HUD_LAYOUT_CENTER;
 	}
 }
+
+static int fixed_widget_is_world(XwaHudWidgetId widget) {
+	return fixed_scale_origin(widget) == XWA_HUD_LAYOUT_VIEWPORT || widget == XWA_HUD_WIDGET_TARGET_ARROW ||
+		   widget == XWA_HUD_WIDGET_PADLOCK_ARROW;
+}
+
+void XwaRemasterHud_SetWorldSplit(int enabled) { fixed_world_split = enabled != 0; }
 
 static void fixed_point_ref(XwaHudWidgetId widget, float classic_x, float classic_top_y, float* out_x,
 							float* out_y, float* out_scale) {
@@ -962,12 +973,17 @@ static void fixed_build_reticle_threats(const XwaHudState* h, const XwaRemasterH
 int XwaRemasterHudFixed_Init(void) {
 	if (!fixed_list)
 		fixed_list = AeronDrawList_Create(XWA_HUD_MAX_FIXED_DRAWS);
-	return fixed_list != NULL;
+	if (!fixed_world_list)
+		fixed_world_list = AeronDrawList_Create(XWA_HUD_MAX_FIXED_DRAWS);
+	return fixed_list != NULL && fixed_world_list != NULL;
 }
 
 void XwaRemasterHudFixed_Shutdown(void) {
 	AeronDrawList_Destroy(fixed_list);
 	fixed_list = NULL;
+	AeronDrawList_Destroy(fixed_world_list);
+	fixed_world_list = NULL;
+	fixed_world_prepared = 0;
 	fixed_snapshot = NULL;
 	fixed_hud_unit_scale = 1.0f;
 	fixed_classic_pixel_scale = 1.0f;
@@ -1037,26 +1053,30 @@ void XwaRemasterHudFixed_Build(const XwaSnapshot* snapshot, XwaHudProfileIndex p
 void XwaRemasterHudFixed_PrepareDrawList(AeronCommandBuffer* cmd, int target_w, int target_h) {
 	if (!cmd || !fixed_list || target_w <= 0 || target_h <= 0)
 		return;
+	const int split = fixed_world_split && fixed_world_list;
+	fixed_world_prepared = 0;
 	AeronDrawList_Begin(fixed_list, NULL, target_w, target_h, AERON_DRAWLIST2D_LOAD, NULL);
-	if (!fixed_draws.valid) {
+	if (split)
+		AeronDrawList_Begin(fixed_world_list, NULL, target_w, target_h, AERON_DRAWLIST2D_LOAD, NULL);
+	const XwaHudLayoutProfile* profile = fixed_draws.valid ? fixed_profile((XwaHudProfileIndex)fixed_draws.profile)
+														   : NULL;
+	int out_x = 0, out_y = 0;
+	float scale = 0.0f;
+	if (profile)
+		XwaRemasterHudLayout_OutputTransform(profile, target_w, target_h, &out_x, &out_y, &scale);
+	if (!profile || scale <= 0.0f) {
 		(void)AeronDrawList_Prepare(fixed_list, cmd);
-		return;
-	}
-	const XwaHudLayoutProfile* profile = fixed_profile((XwaHudProfileIndex)fixed_draws.profile);
-	if (!profile) {
-		(void)AeronDrawList_Prepare(fixed_list, cmd);
-		return;
-	}
-	int out_x, out_y;
-	float scale;
-	XwaRemasterHudLayout_OutputTransform(profile, target_w, target_h, &out_x, &out_y, &scale);
-	if (scale <= 0.0f) {
-		(void)AeronDrawList_Prepare(fixed_list, cmd);
+		if (split) {
+			(void)AeronDrawList_Prepare(fixed_world_list, cmd);
+			fixed_world_prepared = 1;
+		}
 		return;
 	}
 	XwaRemasterHud_BeginRenderPhase();
 	for (uint16_t i = 0; i < fixed_draws.record_count; i++) {
 		const XwaHudDrawRecord* r = &fixed_draws.records[i];
+		AeronDrawList2D* list = split && fixed_widget_is_world((XwaHudWidgetId)r->widget) ? fixed_world_list
+																						: fixed_list;
 		const XwaAssetRef* asset = XwaRemasterHud_AssetFrame(r->object_type, r->frame);
 		if (!asset || asset->classic_w <= 0 || asset->classic_h <= 0)
 			continue;
@@ -1107,13 +1127,17 @@ void XwaRemasterHudFixed_PrepareDrawList(AeronCommandBuffer* cmd, int target_w, 
 			quad.texture = sprite.texture;
 			quad.blend = sprite.blend;
 			quad.filter = sprite.filter;
-			AeronDrawList_AddQuad4(fixed_list, &quad);
+			AeronDrawList_AddQuad4(list, &quad);
 		} else {
-			AeronDrawList_AddSprite(fixed_list, &sprite);
+			AeronDrawList_AddSprite(list, &sprite);
 		}
 	}
 	XwaRemasterHud_EndRenderPhase();
 	(void)AeronDrawList_Prepare(fixed_list, cmd);
+	if (split) {
+		(void)AeronDrawList_Prepare(fixed_world_list, cmd);
+		fixed_world_prepared = 1;
+	}
 }
 
 void XwaRemasterHudFixed_Render(AeronCommandBuffer* cmd, AeronRenderPass* pass, AeronRenderTarget* target,
@@ -1122,6 +1146,14 @@ void XwaRemasterHudFixed_Render(AeronCommandBuffer* cmd, AeronRenderPass* pass, 
 		target_h <= 0)
 		return;
 	AeronDrawList_RenderIntoPass(fixed_list, cmd, pass, target);
+}
+
+void XwaRemasterHudFixed_RenderWorld(AeronCommandBuffer* cmd, AeronRenderPass* pass, AeronRenderTarget* target,
+									 int target_w, int target_h) {
+	if (!cmd || !pass || !target || !fixed_world_list || !fixed_world_prepared || !fixed_draws.valid ||
+		target_w <= 0 || target_h <= 0)
+		return;
+	AeronDrawList_RenderIntoPass(fixed_world_list, cmd, pass, target);
 }
 
 const XwaHudPreparedDrawState* XwaRemasterHud_PreparedDrawState(void) { return &fixed_draws; }

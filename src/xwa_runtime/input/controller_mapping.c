@@ -53,6 +53,18 @@ const AeronControllerSnapshot* XwaControllerMapping_SelectedController(void) {
 	if (!input || !g_controllerMapping.configured) {
 		return NULL;
 	}
+#if defined(__ANDROID__)
+	/* On a standalone headset Android also lists system input devices as
+	 * joysticks; with no device chosen in the options, fly with the VR
+	 * controllers rather than whichever device happens to be first. */
+	if (!g_controllerMapping.options.device.guid[0] && !g_controllerMapping.options.device.path[0]) {
+		static const AeronControllerSelector touch = { .path = "openxr:touch" };
+		const AeronControllerSnapshot* controller = Aeron_SelectController(input, &touch);
+		if (controller) {
+			return controller;
+		}
+	}
+#endif
 	return Aeron_SelectController(input, &g_controllerMapping.options.device);
 }
 

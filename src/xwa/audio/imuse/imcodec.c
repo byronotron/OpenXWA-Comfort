@@ -1061,6 +1061,15 @@ unsigned int ImVimaEncodeBlock(ImVimaState* state, unsigned char* dst, int16_t* 
 	for (channel = 0; channel < channelCount; ++channel) {
 		samplePtr = samples + channel;
 		stepIndex = state->stepIndex[channel];
+#ifdef XWA_MODERN
+		/* A corrupt or sign-confused block header must not index past the
+		 * 89-entry step tables. */
+		if (stepIndex < 0) {
+			stepIndex = 0;
+		} else if (stepIndex > 88) {
+			stepIndex = 88;
+		}
+#endif
 		predictor = state->predictor[channel];
 
 		for (i = 0; i < sampleCount; ++i) {
@@ -1465,6 +1474,15 @@ void ImVimaDecodeAdpcm(ImVimaState* state, int16_t* dst, unsigned char* src, int
 
 		samplesLeft = sampleCount;
 		stepIndex = state->stepIndex[channel];
+#ifdef XWA_MODERN
+		/* A corrupt or sign-confused block header must not index past the
+		 * 89-entry step tables. */
+		if (stepIndex < 0) {
+			stepIndex = 0;
+		} else if (stepIndex > 88) {
+			stepIndex = 88;
+		}
+#endif
 		sample = state->predictor[channel];
 		dstCur = dst + channel;
 		channelCount <<= 1;

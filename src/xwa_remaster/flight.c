@@ -18,6 +18,7 @@
 #include "xwa_remaster/flight_map.h"
 #include "xwa_remaster/glow_marks.h"
 #include "xwa_remaster/hud.h"
+#include "xwa_remaster/hud_fixed.h"
 #include "xwa_remaster/hyperspace.h"
 #include "xwa_remaster/ship.h"
 #include "xwa_remaster/sky_stars.h"
@@ -705,6 +706,14 @@ int XwaRemasterFlight_InitConfig(AeronVfs* vfs) {
 		s.hangar_lighting.direction[axis] /= hangar_direction_length;
 	}
 	s.plight.enabled = AeronConfigFile_GetBool(cf, "point_lights.enabled", 0);
+	{
+		/* XWA_POINT_LIGHTS=0/1 overrides the config (the Quest profile turns
+		 * them off: per-pixel point lights in both eyes saturate its GPU). */
+		const char* env = getenv("XWA_POINT_LIGHTS");
+		if (env && (env[0] == '0' || env[0] == '1')) {
+			s.plight.enabled = env[0] == '1';
+		}
+	}
 	s.plight.clustered = AeronConfigFile_GetBool(cf, "point_lights.clustered", 0);
 	s.plight.cluster_depth_slices = (int)AeronConfigFile_GetInt(cf, "point_lights.cluster_depth_slices", 0);
 	s.plight.cluster_debug = AeronConfigFile_GetBool(cf, "point_lights.cluster_debug", 0);
@@ -3295,32 +3304,51 @@ static void fl_draw_present(AeronCommandBuffer* cmd, AeronRenderPass* pass, Aero
 	fl_draw_hud(cmd, pass, target, target_w, target_h);
 }
 
-/* Semantic HUD draws over an open pass (flat presentation or the VR HUD quad). */
-static void fl_draw_hud(AeronCommandBuffer* cmd, AeronRenderPass* pass, AeronRenderTarget* target, int target_w,
-						int target_h) {
+/* HUD parts for VR, where the HUD is split over two quads: the "world"
+ * part (target brackets, reticle, threat and target arrows) has to line up
+ * with the 3D view, the "head" part (radar, MFDs, CMD, text) follows the
+ * head like a helmet display. Flat output draws everything. */
+enum { FL_HUD_HEAD = 1, FL_HUD_WORLD = 2, FL_HUD_ALL = FL_HUD_HEAD | FL_HUD_WORLD };
+
+static void fl_draw_hud_parts(AeronCommandBuffer* cmd, AeronRenderPass* pass, AeronRenderTarget* target,
+							  int target_w, int target_h, int parts) {
 	if (s.suppress_hud) {
 		return;
 	}
-	if (!s.map_present) {
+	if (!s.map_present && (parts & FL_HUD_WORLD)) {
 		Aeron_GpuDebugMarker(cmd, "HUD target boxes before fixed");
 		XwaRemasterHud_RenderTargetBoxes(cmd, pass, target, target_w, target_h,
 										 XWA_HUD_TARGET_BOX_BEFORE_FIXED);
 	}
-	Aeron_GpuDebugMarker(cmd, "HUD fixed");
-	XwaRemasterHud_RenderFixed(cmd, pass, target, target_w, target_h);
-	if (!s.map_present) {
+	if (parts & FL_HUD_WORLD) {
+		/* Empty unless the world split is on. */
+		XwaRemasterHudFixed_RenderWorld(cmd, pass, target, target_w, target_h);
+	}
+	if (parts & FL_HUD_HEAD) {
+		Aeron_GpuDebugMarker(cmd, "HUD fixed");
+		XwaRemasterHud_RenderFixed(cmd, pass, target, target_w, target_h);
+	}
+	if (!s.map_present && (parts & FL_HUD_WORLD)) {
 		Aeron_GpuDebugMarker(cmd, "HUD target boxes after fixed");
 		XwaRemasterHud_RenderTargetBoxes(cmd, pass, target, target_w, target_h,
 										 XWA_HUD_TARGET_BOX_AFTER_FIXED);
 	}
-	Aeron_GpuDebugMarker(cmd, "HUD CMD");
-	XwaRemasterHud_RenderCmd(cmd, pass, target, target_w, target_h);
-	Aeron_GpuDebugMarker(cmd, "HUD text");
-	XwaRemasterHud_RenderText(cmd, pass, target, target_w, target_h);
-	if (s.map_present) {
-		Aeron_GpuDebugMarker(cmd, "Flight map deferred text");
-		XwaRemasterFlightMap_RenderDeferredText(cmd, pass, target);
+	if (parts & FL_HUD_HEAD) {
+		Aeron_GpuDebugMarker(cmd, "HUD CMD");
+		XwaRemasterHud_RenderCmd(cmd, pass, target, target_w, target_h);
+		Aeron_GpuDebugMarker(cmd, "HUD text");
+		XwaRemasterHud_RenderText(cmd, pass, target, target_w, target_h);
+		if (s.map_present) {
+			Aeron_GpuDebugMarker(cmd, "Flight map deferred text");
+			XwaRemasterFlightMap_RenderDeferredText(cmd, pass, target);
+		}
 	}
+}
+
+/* Semantic HUD draws over an open pass (flat presentation). */
+static void fl_draw_hud(AeronCommandBuffer* cmd, AeronRenderPass* pass, AeronRenderTarget* target, int target_w,
+						int target_h) {
+	fl_draw_hud_parts(cmd, pass, target, target_w, target_h, FL_HUD_ALL);
 }
 
 AeronTexture* XwaRemasterFlight_ResolvePresentation(AeronCommandBuffer* cmd, int direct_present) {
@@ -3861,7 +3889,7 @@ static int fl_xr_output_eye(AeronCommandBuffer* cmd, AeronRenderTarget* target, 
 	return 1;
 }
 
-static int fl_xr_output_hud(AeronCommandBuffer* cmd, AeronRenderTarget* target) {
+static int fl_xr_output_hud(AeronCommandBuffer* cmd, AeronRenderTarget* target, int parts) {
 	AeronRenderPass* pass = Aeron_BeginRenderPass(&(AeronRenderPassDesc) {
 		.color_target = target,
 		.clear_color = 1,
@@ -3875,18 +3903,52 @@ static int fl_xr_output_hud(AeronCommandBuffer* cmd, AeronRenderTarget* target) 
 	const AeronRectI full = { 0, 0, s.rt_w, s.rt_h };
 	Aeron_SetViewport(pass, &full);
 	Aeron_SetScissor(pass, &full);
-	fl_draw_hud(cmd, pass, target, s.rt_w, s.rt_h);
+	fl_draw_hud_parts(cmd, pass, target, s.rt_w, s.rt_h, parts);
 	Aeron_EndRenderPass(pass);
 	return 1;
 }
 
-/* HUD quad matching the ship camera's frustum at a fixed distance. */
-static void fl_xr_hud_quad(const AeronSceneCamera* base, AeronXrHudQuad* out) {
-	const float d = fl_xr_env("XWA_XR_HUD_DISTANCE", 3.0f);
+/* XWA_XR_HUD_HEADLOCK=0 keeps the whole HUD on one quad fixed in the
+ * cockpit (the original VR layout). Default: helmet HUD. */
+static int fl_xr_hud_head_locked(void) {
+	const char* env = getenv("XWA_XR_HUD_HEADLOCK");
+	return !(env && env[0] == '0');
+}
+
+/* HUD quads.
+ *
+ * Fixed (world) quad: matches the ship camera's frustum, so what is drawn
+ * at a screen position lines up with the 3D world from the seated head
+ * position. With the helmet HUD it only carries the elements tied to the
+ * world (brackets, reticle) and sits far away (XWA_XR_HUD_WORLD_DISTANCE,
+ * 500 m): a quad near the eyes would make the eyes converge on it while the
+ * targets it marks are kilometres away, which reads as double vision.
+ *
+ * Helmet (head) quad: the rest of the HUD at XWA_XR_HUD_DISTANCE, scaled by
+ * XWA_XR_HUD_SCALE, centred in front of the eyes and trailing head motion
+ * with an XWA_XR_HUD_SMOOTH time constant. */
+static void fl_xr_hud_quad(const AeronSceneCamera* base, AeronXrHudQuad* out, int head) {
+	const int split = fl_xr_hud_head_locked();
 	const float th = tanf(base->h_half_rad);
 	const float tv = tanf(base->v_half_rad);
 	memset(out, 0, sizeof *out);
 	out->visible = !s.suppress_hud;
+	if (head) {
+		const float d = fl_xr_env("XWA_XR_HUD_DISTANCE", 3.0f);
+		const float scale = fl_xr_env("XWA_XR_HUD_SCALE", 0.65f);
+		const char* smooth = getenv("XWA_XR_HUD_SMOOTH");
+		out->size[0] = 2.0f * d * th * scale;
+		out->size[1] = 2.0f * d * tv * scale;
+		out->position[2] = -d;
+		out->head_locked = 1;
+		out->follow_s = 0.18f;
+		if (smooth && smooth[0]) {
+			const float value = (float)atof(smooth);
+			out->follow_s = value > 0.0f ? value : 0.0f; /* 0 = rigid */
+		}
+		return;
+	}
+	const float d = split ? fl_xr_env("XWA_XR_HUD_WORLD_DISTANCE", 500.0f) : fl_xr_env("XWA_XR_HUD_DISTANCE", 3.0f);
 	out->size[0] = 2.0f * d * th;
 	out->size[1] = 2.0f * d * tv;
 	out->position[0] = -base->proj_x_offset * th * d;
@@ -3910,6 +3972,14 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	}
 	memcpy(s.origin_world, flight_view.origin_world, sizeof s.origin_world);
 	memcpy(s.camera_local, flight_view.camera.pos, sizeof s.camera_local);
+	{
+		/* The HUD draw lists are built here, so the VR head/world split has
+		 * to be known before the stereo decision further down. */
+		AeronXrStereoFrame probe;
+		const int stereo_probe = fl_xr_stereo_eligible(cam) && Aeron_XrStereoBegin(&probe) &&
+								 probe.width == s.rt_w && probe.height == s.rt_h;
+		XwaRemasterHud_SetWorldSplit(stereo_probe && fl_xr_hud_head_locked());
+	}
 	XwaRemasterHud_PrepareFrame(cmd, snap, assets, &flight_view, s.rt_w, s.rt_h);
 	fl_quat_to_mat3(flight_view.camera.ori, s.crows);
 	const uint64_t host_time_us = XwaTime_GetElapsedUs();
@@ -4200,6 +4270,9 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 			if (stereo) {
 				/* The eye covers a wider field than the ship camera at the same height. */
 				upscale *= tanf(flight_view.camera.v_half_rad) / tanf(xr_eyes[0].v_half_rad);
+				/* A star the size of one classic pixel is smaller than a
+				 * headset pixel and vanishes in the lens; keep a minimum. */
+				upscale = fmaxf(upscale, fl_xr_env("XWA_XR_STAR_MIN_SCALE", 2.5f));
 			}
 			const XwaRemasterSkyStarsParams stars = {
 				.exposure = s.sky_exposure,
@@ -4595,14 +4668,35 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	AeronScene_SetPassHook(s.scene, AERON_SCENE_HOOK_BEFORE_OPAQUE, NULL, NULL);
 	s.before_opaque_mode = FL_BEFORE_OPAQUE_NONE;
 	s.snap = NULL; /* hooks must not outlive the snapshot */
-	/* Flat output (desktop window / non-VR): right eye in stereo, plus HUD. */
-	AeronTexture* out = fl_present(cmd, stereo ? 0 : direct_present);
+	/* Flat output (desktop window / non-VR): right eye in stereo, plus HUD.
+	 * A headless headset (Quest standalone) has no window to show it in, so
+	 * skip that whole tonemap + HUD pass; the scene texture stands in as the
+	 * (unshown) flat result. */
+	const int flat_output = !stereo || Aeron_HasDesktopMirror();
+	AeronTexture* out;
+	if (flat_output) {
+		out = fl_present(cmd, stereo ? 0 : direct_present);
+	} else {
+		s.present_scene_tex = Aeron_RenderTargetGetTexture(AeronScene_SceneRt(s.scene));
+		s.present_bloom_tex = NULL; /* the right eye computes its own */
+		s.direct_ready = 0;
+		out = s.present_scene_tex;
+	}
 	if (out && stereo) {
+		const int split = fl_xr_hud_head_locked();
 		AeronXrHudQuad hud;
+		AeronXrHudQuad hud_world;
 		if (fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format, s.present_bloom_tex) &&
-			fl_xr_output_hud(cmd, xr_frame.hud_target)) {
-			fl_xr_hud_quad(&flight_view.camera, &hud);
-			Aeron_XrStereoCommit(&hud);
+			fl_xr_output_hud(cmd, xr_frame.hud_target, split ? FL_HUD_HEAD : FL_HUD_ALL) &&
+			(!split || fl_xr_output_hud(cmd, xr_frame.hud_world_target, FL_HUD_WORLD))) {
+			if (split) {
+				fl_xr_hud_quad(&flight_view.camera, &hud, 1);
+				fl_xr_hud_quad(&flight_view.camera, &hud_world, 0);
+				Aeron_XrStereoCommitHuds(&hud, &hud_world);
+			} else {
+				fl_xr_hud_quad(&flight_view.camera, &hud, 0);
+				Aeron_XrStereoCommit(&hud);
+			}
 		}
 	}
 	return out;

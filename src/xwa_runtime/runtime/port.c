@@ -12,6 +12,7 @@
 #include "xwa/config/pilot.h"
 #include "xwa/flight/flight.h"
 #include "xwa/flight/flight_display.h"
+#include "xwa/flight/hangar.h"
 #include "xwa/frontend/flight_loading.h"
 #include "xwa/frontend/frontend_display.h"
 #include "xwa/frontend/frontend_flight.h"
@@ -38,6 +39,7 @@
 #include "xwa_runtime/timing/host_clock.h"
 
 #include <stdio.h>
+#include <string.h>
 
 static int g_xwaPortInitialized;
 static int g_xwaPortShouldQuit;
@@ -180,6 +182,104 @@ int XwaPort_QueueMouseLookToggle(void) {
 	return 1;
 }
 
+/* VR controller buttons in flight. Each Touch button has a plain and a
+ * shifted (left grip held) action; the right stick flicks only exist
+ * shifted. Fire, target-in-sights (right grip), steering, roll and the
+ * throttle lever stay on the virtual gamepad. */
+typedef struct XwaVrButtonBinding {
+	uint16_t plain;
+	uint16_t shifted;
+} XwaVrButtonBinding;
+
+static const XwaVrButtonBinding g_xwaVrButtonBindings[AERON_XR_BUTTON_COUNT] = {
+	[AERON_XR_BUTTON_A]            = { KEY_R, KEY_O },
+	[AERON_XR_BUTTON_B]            = { KEY_T, KEY_Y },
+	[AERON_XR_BUTTON_X]            = { KEY_C, KEY_SPACE },
+	[AERON_XR_BUTTON_Y]            = { KEY_ENTER, KEY_SHIFT_P },
+	[AERON_XR_BUTTON_LEFT_TRIGGER] = { KEY_W, KEY_SHIFT_D },
+	[AERON_XR_BUTTON_LEFT_STICK]   = { KEY_X, KEY_SHIFT_R },
+	[AERON_XR_BUTTON_RIGHT_STICK]  = { KEY_E, KEY_A },
+	[AERON_XR_BUTTON_RIGHT_GRIP]   = { KEY_NONE, KEY_I },
+	[AERON_XR_BUTTON_FLICK_UP]     = { KEY_NONE, KEY_APOSTROPHE },
+	[AERON_XR_BUTTON_FLICK_DOWN]   = { KEY_NONE, KEY_SEMICOLON },
+	[AERON_XR_BUTTON_FLICK_LEFT]   = { KEY_NONE, KEY_S },
+	[AERON_XR_BUTTON_FLICK_RIGHT]  = { KEY_NONE, KEY_N },
+};
+
+static int g_xwaPortVrFlightButtons;
+
+/* Queues a flight action key behind any already pending ones (the injected
+ * stack pops from the top, so FIFO order means inserting at the bottom). */
+static int XwaPort_QueueFlightActionKey(uint16_t key) {
+	int i;
+	if (key == KEY_NONE) {
+		return 0;
+	}
+	if (g_injectedKeyCount >= (int)(sizeof g_injectedKeyStack / sizeof g_injectedKeyStack[0])) {
+		return 0;
+	}
+	for (i = g_injectedKeyCount; i > 0; --i) {
+		g_injectedKeyStack[i] = g_injectedKeyStack[i - 1];
+	}
+	g_injectedKeyStack[0] = key;
+	++g_injectedKeyCount;
+	return 1;
+}
+
+/* Short haptic tick on the VR controllers as press feedback. */
+static void XwaPort_VrButtonTick(void) {
+	const AeronInputSnapshot* input = Aeron_InputSnapshot();
+	int                       i;
+	if (!input) {
+		return;
+	}
+	for (i = 0; i < AERON_CONTROLLER_MAX; ++i) {
+		const AeronControllerSnapshot* pad = &input->controllers[i];
+		if (pad->connected && strcmp(pad->path, "openxr:touch") == 0) {
+			Aeron_RumbleController(pad->instance_id, 0x3000, 0x6000, 25);
+			return;
+		}
+	}
+}
+
+static void XwaPort_UpdateVrFlightButtons(int enabled) {
+	AeronXrButton button;
+	int           shifted;
+	enabled = enabled && Aeron_XrIsPresenting();
+	if (enabled != g_xwaPortVrFlightButtons) {
+		g_xwaPortVrFlightButtons = enabled;
+		Aeron_XrSetFlightButtons(enabled);
+	}
+	if (!enabled) {
+		return;
+	}
+	while (Aeron_XrPollButton(&button, &shifted)) {
+		uint16_t key;
+		if ((int)button < 0 || (int)button >= AERON_XR_BUTTON_COUNT) {
+			continue;
+		}
+		key = shifted ? g_xwaVrButtonBindings[button].shifted : g_xwaVrButtonBindings[button].plain;
+		if (XwaPort_QueueFlightActionKey(key)) {
+			XwaPort_VrButtonTick();
+		}
+	}
+}
+
+/* Picks the VR controller mode for this frame: keyboard-only menus in the
+ * hangar, bindable buttons in flight, neither elsewhere (the laser pointer
+ * handles the frontend). */
+static void XwaPort_UpdateVrModes(void) {
+	const int flight = XwaFlightTask_IsActive();
+	const int modal  = flight && FlightDisplay_IsFrontendModalActive();
+	if (!Aeron_XrIsPresenting()) {
+		Aeron_XrSetMenuKeys(0);
+		XwaPort_UpdateVrFlightButtons(0);
+		return;
+	}
+	Aeron_XrSetMenuKeys(flight && g_inHangarReady && !modal);
+	XwaPort_UpdateVrFlightButtons(flight && !g_inHangarReady && !modal && !XwaFlightPauseTask_IsActive());
+}
+
 void XwaPort_ToggleMouseCapture(void) {
 	g_xwaPortMouseCaptureSuspended = !g_xwaPortMouseCaptureSuspended;
 	Aeron_LogInfo("xwa", "%s", g_xwaPortMouseCaptureSuspended ? "mouse released to OS" : "mouse captured");
@@ -212,6 +312,7 @@ static void XwaPort_TickBody(int32_t delta_us) {
 	if (input != 0 && input->has_focus) {
 		g_xwaPortEverHadFocus = 1;
 	}
+	XwaPort_UpdateVrModes();
 
 	XwaSnapshot_BeginTick();
 

@@ -206,6 +206,11 @@ void XwaRemasterHud_PrepareFrame(AeronCommandBuffer* cmd, const XwaSnapshot* sna
 								 XwaRemasterAssets* assets, const XwaRemasterFlightView* flight_view,
 								 int target_w, int target_h);
 const XwaRemasterHudPreparedAssets* XwaRemasterHud_PreparedAssets(void);
+/* VR: draw the elements tied to the 3D world (reticle, threat and
+ * readiness indicators, target arrows) into a separate list, rendered by
+ * XwaRemasterHudFixed_RenderWorld, so they can sit on a far quad while the
+ * rest of the HUD follows the head. Applies from the next PrepareFrame. */
+void XwaRemasterHud_SetWorldSplit(int enabled);
 void XwaRemasterHud_BeginRenderPhase(void);
 void XwaRemasterHud_EndRenderPhase(void);
 const XwaAssetRef* XwaRemasterHud_AssetFrame(int object_type, int classic_frame_1based);

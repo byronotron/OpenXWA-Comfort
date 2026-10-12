@@ -170,6 +170,9 @@ void XwaVrKeyboard_BeginFrame(int32_t delta_us) {
 		AeronUi_EndColumns(g_vrk.ui);
 		AeronUi_EndWindow(g_vrk.ui);
 	}
+	/* The game's cursor is drawn underneath this overlay; show where the
+	 * laser points on top of the keys. */
+	AeronUi_DrawPointer(g_vrk.ui, 9.0f);
 	const AeronUiOutput out = AeronUi_EndFrame(g_vrk.ui);
 	g_vrk.frame_open        = 1;
 

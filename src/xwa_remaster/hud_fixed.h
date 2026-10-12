@@ -27,5 +27,9 @@ const XwaHudProjectedArrow* XwaRemasterHudFixed_TargetArrow(void);
 int XwaRemasterHudFixed_ReticleCenter(float* out_x_ref, float* out_y_ref);
 void XwaRemasterHudFixed_Render(AeronCommandBuffer* cmd, AeronRenderPass* pass,
 								AeronRenderTarget* target, int target_w, int target_h);
+/* The world-split elements (see XwaRemasterHud_SetWorldSplit); nothing
+ * when the split is off. */
+void XwaRemasterHudFixed_RenderWorld(AeronCommandBuffer* cmd, AeronRenderPass* pass,
+									 AeronRenderTarget* target, int target_w, int target_h);
 
 #endif

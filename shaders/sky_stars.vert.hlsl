@@ -155,7 +155,9 @@ VSOut main(uint vid : SV_VertexID)
     /* localPx.y is screen-down; NDC y is up, so flip. */
     float2 clipOff = localPx * float2(2.0f / view.x, -2.0f / view.y) * clip.w;
 
-    o.position = float4(clip.xy + clipOff, 0.0f, clip.w); /* reverse-Z far plane */
+    /* Reverse-Z far plane, nudged off exactly 0: some mobile GPUs (Adreno)
+     * clip or depth-fail z == 0 against the 0 clear. */
+    o.position = float4(clip.xy + clipOff, 1e-7f * clip.w, clip.w);
     o.localPx = localPx;
 
     float expB = tone.x;

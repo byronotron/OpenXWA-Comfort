@@ -33,6 +33,14 @@ if(XWA_ENABLE_ASAN)
     message(STATUS "AddressSanitizer enabled (XWA_ENABLE_ASAN=ON)")
 endif()
 
+# The original game was built for x86, where plain `char` is signed. ARM
+# Linux/Android ABIs make it unsigned, which silently breaks table lookups
+# with negative indices (e.g. the iMUSE VIMA step-index adjust). Apple's ARM
+# ABI already uses signed char.
+if(NOT MSVC AND NOT APPLE AND (ANDROID OR CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|arm)"))
+    add_compile_options(-fsigned-char)
+endif()
+
 # Aeron engine (window, GPU HAL, input, audio, VFS) — shared git submodule.
 option(XWA_BUILD_TOOLS "Build OpenXWA and Aeron asset/developer tools" ON)
 set(AERON_BUILD_TOOLS ${XWA_BUILD_TOOLS})
