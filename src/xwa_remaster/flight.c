@@ -2065,7 +2065,7 @@ static void fl_world_to_view(const float cam[9], float x, float y, float z, floa
 }
 
 static uint32_t fl_derive_backdrops(const XwaSnapshot* snap, const float crows[9],
-									XwaRemasterAssets* assets) {
+									XwaRemasterAssets* assets, int stereo) {
 	uint32_t count = 0;
 	for (uint32_t i = 0; i < snap->backdrop_count; i++) {
 		const XwaBackdrop* b = &snap->backdrops[i];
@@ -2135,7 +2135,11 @@ static uint32_t fl_derive_backdrops(const XwaSnapshot* snap, const float crows[9
 			 * direction / 512. Visibility gates on the camera forward
 			 * row's Z sign (side 4 faces one world pole, 5 the other). */
 			const float fwd_z = crows[8];
-			if ((b->side == 4 && !(fwd_z > 0.0f)) || (b->side == 5 && !(fwd_z < 0.0f))) {
+			/* The classic hemisphere gate keys on the SHIP camera's forward.
+			 * In VR the player looks around with a much wider field of view,
+			 * so the gate would pop pole backdrops (planets) in and out while
+			 * they are on screen. Quads behind the eye are clipped anyway. */
+			if (!stereo && ((b->side == 4 && !(fwd_z > 0.0f)) || (b->side == 5 && !(fwd_z < 0.0f)))) {
 				continue;
 			}
 			if (count >= FL_MAX_BACKDROP_QUADS ||
@@ -4051,7 +4055,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	fl_derive_billboards(snap, assets, billboard_history_cam, billboard_history_crows);
 	fl_derive_lens_flares(snap, assets, &flight_view);
 	fl_derive_point_lights(snap);
-	s.bd_count = fl_derive_backdrops(snap, s.crows, assets);
+	s.bd_count = fl_derive_backdrops(snap, s.crows, assets, stereo);
 	XwaRemasterEffectView effect_view;
 	XwaRemasterEffectView_Main(&effect_view, &flight_view, s.crows);
 	XwaRemasterEffectView previous_effect_view;
@@ -4206,6 +4210,20 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	 * against the cleared / prepass buffer reproduces that (behind all
 	 * geometry, visible elsewhere). */
 	for (uint32_t i = 0; i < s.bd_count; i++) {
+		if (stereo) {
+			/* Classic backdrops sit ~2k units (about 50 m) from the camera.
+			 * Push them out along their view rays (same angular size) so the
+			 * eyes see no parallax: planets read as infinitely far away. */
+			float far_corners[4][3];
+			for (int v = 0; v < 4; v++) {
+				for (int a = 0; a < 3; a++) {
+					far_corners[v][a] = s.bd_quads[i].corners[v][a] * 256.0f;
+				}
+			}
+			fl_submit_view_quad(AERON_SCENE_BILLBOARD_STAGE_SKY, far_corners, s.bd_quads[i].uvs,
+								&s.bd_quads[i].ref, 0xffffffffu, NULL);
+			continue;
+		}
 		fl_submit_view_quad(AERON_SCENE_BILLBOARD_STAGE_SKY, s.bd_quads[i].corners, s.bd_quads[i].uvs,
 							&s.bd_quads[i].ref, 0xffffffffu, NULL);
 	}
