@@ -319,7 +319,8 @@ static void vc_layout(void) {
 			vc_label(x + w * 0.5f, 202.0f, "SUBSYSTEM", 22, 1, 0, !st->has_target);
 		}
 		{
-			vc_label(x, 262.0f, "MEMORY", 20, 0, 0, 0);
+			vc_label(x, 251.0f, "STORE", 20, 0, 0, 0);
+			vc_label(x, 273.0f, "TARGET", 20, 0, 0, 0);
 			static const char* const l[3] = { "1", "2", "3" };
 			static const XwaVrConsoleAction a[3] = { XWA_VRC_MEMORY_RECALL, XWA_VRC_MEMORY_RECALL,
 													 XWA_VRC_MEMORY_RECALL };
