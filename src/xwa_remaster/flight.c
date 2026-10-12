@@ -3959,8 +3959,9 @@ static void fl_xr_hud_quad(const AeronSceneCamera* base, AeronXrHudQuad* out, in
 /* VR starfield. The procedural star pass (a vertex-pulled scatter draw
  * before the opaque pass) never showed up on the Quest's GPU, while sky
  * billboards (backdrops) do; in stereo the same field is evaluated on the
- * CPU and drawn as additive sky billboards instead. XWA_XR_STARS=shader
- * restores the GPU pass. */
+ * CPU and drawn as additive sky billboards instead, submitted before the
+ * backdrops so planets cover them. XWA_XR_STARS=shader restores the GPU
+ * pass. */
 static int fl_xr_star_sprites(void) {
 	const char* env = getenv("XWA_XR_STARS");
 	return !(env && strcmp(env, "shader") == 0);
@@ -4396,6 +4397,13 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		}
 	}
 
+	/* VR stars first: sky billboards draw in submission order, and the
+	 * classic draws the starfield under the backdrops. The pool has room
+	 * for FL_VR_STAR_MAX on top of the usual billboard budget. */
+	if (vr_star_sprites) {
+		fl_submit_vr_stars(&stars_params, xr_eyes, fl_world_to_cube);
+	}
+
 	/* Backdrops — classic draws them first with depth compare and write
 	 * both OFF (states 0x612/0x2612); the SKY stage's far-depth GE test
 	 * against the cleared / prepass buffer reproduces that (behind all
@@ -4737,10 +4745,6 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	 * (OVERLAY stage, back-to-front; engine glows submit per instance
 	 * above, in the classic per-object order). */
 	fl_submit_billboards();
-	/* VR stars last, so a full billboard pool drops stars, not explosions. */
-	if (vr_star_sprites) {
-		fl_submit_vr_stars(&stars_params, xr_eyes, fl_world_to_cube);
-	}
 	/* Lens-flare trains (LENS stage — the scene draws them after its
 	 * color passes with GPU anchor occlusion, before bloom). */
 	if (!stereo) {
