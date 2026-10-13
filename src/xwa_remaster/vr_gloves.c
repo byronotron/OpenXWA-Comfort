@@ -459,15 +459,17 @@ static void gl_pose(const GlHand* h, float (*rot)[4]) {
 	 * trigger, not a fist: less. */
 	static const float bend[3] = { 1.30f, 1.65f, 1.05f };
 	static const float index_bend[3] = { 0.85f, 0.95f, 0.55f };
+	/* A relaxed straight finger keeps a slight curve. */
+	static const float relaxed[3] = { 0.06f, 0.10f, 0.06f };
 	for (int f = 0; f < GL_FINGERS; ++f) {
 		for (int k = 0; k < 3; ++k) {
 			const int j = m->finger[f][1 + k];
 			const float b = f == 0 ? index_bend[k] : bend[k];
-			/* Right fingers curl about +Z, left about -Z; curl 0 is straight. */
-			const float angle = -m->rest_curl[j] + m->side * h->curl[f] * b;
-			float q[4];
-			q_axis(0.0f, 0.0f, 1.0f, angle, q);
-			q_mul(m->joints[j].r, q, rot[j]);
+			/* Pure flexion from the bone lined up with its parent: the
+			 * model's rest pose kinks the fingers sideways and bends the
+			 * index knuckle backwards, which looks broken when pointing.
+			 * Right fingers curl about +Z, left about -Z. */
+			q_axis(0.0f, 0.0f, 1.0f, m->side * (relaxed[k] + h->curl[f] * b), rot[j]);
 		}
 	}
 	/* Thumb: the rest pose lies on the controller; thumbs up straightens it
@@ -616,11 +618,14 @@ void XwaVrGloves_Submit(AeronScene3D* scene, AeronCommandBuffer* cmd, const floa
 		if (xh.index_touch == 1) {
 			index_goal = 0.35f + 0.6f * xh.trigger;
 		} else if (xh.index_touch == 0) {
-			index_goal = 0.0f; /* pointing: straight */
+			/* Lifted: pointing (straight) while the grip is held; with the
+			 * hand relaxed (grip open) a gentle curve. */
+			index_goal = 0.60f * fmaxf(0.0f, 1.0f - 2.0f * xh.grip);
 		} else {
 			index_goal = 0.9f * xh.trigger;
 		}
-		const float grip_goal = 0.30f + 0.65f * xh.grip;
+		/* Relaxed (grip open) the fingers stay half closed. */
+		const float grip_goal = 0.65f + 0.30f * xh.grip;
 		float thumb_goal = 0.0f;
 		if (xh.thumb_touch == 0) {
 			thumb_goal = xh.grip > 0.5f ? 1.0f : 0.4f;
