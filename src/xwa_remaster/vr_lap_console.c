@@ -169,6 +169,7 @@ static struct {
 	/* Grips the panels own this frame (handles reached), applied in
 	 * EndFrame. */
 	int grip_capture[2];
+	float clock; /* seconds, for pulsing */
 } s_vc;
 
 /* ---- Small math ------------------------------------------------------- */
@@ -1057,65 +1058,82 @@ static void vc_cut_gloves(void) {
 	}
 }
 
-/* The energy distribution the HUD shows beside the fore radar (laser and
- * shield pips) and the aft radar (beam pips, reserve): one segmented
- * gauge in the space under the energy controls. */
-static void vc_draw_energy(float x, float y, float w, float h) {
+/* One bar of indicator lights: `lit` of `count` in colour `c`, with its
+ * label and value above. `pulse` (0..1) dims the outlines (engine at 0). */
+static void vc_energy_bar(float x, float y, float w, const char* label, const char* value, int count, int lit,
+						  const float c[3], float pulse) {
+	const float gap = 5.0f, h = 20.0f;
+	const float cell = (w - gap * (float)(count - 1)) / (float)count;
+	vc_text(x, y, label, 16.0f, 0, c[0], c[1], c[2], 0.95f);
+	vc_text(x + w, y, value, 16.0f, 2, c[0], c[1], c[2], 0.95f);
+	for (int i = 0; i < count; ++i) {
+		float fill[4], rim[4];
+		if (i < lit) {
+			vc_pma(fill, c[0], c[1], c[2], 0.85f);
+			vc_pma(rim, c[0], c[1], c[2], 1.0f);
+		} else {
+			vc_pma(fill, c[0], c[1], c[2], 0.06f);
+			vc_pma(rim, c[0], c[1], c[2], 0.40f * (1.0f - pulse) + 0.85f * pulse);
+		}
+		vc_rrect(x + (float)i * (cell + gap), y + 22.0f, cell, h, 4.0f, 1.5f, 1.0f, fill, rim);
+	}
+}
+
+/* Energy: the split the HUD shows beside the radars (laser and shield
+ * pips, beam pips, reserve), as bars of lights. Engine is the reserve:
+ * what lasers, shields and beam leave for speed. Lasers and shields have
+ * 4 lights; the engine 8, or 12 on craft with a beam (the game counts 12
+ * units there), which also get a 4-light beam bar. */
+static void vc_draw_energy(float x, float y, float w) {
 	const XwaVrConsoleState* st = &s_vc.state;
 	const int lasers = st->laser_level;
 	const int shields = st->has_shields ? st->shield_level : 0;
 	const int beam = st->has_beam ? st->beam_level : 0;
-	/* The HUD's reserve: 8 units, 12 with a beam. */
-	int reserve = 8 - lasers;
+	int engine = 8 - lasers;
 	if (st->has_beam) {
 		if (st->has_shields) {
-			reserve += 2 - shields;
+			engine += 2 - shields;
 		}
-		reserve += 2 - beam;
+		engine += 2 - beam;
 	} else {
-		reserve -= shields;
+		engine -= shields;
 	}
-	if (reserve < 0) {
-		reserve = 0;
+	const int engine_lights = st->has_beam ? 12 : 8;
+	engine = engine < 0 ? 0 : engine > engine_lights ? engine_lights : engine;
+	static const float red[3] = { 1.0f, 0.36f, 0.28f };
+	static const float yellow[3] = { 1.0f, 0.85f, 0.25f };
+	static const float purple[3] = { 0.80f, 0.42f, 1.0f };
+	static const float blue[3] = { 0.36f, 0.66f, 1.0f };
+	/* Bars sized by their light count so all lights are the same width. */
+	const int bars = st->has_beam ? 4 : 3;
+	const float bar_gap = 20.0f;
+	const int counts[4] = { 4, 4, st->has_beam ? 4 : engine_lights, engine_lights };
+	int total = 0;
+	for (int i = 0; i < bars; ++i) {
+		total += counts[i];
 	}
-	const int total = lasers + shields + beam + reserve;
-	vc_text(x, y, "ENERGY FLOW", 18.0f, 0, 0.62f, 0.85f, 0.92f, 0.95f);
-	if (total <= 0) {
-		return;
-	}
-	const float bar_y = y + 22.0f, bar_h = 16.0f, gap = 3.0f;
-	const float cell = (w - gap * (float)(total - 1)) / (float)total;
-	static const float colors[4][3] = {
-		{ 1.0f, 0.36f, 0.25f }, /* lasers */
-		{ 1.0f, 0.86f, 0.25f }, /* shields */
-		{ 0.85f, 0.35f, 1.0f }, /* beam */
-		{ 0.85f, 0.92f, 0.95f }, /* reserve */
-	};
-	const int counts[4] = { lasers, shields, beam, reserve };
+	const float unit = (w - bar_gap * (float)(bars - 1)) / (float)total;
+	const float pulse = engine == 0 ? 0.5f + 0.5f * sinf(s_vc.clock * 5.0f) : 0.0f;
+	char text[16];
 	float cx = x;
-	for (int g = 0; g < 4; ++g) {
-		for (int i = 0; i < counts[g]; ++i) {
-			float fill[4], rim[4];
-			vc_pma(fill, colors[g][0], colors[g][1], colors[g][2], g == 3 ? 0.18f : 0.55f);
-			vc_pma(rim, colors[g][0], colors[g][1], colors[g][2], 0.95f);
-			vc_rrect(cx, bar_y, cell, bar_h, 3.0f, 1.5f, 1.0f, fill, rim);
-			cx += cell + gap;
-		}
-	}
-	/* Legend under the gauge. */
-	char text[96];
-	snprintf(text, sizeof text, "LASERS %d", lasers);
-	vc_text(x, y + h - 14.0f, text, 15.0f, 0, colors[0][0], colors[0][1], colors[0][2], 0.95f);
+	snprintf(text, sizeof text, "%d", lasers);
+	vc_energy_bar(cx, y, unit * 4.0f, "LASERS", text, 4, lasers, red, 0.0f);
+	cx += unit * 4.0f + bar_gap;
 	if (st->has_shields) {
-		snprintf(text, sizeof text, "SHIELDS %d", shields);
-		vc_text(x + w * 0.27f, y + h - 14.0f, text, 15.0f, 0, colors[1][0], colors[1][1], colors[1][2], 0.95f);
+		snprintf(text, sizeof text, "%d", shields);
+		vc_energy_bar(cx, y, unit * 4.0f, "SHIELDS", text, 4, shields, yellow, 0.0f);
+	} else {
+		const float dim[3] = { yellow[0] * 0.5f, yellow[1] * 0.5f, yellow[2] * 0.5f };
+		vc_energy_bar(cx, y, unit * 4.0f, "SHIELDS", "NONE", 4, 0, dim, 0.0f);
 	}
+	cx += unit * 4.0f + bar_gap;
 	if (st->has_beam) {
-		snprintf(text, sizeof text, "BEAM %d", beam);
-		vc_text(x + w * 0.56f, y + h - 14.0f, text, 15.0f, 0, colors[2][0], colors[2][1], colors[2][2], 0.95f);
+		snprintf(text, sizeof text, "%d", beam);
+		vc_energy_bar(cx, y, unit * 4.0f, "BEAM", text, 4, beam, purple, 0.0f);
+		cx += unit * 4.0f + bar_gap;
 	}
-	snprintf(text, sizeof text, "RESERVE %d", reserve);
-	vc_text(x + w, y + h - 14.0f, text, 15.0f, 2, colors[3][0], colors[3][1], colors[3][2], 0.95f);
+	snprintf(text, sizeof text, "%d", engine);
+	vc_energy_bar(cx, y, unit * (float)engine_lights, "ENGINE", text, engine_lights, engine, blue, pulse);
 }
 
 static void vc_draw(void) {
@@ -1128,7 +1146,7 @@ static void vc_draw(void) {
 	vc_pma(border, VC_CYAN, 0.6f);
 	vc_rrect(10.0f, 10.0f, VC_W - 20.0f, VC_H - 20.0f, 26.0f, 2.0f, 1.0f, fill, border);
 	vc_draw_handles(&s_vc.lap);
-	vc_draw_energy(34.0f, 404.0f, 470.0f, 60.0f);
+	vc_draw_energy(34.0f, 406.0f, 470.0f);
 	/* Scan lines, fixed to the panel. */
 	for (float y = 14.0f; y < VC_H - 14.0f; y += 6.0f) {
 		float line[4];
@@ -1190,6 +1208,7 @@ static int vc_card_enabled(void);
 
 void XwaVrConsole_BeginFrame(float dt_seconds) {
 	s_vc.dt = dt_seconds > 0.0f && dt_seconds < 0.25f ? dt_seconds : 0.0f;
+	s_vc.clock = fmodf(s_vc.clock + s_vc.dt, 1000.0f);
 	s_vc.drawn = 0;
 	s_vc.card_drawn = 0;
 	/* Load the font here, between frames, rather than while the flight
