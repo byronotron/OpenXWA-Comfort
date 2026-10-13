@@ -1372,6 +1372,11 @@ int std3D_CreateDevice(unsigned int deviceIdx, char bUseZBuffer) {
 		DebugPrintf("Error %s creating Direct3D device.\n", std3D_GetD3DErrorString(result), 0, 0, 0);
 		goto fail;
 	}
+	/* OpenXWA: a fresh device has no scene open. A flight that ended between
+	 * the frame's scene start and RenderScene_End3D (e.g. on mission
+	 * complete) leaves the pending flag cleared, and the next mission's first
+	 * End3D would then end a scene this device never began. */
+	g_std3DStartScenePending = 1;
 
 	g_std3DNumTexFormats = 0;
 	result = g_d3dDevice->lpVtbl->EnumTextureFormats(g_d3dDevice, (void*)std3D_EnumTextureFormats, NULL);
