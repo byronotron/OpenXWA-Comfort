@@ -9,6 +9,7 @@
 #include "aeron/scene/text2d.h"
 #include "aeron/vfs.h"
 #include "xwa_remaster/vr_gloves.h"
+#include "xwa_remaster/vr_flight_stick.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -1056,6 +1057,12 @@ static void vc_cut_gloves(void) {
 			vc_cut_capsule(&caps[c]);
 		}
 	}
+	/* The flight stick shows through too. */
+	XwaVrGloveCapsule stick[4];
+	const int n = XwaVrStick_Capsules(stick, 4);
+	for (int c = 0; c < n; ++c) {
+		vc_cut_capsule(&stick[c]);
+	}
 }
 
 /* One bar of indicator lights: `lit` of `count` in colour `c`, with its
@@ -1349,91 +1356,174 @@ int XwaVrConsole_Frame(AeronCommandBuffer* cmd, AeronRenderTarget* target, int w
 
 /* ---- Button card ------------------------------------------------------- */
 
-/* The controller layout in flight. Keep in step with the VR button
- * bindings in xwa_runtime/runtime/port.c and the Touch mapping in Aeron's
- * xr_input_map.h. "grip+" = with the left grip held. */
-typedef struct VcCardRow {
-	int kind; /* 0 trigger, 1 upper button, 2 stick, 3 lower button, 4 menu, 5 grip */
+/* The controller layout in flight: Quest Touch controllers in outline,
+ * three-quarter view from above, each control labelled. Keep in step with
+ * the VR button bindings in xwa_runtime/runtime/port.c and the Touch mapping
+ * in Aeron's xr_input_map.h. "grip+" = with the left grip held. */
+
+/* Outline paths of the LEFT controller, in card pixels around the top
+ * face's centre (y down); the right one is its mirror image. */
+static const float k_ctl_handle[][2] = {
+	{ -88.0f, 66.0f },   { -104.0f, 128.0f }, { -116.0f, 198.0f }, { -120.0f, 254.0f }, { -110.0f, 293.0f },
+	{ -86.0f, 309.0f },  { -60.0f, 298.0f },  { -44.0f, 256.0f },  { -24.0f, 190.0f },  { -2.0f, 128.0f },
+	{ 18.0f, 88.0f },
+};
+static const float k_ctl_trigger[][2] = {
+	{ 99.0f, 12.0f }, { 111.0f, 42.0f }, { 109.0f, 84.0f }, { 97.0f, 101.0f }, { 84.0f, 89.0f }, { 80.0f, 50.0f },
+};
+static const float k_ctl_grip[][2] = {
+	{ -6.0f, 110.0f }, { 8.0f, 104.0f }, { 12.0f, 122.0f }, { 0.0f, 164.0f }, { -14.0f, 176.0f }, { -20.0f, 155.0f },
+};
+#define CTL_FACE_RX 104.0f
+#define CTL_FACE_RY 68.0f
+#define CTL_FACE_ROT_DEG -26.0f
+
+/* Where each control sits on the left controller (mirrored on the right). */
+enum { CTL_STICK, CTL_UPPER, CTL_LOWER, CTL_MENU, CTL_TRIGGER, CTL_GRIP, CTL_PARTS };
+static const float k_ctl_part[CTL_PARTS][3] = {
+	/* x, y, radius */
+	[CTL_STICK] = { -30.0f, -20.0f, 25.0f }, [CTL_UPPER] = { 42.0f, -12.0f, 14.0f },
+	[CTL_LOWER] = { 16.0f, 27.0f, 14.0f },   [CTL_MENU] = { -58.0f, 24.0f, 8.0f },
+	[CTL_TRIGGER] = { 97.0f, 92.0f, 0.0f },  [CTL_GRIP] = { -4.0f, 140.0f, 0.0f },
+};
+
+typedef struct VcCardLabel {
+	int part;
 	const char* action;
 	const char* more;
-} VcCardRow;
+	float y; /* label row (card pixels) */
+} VcCardLabel;
 
-static const VcCardRow k_card_left[] = {
-	{ 0, "Cycle warheads (W)", "grip+: dock / board" },
-	{ 1, "Y: match speed (Enter)", "grip+: pick up" },
-	{ 2, "Throttle (fwd/back), roll", "click: fire link (X), grip+: release" },
-	{ 3, "X: countermeasure (C)", "grip+: confirm (Space)" },
-	{ 4, "Pause / menu", NULL },
-	{ 5, "Hold: grip+ layer", "picks panels up by their ends" },
+static const VcCardLabel k_card_left[] = {
+	{ CTL_STICK, "Throttle (fwd/back) - roll", "click: fire link (X)   grip+: release", 96.0f },
+	{ CTL_UPPER, "Y: match speed (Enter)", "grip+: pick up", 168.0f },
+	{ CTL_LOWER, "X: countermeasure (C)", "grip+: confirm (Space)", 232.0f },
+	{ CTL_MENU, "Pause / menu", NULL, 296.0f },
+	{ CTL_GRIP, "Hold: grip+ layer", "on a panel or the stick: move it", 380.0f },
+	{ CTL_TRIGGER, "Cycle warheads (W)", "grip+: dock / board", 452.0f },
 };
 
-static const VcCardRow k_card_right[] = {
-	{ 0, "Fire", NULL },
-	{ 1, "B: next target (T)", "grip+: previous target (Y)" },
-	{ 2, "Yaw / pitch", "click: my attacker (E), grip+: (A)" },
-	{ 3, "A: nearest enemy (R)", "grip+: nearest objective (O)" },
-	{ 5, "Target in sights", "grip+: incoming warhead (I)" },
+static const VcCardLabel k_card_right[] = {
+	{ CTL_STICK, "Yaw / pitch", "click: my attacker (E)   grip+: (A)", 96.0f },
+	{ CTL_UPPER, "B: next target (T)", "grip+: previous target (Y)", 168.0f },
+	{ CTL_LOWER, "A: nearest enemy (R)", "grip+: nearest objective (O)", 232.0f },
+	{ CTL_MENU, "Meta: system menu", NULL, 296.0f },
+	{ CTL_GRIP, "Target in sights", "on the flight stick: fly with it", 380.0f },
+	{ CTL_TRIGGER, "Fire", NULL, 452.0f },
 };
 
-static float vc_card_row_y(int kind) {
-	static const float y[6] = { 150.0f, 236.0f, 322.0f, 408.0f, 490.0f, 576.0f };
-	return y[kind];
-}
-
-static void vc_card_element(float cx, int kind) {
-	const float y = vc_card_row_y(kind);
-	float fill[4], rim[4];
-	switch (kind) {
-		case 0:
-			vc_pma(fill, VC_AMBER, 0.35f);
-			vc_pma(rim, VC_AMBER, 0.95f);
-			vc_rrect(cx - 18.0f, y - 9.0f, 36.0f, 18.0f, 6.0f, 2.0f, 1.0f, fill, rim);
-			break;
-		case 1:
-		case 3:
-			vc_pma(fill, VC_CYAN, 0.25f);
-			vc_pma(rim, VC_CYAN, 0.95f);
-			vc_rrect(cx - 13.0f, y - 13.0f, 26.0f, 26.0f, 13.0f, 2.0f, 1.0f, fill, rim);
-			break;
-		case 2:
-			vc_pma(fill, VC_CYAN, 0.12f);
-			vc_pma(rim, VC_CYAN, 0.95f);
-			vc_rrect(cx - 20.0f, y - 20.0f, 40.0f, 40.0f, 20.0f, 3.0f, 1.0f, fill, rim);
-			break;
-		case 4:
-			vc_pma(fill, VC_CYAN, 0.25f);
-			vc_pma(rim, VC_CYAN, 0.8f);
-			vc_rrect(cx - 7.0f, y - 7.0f, 14.0f, 14.0f, 7.0f, 2.0f, 1.0f, fill, rim);
-			break;
-		default:
-			vc_pma(fill, 0.62f, 0.50f, 1.0f, 0.35f);
-			vc_pma(rim, 0.62f, 0.50f, 1.0f, 0.95f);
-			vc_rrect(cx - 15.0f, y - 22.0f, 30.0f, 44.0f, 6.0f, 2.0f, 1.0f, fill, rim);
-			break;
+/* Smooth open/closed path through `pts` (Catmull-Rom), offset and
+ * optionally mirrored. */
+static void vc_card_path(const float (*pts)[2], int n, int closed, float ox, float oy, float sx, float width,
+						 const float col[4]) {
+	const int steps = 6;
+	float px = 0.0f, py = 0.0f;
+	int have = 0;
+	const int segs = closed ? n : n - 1;
+	for (int i = 0; i < segs; ++i) {
+		const int i0 = closed ? (i - 1 + n) % n : (i > 0 ? i - 1 : 0);
+		const int i1 = i;
+		const int i2 = closed ? (i + 1) % n : i + 1;
+		const int i3 = closed ? (i + 2) % n : (i + 2 < n ? i + 2 : n - 1);
+		for (int s = 0; s <= steps; ++s) {
+			if (have && s == 0) {
+				continue;
+			}
+			const float t = (float)s / (float)steps, t2 = t * t, t3 = t2 * t;
+			float p[2];
+			for (int k = 0; k < 2; ++k) {
+				p[k] = 0.5f * ((2.0f * pts[i1][k]) + (-pts[i0][k] + pts[i2][k]) * t +
+							   (2.0f * pts[i0][k] - 5.0f * pts[i1][k] + 4.0f * pts[i2][k] - pts[i3][k]) * t2 +
+							   (-pts[i0][k] + 3.0f * pts[i1][k] - 3.0f * pts[i2][k] + pts[i3][k]) * t3);
+			}
+			const float x = ox + sx * p[0], y = oy + p[1];
+			if (have) {
+				AeronDrawList_AddLine(s_vc.cur_list, px, py, x, y, width, col, AERON_BLIT2D_BLEND_PMA, NULL);
+			}
+			px = x;
+			py = y;
+			have = 1;
+		}
 	}
 }
 
-static void vc_card_side(const VcCardRow* rows, int count, float body_cx, int right) {
-	const float transparent[4] = { 0, 0, 0, 0 };
-	float body[4], line[4];
-	vc_pma(body, 0.62f, 0.85f, 0.92f, 0.55f);
-	vc_rrect(body_cx - 27.0f, 115.0f, 54.0f, 505.0f, 27.0f, 2.0f, 1.0f, transparent, body);
-	vc_pma(line, VC_CYAN, 0.45f);
+/* Outline of an ellipse arc (degrees in its own frame, rotated `rot`). */
+static void vc_card_ellipse(float cx, float cy, float rx, float ry, float rot_deg, float a0, float a1, float width,
+							const float col[4]) {
+	const float rot = rot_deg * 3.14159265f / 180.0f;
+	const float cr = cosf(rot), sr = sinf(rot);
+	const int steps = (int)fmaxf(8.0f, fabsf(a1 - a0) / 6.0f);
+	float px = 0.0f, py = 0.0f;
+	for (int i = 0; i <= steps; ++i) {
+		const float a = (a0 + (a1 - a0) * (float)i / (float)steps) * 3.14159265f / 180.0f;
+		const float ex = rx * cosf(a), ey = ry * sinf(a);
+		const float x = cx + ex * cr - ey * sr, y = cy + ex * sr + ey * cr;
+		if (i > 0) {
+			AeronDrawList_AddLine(s_vc.cur_list, px, py, x, y, width, col, AERON_BLIT2D_BLEND_PMA, NULL);
+		}
+		px = x;
+		py = y;
+	}
+}
+
+/* One controller: outline, its controls and their labels. `sx` -1 mirrors
+ * it into the right controller; labels go to the outer side. */
+static void vc_card_controller(float cx, float cy, float sx, const VcCardLabel* labels, int count, float text_x,
+							   float mid_x) {
+	float line[4], body[4], part[4], lead[4], trig[4], grip[4];
+	vc_pma(body, 0.78f, 0.93f, 1.0f, 0.95f);
+	vc_pma(line, 0.78f, 0.93f, 1.0f, 0.95f);
+	vc_pma(part, VC_CYAN, 1.0f);
+	vc_pma(lead, VC_CYAN, 0.5f);
+	vc_pma(trig, VC_AMBER, 1.0f);
+	vc_pma(grip, 0.66f, 0.56f, 1.0f, 1.0f);
+	const float face_rot = CTL_FACE_ROT_DEG * sx;
+	/* Handle first, then the face over it (the face hides the handle's top). */
+	vc_card_path(k_ctl_handle, (int)(sizeof k_ctl_handle / sizeof k_ctl_handle[0]), 0, cx, cy, sx, 3.0f, body);
+	vc_card_ellipse(cx + 5.0f * sx, cy + 15.0f, CTL_FACE_RX, CTL_FACE_RY, face_rot, sx > 0.0f ? -12.0f : 12.0f,
+					sx > 0.0f ? 192.0f : 168.0f, 3.0f, body);
+	vc_card_ellipse(cx, cy, CTL_FACE_RX, CTL_FACE_RY, face_rot, 0.0f, 360.0f, 3.0f, line);
+	vc_card_path(k_ctl_trigger, (int)(sizeof k_ctl_trigger / sizeof k_ctl_trigger[0]), 1, cx, cy, sx, 2.5f, trig);
+	vc_card_path(k_ctl_grip, (int)(sizeof k_ctl_grip / sizeof k_ctl_grip[0]), 1, cx, cy, sx, 2.5f, grip);
+	/* Thumbstick (cap and well) and the face buttons. */
+	{
+		const float* s = k_ctl_part[CTL_STICK];
+		vc_card_ellipse(cx + sx * s[0], cy + s[1], s[2], s[2] * 0.82f, 0.0f, 0.0f, 360.0f, 2.5f, part);
+		vc_card_ellipse(cx + sx * s[0], cy + s[1] - 3.0f, s[2] * 0.62f, s[2] * 0.52f, 0.0f, 0.0f, 360.0f, 2.5f, part);
+	}
+	for (int p = CTL_UPPER; p <= CTL_MENU; ++p) {
+		const float* b = k_ctl_part[p];
+		vc_card_ellipse(cx + sx * b[0], cy + b[1], b[2], b[2] * 0.78f, 0.0f, 0.0f, 360.0f, 2.5f, part);
+	}
+	/* Labels with leader lines out to the side. */
 	for (int i = 0; i < count; ++i) {
-		const VcCardRow* r = &rows[i];
-		const float y = vc_card_row_y(r->kind);
-		vc_card_element(body_cx, r->kind);
-		const float half = r->kind == 2 ? 20.0f : r->kind == 0 ? 18.0f : r->kind == 5 ? 15.0f : r->kind == 4 ? 7.0f : 13.0f;
-		const float x0 = right ? body_cx + half + 4.0f : body_cx - half - 4.0f;
-		const float x1 = right ? body_cx + 60.0f : body_cx - 60.0f;
-		AeronDrawList_AddLine(s_vc.cur_list, x0, y, x1, y, 2.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
-		const float tx = right ? x1 + 8.0f : x1 - 8.0f;
-		const int align = right ? 0 : 2;
-		if (r->more) {
-			vc_text(tx, y - 26.0f, r->action, 22.0f, align, 0.85f, 0.97f, 1.0f, 1.0f);
-			vc_text(tx, y + 2.0f, r->more, 17.0f, align, 0.62f, 0.85f, 0.92f, 0.85f);
-		} else {
-			vc_text(tx, y - 13.0f, r->action, 22.0f, align, 0.85f, 0.97f, 1.0f, 1.0f);
+		const VcCardLabel* l = &labels[i];
+		const float* pp = k_ctl_part[l->part];
+		const float ex = cx + sx * pp[0], ey = cy + pp[1];
+		/* Triggers: labelled below, toward the card's middle. */
+		const int under = l->part == CTL_TRIGGER;
+		const float tx = under ? mid_x - sx * 14.0f : text_x;
+		const float ly = under ? l->y - 8.0f : l->y + 14.0f;
+		const float lx = under ? ex + sx * 6.0f : text_x + (sx > 0.0f ? 10.0f : -10.0f);
+		/* Start at the control's edge, toward the label. */
+		const float r = l->part <= CTL_MENU ? pp[2] : 0.0f;
+		float dx = lx - ex, dy = ly - ey;
+		const float dl = sqrtf(dx * dx + dy * dy);
+		dx /= dl > 0.0f ? dl : 1.0f;
+		dy /= dl > 0.0f ? dl : 1.0f;
+		const float* c = l->part == CTL_TRIGGER ? trig : l->part == CTL_GRIP ? grip : lead;
+		float dot[4];
+		memcpy(dot, c, sizeof dot);
+		AeronDrawList_AddLine(s_vc.cur_list, ex + dx * (r + 3.0f), ey + dy * (r + 3.0f), lx, ly, 1.5f, lead,
+							  AERON_BLIT2D_BLEND_PMA, NULL);
+		vc_rrect(lx - 3.0f, ly - 3.0f, 6.0f, 6.0f, 3.0f, 0.0f, 0.0f, dot, dot);
+		const int align = sx > 0.0f ? 2 : 0;
+		const float* tc = l->part == CTL_TRIGGER ? (const float[3]) { VC_AMBER }
+						  : l->part == CTL_GRIP  ? (const float[3]) { 0.80f, 0.72f, 1.0f }
+												 : (const float[3]) { 0.85f, 0.97f, 1.0f };
+		vc_text(tx, l->y, l->action, 20.0f, align, tc[0], tc[1], tc[2], 1.0f);
+		if (l->more) {
+			vc_text(tx, l->y + 24.0f, l->more, 15.0f, align, 0.62f, 0.85f, 0.92f, 0.9f);
 		}
 	}
 }
@@ -1456,13 +1546,18 @@ static void vc_card_draw(void) {
 	}
 	vc_text(44.0f, 30.0f, "CONTROLS", 30.0f, 0, VC_CYAN, 1.0f);
 	vc_text(W - 44.0f, 38.0f, "grip+ = while holding the LEFT grip", 18.0f, 2, 0.62f, 0.85f, 0.92f, 0.9f);
-	vc_text(W * 0.5f - 107.0f, 84.0f, "LEFT", 20.0f, 1, VC_CYAN, 0.9f);
-	vc_text(W * 0.5f + 107.0f, 84.0f, "RIGHT", 20.0f, 1, VC_CYAN, 0.9f);
-	vc_card_side(k_card_left, (int)(sizeof k_card_left / sizeof k_card_left[0]), W * 0.5f - 107.0f, 0);
-	vc_card_side(k_card_right, (int)(sizeof k_card_right / sizeof k_card_right[0]), W * 0.5f + 107.0f, 1);
-	vc_text(W * 0.5f, H - 108.0f, "Right stick flicks, grip+:  up  lasers > shields    down  shields > lasers", 18.0f, 1,
+	const float cy = 222.0f;
+	vc_card_controller(W * 0.5f - 148.0f, cy, 1.0f, k_card_left, (int)(sizeof k_card_left / sizeof k_card_left[0]),
+					   236.0f, W * 0.5f);
+	vc_card_controller(W * 0.5f + 148.0f, cy, -1.0f, k_card_right, (int)(sizeof k_card_right / sizeof k_card_right[0]),
+					   W - 236.0f, W * 0.5f);
+	vc_text(W * 0.5f - 148.0f - 80.0f, cy + 318.0f, "LEFT", 22.0f, 1, VC_CYAN, 0.9f);
+	vc_text(W * 0.5f + 148.0f + 80.0f, cy + 318.0f, "RIGHT", 22.0f, 1, VC_CYAN, 0.9f);
+	vc_text(W * 0.5f, H - 132.0f, "Flight stick (between your knees): right grip on it = fly, left grip = move it", 17.0f,
+			1, 0.85f, 0.97f, 1.0f, 0.95f);
+	vc_text(W * 0.5f, H - 104.0f, "Right stick flicks, grip+:  up  lasers > shields    down  shields > lasers", 17.0f, 1,
 			0.62f, 0.85f, 0.92f, 0.9f);
-	vc_text(W * 0.5f, H - 80.0f, "left  shield balance (S)    right  flagged targets (N)", 18.0f, 1, 0.62f, 0.85f,
+	vc_text(W * 0.5f, H - 78.0f, "left  shield balance (S)    right  flagged targets (N)", 17.0f, 1, 0.62f, 0.85f,
 			0.92f, 0.9f);
 	vc_cut_gloves();
 }

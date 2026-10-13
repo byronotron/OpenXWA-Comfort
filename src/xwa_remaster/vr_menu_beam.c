@@ -7,6 +7,7 @@
 #include "xwa_remaster/vr_gloves.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* The beam texture: a vertical strip in the target's top-left corner, the
@@ -92,10 +93,14 @@ int XwaVrBeam_DrawStrips(AeronCommandBuffer* cmd, AeronRenderTarget* target, int
 		}
 	}
 	AeronDrawList_Begin(s_list, target, width, height, AERON_DRAWLIST2D_CLEAR, NULL);
-	/* Premultiplied: a soft cyan glow and a bright core, strongest at the
-	 * far end. Strip 0 bright, strip 1 faint. */
+	/* Premultiplied: a soft cyan glow and a core, strongest at the far end.
+	 * Strip 0 is the menu pointer, translucent so the screen shows through
+	 * (XWA_XR_BEAM_OPACITY, default 0.5); strip 1 the faint console beams. */
+	const char* opacity_env = getenv("XWA_XR_BEAM_OPACITY");
+	float opacity = opacity_env && opacity_env[0] ? (float)atof(opacity_env) : 0.5f;
+	opacity = opacity < 0.05f ? 0.05f : opacity > 1.0f ? 1.0f : opacity;
 	for (int faint = 0; faint < 2; ++faint) {
-		const float k = faint ? 0.35f : 1.0f;
+		const float k = faint ? 0.35f : opacity;
 		const float x = faint ? (float)MB_TEX_W : 0.0f;
 		const float glow_top[4] = { 0.10f * 0.45f * k, 0.65f * 0.45f * k, 0.45f * k, 0.45f * k };
 		const float glow_bottom[4] = { 0.10f * 0.12f * k, 0.65f * 0.12f * k, 0.12f * k, 0.12f * k };

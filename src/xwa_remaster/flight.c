@@ -23,6 +23,7 @@
 #include "xwa_remaster/vr_env.h"
 #include "xwa_remaster/vr_menu_beam.h"
 #include "xwa_remaster/vr_gloves.h"
+#include "xwa_remaster/vr_flight_stick.h"
 #include "xwa_remaster/vr_lap_console.h"
 #include "xwa_remaster/hyperspace.h"
 #include "xwa_remaster/ship.h"
@@ -4828,8 +4829,11 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	/* VR gloves: near-field like the cockpit, so inside its range (the
 	 * depth boost moves them with each eye). */
 	if (stereo) {
-		XwaVrGloves_Submit(s.scene, cmd, s.crows, flight_view.camera.pos,
-						   AERON_OPT_UNITS_PER_METER * fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f));
+		const float vr_units = AERON_OPT_UNITS_PER_METER * fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f);
+		/* The flight stick first: its grab decides what the grips do. */
+		XwaVrStick_Update();
+		XwaVrGloves_Submit(s.scene, cmd, s.crows, flight_view.camera.pos, vr_units);
+		XwaVrStick_Submit(s.scene, cmd, s.crows, flight_view.camera.pos, vr_units);
 	} else {
 		XwaVrGloves_Idle();
 	}
@@ -5107,6 +5111,7 @@ void XwaRemasterFlight_Shutdown(void) {
 	XwaVrCockpitHud_Shutdown();
 	XwaVrConsole_Shutdown();
 	XwaVrGloves_Shutdown();
+	XwaVrStick_Shutdown();
 	XwaRemasterFlightMap_Shutdown();
 	XwaRemasterHyperspace_Destroy(s.hyperspace);
 	s.hyperspace = NULL;

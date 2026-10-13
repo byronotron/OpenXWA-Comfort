@@ -33,6 +33,7 @@ enum {
 	VR_SHADOWS,
 	VR_CONSOLE,
 	VR_GLOVES,
+	VR_FLIGHT_STICK,
 	VR_BUTTON_CARD,
 	VR_ENVIRONMENT,
 	VR_RESOLUTION,
@@ -62,6 +63,7 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "XWA_XR_SHADOWS", "Cockpit Shadows", k_toggle_texts, k_toggle_values, 2, 0, 85 },
 	{ "XWA_XR_CONSOLE", "Lap Console", k_toggle_texts, k_toggle_values, 2, 1, 88 },
 	{ "XWA_XR_GLOVES", "Pilot Gloves", k_toggle_texts, k_toggle_values, 2, 1, 89 },
+	{ "XWA_XR_FLIGHT_STICK", "Flight Stick", k_toggle_texts, k_toggle_values, 2, 1, 94 },
 	{ "XWA_XR_BUTTON_CARD", "Button Card", k_toggle_texts, k_toggle_values, 2, 1, 92 },
 	{ "XWA_XR_ENVIRONMENT", "Menu Hangar", k_toggle_texts, k_toggle_values, 2, 1, 90 },
 	{ "AERON_XR_RESOLUTION_SCALE", "Resolution (restart)", k_res_texts, k_res_values, 6, 2, 86 },
@@ -273,7 +275,7 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 		return 0;
 	}
 	vr_load();
-	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 130, cursor_row, VR_COUNT + 3);
+	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 110, cursor_row, VR_COUNT + 4);
 	XwaModernOptionsMenu_DrawTitle(&menu, "OpenXWA VR Options");
 
 	for (int i = 0; i < VR_COUNT; i++) {
@@ -298,6 +300,11 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 		SDL_setenv_unsafe("XWA_XR_CONSOLE_POSE", "", 1);
 		XwaModernVrOptions_SaveValue("XWA_XR_CONSOLE_POSE", "");
 		Aeron_LogInfo("xwa.config", "lap console back at its default spot");
+	}
+	if (XwaModernOptionsMenu_DrawAction(&menu, "Reset Flight Stick Position", 95, 0)) {
+		SDL_setenv_unsafe("XWA_XR_STICK_POS", "", 1);
+		XwaModernVrOptions_SaveValue("XWA_XR_STICK_POS", "");
+		Aeron_LogInfo("xwa.config", "flight stick back at its default spot");
 	}
 	back = XwaModernOptionsMenu_DrawAction(&menu, FrontendString_Get(STR_BACK), 87, 0);
 	back |= XwaModernOptionsMenu_TakeEscape(&menu);

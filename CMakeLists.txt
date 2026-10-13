@@ -271,6 +271,7 @@ add_library(xwa_remaster STATIC
     src/xwa_remaster/vr_cockpit_hud.c
     src/xwa_remaster/vr_lap_console.c
     src/xwa_remaster/vr_gloves.c
+    src/xwa_remaster/vr_flight_stick.c
     src/xwa_remaster/vr_env.c
     src/xwa_remaster/vr_menu_beam.c
     src/xwa_remaster/assets.c

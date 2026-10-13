@@ -9,6 +9,7 @@
 #include "xwa/config/game_config.h"
 #include "xwa_remaster/vr_cockpit_hud.h"
 #include "xwa_remaster/vr_lap_console.h"
+#include "xwa_remaster/vr_flight_stick.h"
 #include "xwa_runtime/config/modern_vr_options_screen.h"
 #include "xwa_remaster/xwa_remaster.h"
 #include "xwa_runtime/config/modern_video_options.h"
@@ -385,6 +386,18 @@ static void android_load_settings(void) {
 				  "#XWA_XR_ENV_CRAFT=Xwing\n"
 				  "# Hangar brightness behind the screen (1 = full, 0.4 = 60 % darker):\n"
 				  "#XWA_XR_ENV_BRIGHTNESS=0.4\n"
+				  "# Menu laser pointer opacity (1 = solid):\n"
+				  "#XWA_XR_BEAM_OPACITY=0.5\n"
+				  "# Flight stick between your knees (0 = off): squeeze the right grip on\n"
+				  "# it to fly, the left grip on it to move it. Full tilt in degrees;\n"
+				  "# 1 = twisting it rolls; where you put it (Reset in the VR options):\n"
+				  "#XWA_XR_FLIGHT_STICK=1\n"
+				  "#XWA_XR_STICK_ANGLE=20\n"
+				  "#XWA_XR_STICK_TWIST=0\n"
+				  "#XWA_XR_STICK_POS=\n"
+				  "# Left thumbstick: degrees either side of straight forward/back that\n"
+				  "# move the throttle; everywhere else rolls:\n"
+				  "#AERON_XR_THROTTLE_ZONE=30\n"
 				  "# Helmet HUD distance in metres and size:\n"
 				  "#XWA_XR_HUD_DISTANCE=3.0\n"
 				  "#XWA_XR_HUD_SCALE=0.65\n"
@@ -741,11 +754,17 @@ int main(int argc, char** argv) {
 			}
 			XwaRemaster_Frame(delta_us);
 			XwaVrConsole_EndFrame();
+			XwaVrStick_EndFrame();
 			{
 				/* The player put the lap console somewhere new: keep it there. */
 				char placement[160];
 				if (XwaVrConsole_TakePlacement(placement, (int)sizeof placement)) {
 					XwaModernVrOptions_SaveValue("XWA_XR_CONSOLE_POSE", placement);
+				}
+				/* The flight stick moved. */
+				char stick_pos[64];
+				if (XwaVrStick_TakePlacement(stick_pos, (int)sizeof stick_pos)) {
+					XwaModernVrOptions_SaveValue("XWA_XR_STICK_POS", stick_pos);
 				}
 				/* A HUD panel moved: this cockpit's layout. */
 				char layout_key[96];
