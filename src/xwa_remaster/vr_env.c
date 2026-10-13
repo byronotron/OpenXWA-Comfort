@@ -6,6 +6,7 @@
 #include "aeron/scene/billboard.h"
 #include "aeron/scene/mesh.h"
 #include "aeron/vfs.h"
+#include "aeron/xr.h"
 #include "xwa_2d.h"
 #include "xwa_remaster/ship.h"
 
@@ -840,28 +841,51 @@ static void env_beam(AeronScene3D* scene, AeronSceneBillboardStage stage, const 
  * the frame image is drawn behind the screen's quad layer, in its plane. */
 static const float k_frame_opening[4] = { 123.5f, 138.0f, 1139.5f, 900.0f }; /* x0, y0, x1, y1 */
 
-/* Height (metres) the frame rises above the top of a screen `sw` wide. */
-static float env_frame_top(float sw) {
+/* Where the 4:3 picture sits on the virtual screen: the 2D layers are
+ * fitted into the screen quad keeping their aspect, centred. Lengths in
+ * real metres; `k` converts them to scene units at the head's scale
+ * (XWA_XR_WORLD_SCALE scales tracked head motion, so the screen's real
+ * distance is k * metres for the stereo to agree with the quad layer). */
+typedef struct EnvScreen {
+	float dist, w, h, lift, k;
+} EnvScreen;
+
+static void env_screen(EnvScreen* out) {
+	float dist = 2.1f, sw = 2.625f, sh = 2.625f * 0.75f, lift = 0.0f;
+	if (!Aeron_XrVirtualScreenGeometry(&dist, &sw, &sh, &lift)) {
+		dist = env_float("AERON_XR_SCREEN_DISTANCE", dist);
+		sw = env_float("AERON_XR_SCREEN_WIDTH", sw);
+		sh = 0.75f * sw;
+		lift = env_float("AERON_XR_SCREEN_HEIGHT_OFFSET", lift);
+	}
+	out->w = fminf(sw, sh * 4.0f / 3.0f);
+	out->h = 0.75f * out->w;
+	out->dist = dist;
+	out->lift = lift;
+	out->k = AERON_OPT_UNITS_PER_METER * env_float("XWA_XR_WORLD_SCALE", 1.0f);
+}
+
+/* Height (metres) the frame rises above the top of the picture. */
+static float env_frame_top(const EnvScreen* sc) {
 	if (!s_env.tex[ENV_TEX_FRAME]) {
 		return 0.0f;
 	}
-	return k_frame_opening[1] * sw / (k_frame_opening[2] - k_frame_opening[0]);
+	return k_frame_opening[1] * sc->w / (k_frame_opening[2] - k_frame_opening[0]);
 }
 
 static void env_submit_frame(AeronScene3D* scene) {
 	if (!s_env.tex[ENV_TEX_FRAME]) {
 		return;
 	}
-	const float k = AERON_OPT_UNITS_PER_METER;
-	const float dist = env_float("AERON_XR_SCREEN_DISTANCE", 1.6f);
-	const float sw = env_float("AERON_XR_SCREEN_WIDTH", 2.0f);
-	const float lift = env_float("AERON_XR_SCREEN_HEIGHT_OFFSET", 0.0f);
-	const float px = sw / (k_frame_opening[2] - k_frame_opening[0]); /* metres per image pixel */
+	EnvScreen sc;
+	env_screen(&sc);
+	const float k = sc.k, dist = sc.dist, lift = sc.lift;
+	const float px = sc.w / (k_frame_opening[2] - k_frame_opening[0]); /* metres per image pixel */
 	const float fw = (float)s_env.tex_w[ENV_TEX_FRAME] * px, fh = (float)s_env.tex_h[ENV_TEX_FRAME] * px;
 	/* Frame centre relative to the screen centre (image y runs down). */
 	const float dx = (0.5f * (float)s_env.tex_w[ENV_TEX_FRAME] - 0.5f * (k_frame_opening[0] + k_frame_opening[2])) * px;
 	const float dz = -(0.5f * (float)s_env.tex_h[ENV_TEX_FRAME] - 0.5f * (k_frame_opening[1] + k_frame_opening[3])) * px;
-	const float center[3] = { s_env.view_pos[0] + dx * k, s_env.view_pos[1] + (dist + 0.002f) * k,
+	const float center[3] = { s_env.view_pos[0] + dx * k, s_env.view_pos[1] + (dist + 0.004f) * k,
 							  s_env.view_pos[2] + (lift + dz) * k };
 	const float ax[3] = { 0.5f * fw * k, 0.0f, 0.0f };
 	const float ay[3] = { 0.0f, 0.0f, 0.5f * fh * k };
@@ -879,7 +903,7 @@ static void env_submit_endor_sprites(AeronScene3D* scene) {
 	env_sky_sprite(scene, ENV_TEX_ENDOR, 40.0f, -48.0f, 70.0f, 15.0f, endor_tint, c);
 	static const float ds_tint[4] = { 0.9f, 0.9f, 1.0f, 1.0f };
 	float ds[4][3];
-	env_sky_sprite(scene, ENV_TEX_DEATHSTAR, ENV_DS_YAW, ENV_DS_PITCH, 26.0f, -10.0f, ds_tint, ds);
+	env_sky_sprite(scene, ENV_TEX_DEATHSTAR, ENV_DS_YAW, ENV_DS_PITCH, 22.1f, -10.0f, ds_tint, ds);
 	/* The superlaser: from the dish (texel ~0.36, 0.31 of the sprite) to
 	 * the burning cruiser. */
 	if (s_env.tex[ENV_TEX_DEATHSTAR]) {
@@ -990,15 +1014,15 @@ static void env_submit_endor_sprites(AeronScene3D* scene) {
 	}
 	/* The logo above the virtual screen and its frame. */
 	if (s_env.tex[ENV_TEX_LOGO]) {
-		const float dist = env_float("AERON_XR_SCREEN_DISTANCE", 1.6f);
-		const float sw = env_float("AERON_XR_SCREEN_WIDTH", 2.0f);
-		const float lift = env_float("AERON_XR_SCREEN_HEIGHT_OFFSET", 0.0f);
-		const float lw = 0.6f * sw * env_float("XWA_XR_LOGO_SCALE", 1.0f);
+		EnvScreen sc;
+		env_screen(&sc);
+		const float lw = 0.6f * sc.w * env_float("XWA_XR_LOGO_SCALE", 1.0f);
 		const float lh = lw * (float)s_env.tex_h[ENV_TEX_LOGO] / (float)s_env.tex_w[ENV_TEX_LOGO];
-		const float center[3] = { s_env.view_pos[0], s_env.view_pos[1] + (dist + 0.03f) * k,
-								  s_env.view_pos[2] + (lift + 0.375f * sw + env_frame_top(sw) + 0.04f + 0.5f * lh) * k };
-		const float ax[3] = { 0.5f * lw * k, 0.0f, 0.0f };
-		const float ay[3] = { 0.0f, 0.0f, 0.5f * lh * k };
+		const float center[3] = { s_env.view_pos[0], s_env.view_pos[1] + (sc.dist + 0.03f) * sc.k,
+								  s_env.view_pos[2] +
+									  (sc.lift + 0.5f * sc.h + env_frame_top(&sc) + 0.04f + 0.5f * lh) * sc.k };
+		const float ax[3] = { 0.5f * lw * sc.k, 0.0f, 0.0f };
+		const float ay[3] = { 0.0f, 0.0f, 0.5f * lh * sc.k };
 		env_rect(center, ax, ay, c);
 		static const float tint[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 		env_quad(scene, ENV_TEX_LOGO, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, tint);

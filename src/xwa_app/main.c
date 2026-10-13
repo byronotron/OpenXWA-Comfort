@@ -431,8 +431,8 @@ static void android_load_settings(void) {
 				  "# Helmet HUD distance in metres and size:\n"
 				  "#XWA_XR_HUD_DISTANCE=3.0\n"
 				  "#XWA_XR_HUD_SCALE=0.65\n"
-				  "#AERON_XR_SCREEN_DISTANCE=1.6\n"
-				  "#AERON_XR_SCREEN_WIDTH=2.0\n"
+				  "#AERON_XR_SCREEN_DISTANCE=2.1\n"
+				  "#AERON_XR_SCREEN_WIDTH=2.625\n"
 				  "#AERON_XR_THROTTLE_RATE=0.8\n"
 				  "# Skip the Quest render defaults (SSAO/MSAA/... follow the in-game options):\n"
 				  "#XWA_QUEST_PROFILE=0\n",
@@ -499,6 +499,11 @@ static void android_xr_defaults(void) {
 	}
 	if (!SDL_getenv("AERON_XR_RESOLUTION_SCALE")) {
 		SDL_setenv_unsafe("AERON_XR_RESOLUTION_SCALE", "0.9", 1);
+	}
+	if (!SDL_getenv("AERON_XR_SCREEN_PIXELS")) {
+		/* A 4:3 virtual screen: the game's menus, briefings and films fill
+		 * it (and its frame) edge to edge instead of being pillarboxed. */
+		SDL_setenv_unsafe("AERON_XR_SCREEN_PIXELS", "1920x1440", 1);
 	}
 	{
 		/* Fixed foveated rendering: SDL loads Vulkan through the OpenXWA shim
