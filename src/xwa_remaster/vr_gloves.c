@@ -618,9 +618,9 @@ void XwaVrGloves_Submit(AeronScene3D* scene, AeronCommandBuffer* cmd, const floa
 		if (xh.index_touch == 1) {
 			index_goal = 0.35f + 0.6f * xh.trigger;
 		} else if (xh.index_touch == 0) {
-			/* Lifted: pointing (straight) while the grip is held; with the
-			 * hand relaxed (grip open) a gentle curve. */
-			index_goal = 0.60f * fmaxf(0.0f, 1.0f - 2.0f * xh.grip);
+			/* Lifted: always pointing, grip held or not (only the relaxed
+			 * curve's slight natural bend). */
+			index_goal = 0.0f;
 		} else {
 			index_goal = 0.9f * xh.trigger;
 		}
