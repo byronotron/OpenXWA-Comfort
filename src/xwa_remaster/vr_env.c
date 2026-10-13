@@ -844,7 +844,7 @@ static void env_beam(AeronScene3D* scene, AeronSceneBillboardStage stage, const 
 
 /* The frame's opening (image pixels) that the 4:3 screen fills exactly;
  * the frame image is drawn behind the screen's quad layer, in its plane. */
-static const float k_frame_opening[4] = { 124.0f, 151.0f, 1123.0f, 901.0f }; /* x0, y0, x1, y1 */
+static const float k_frame_opening[4] = { 114.0f, 144.0f, 1133.0f, 908.0f }; /* x0, y0, x1, y1 */
 
 /* Where the 4:3 picture sits on the virtual screen: the 2D layers are
  * fitted into the screen quad keeping their aspect, centred. Lengths in
@@ -855,9 +855,10 @@ typedef struct EnvScreen {
 	float dist, w, h, lift, k;
 	/* The picture as the frame's opening shows it: the screen's picture
 	 * divided by XWA_XR_FRAME_OVERSCAN (1.0: the picture fills the opening
-	 * exactly, nothing of it hidden). The opening is the largest 4:3
-	 * rectangle clear of the frame's corner pieces (dark around it). The
-	 * frame sits XWA_XR_FRAME_DEPTH (4 cm) in front of the picture for a
+	 * exactly). The opening is the frame's clear 4:3 area enlarged 2 %: the
+	 * bezel overlaps under 1 % of the picture's edges (no menu text), dark
+	 * backing fills any gap. The
+	 * frame sits XWA_XR_FRAME_DEPTH (3 cm) in front of the picture for a
 	 * little depth, scaled so its opening lines up from the viewer (leaning
 	 * 20 cm shifts the two by under 4 mm, about a game pixel). */
 	float pic_w, pic_h;
@@ -880,7 +881,7 @@ static void env_screen(EnvScreen* out) {
 	const float overscan = fmaxf(env_float("XWA_XR_FRAME_OVERSCAN", 1.0f), 0.5f);
 	out->pic_w = out->w / overscan;
 	out->pic_h = out->h / overscan;
-	out->frame_dist = fmaxf(dist - env_float("XWA_XR_FRAME_DEPTH", 0.04f), 0.2f);
+	out->frame_dist = fmaxf(dist - env_float("XWA_XR_FRAME_DEPTH", 0.03f), 0.2f);
 	out->frame_scale = dist > 0.01f ? out->frame_dist / dist : 1.0f;
 }
 
