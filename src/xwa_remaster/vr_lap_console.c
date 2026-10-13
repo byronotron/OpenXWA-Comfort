@@ -1590,14 +1590,57 @@ static int vc_render_panel(AeronCommandBuffer* cmd, int layer, AeronDrawList2D* 
 	AeronDrawList_Begin(base->list, NULL, width, height, AERON_DRAWLIST2D_CLEAR, NULL);
 	draw();
 	const uint64_t base_hash = AeronDrawList_Hash(base->list);
-	/* Each eye's overlay. */
+	/* The content's own image, in the layer's format. Taking the layer's
+	 * target acquires its next image, so only do that to draw into it. */
+	static AeronTextureFormat s_panel_format = AERON_TEXTURE_FORMAT_UNKNOWN;
+	AeronRenderTarget* target = NULL;
+	if (s_panel_format == AERON_TEXTURE_FORMAT_UNKNOWN) {
+		target = Aeron_XrStereoPanelTarget(layer, NULL, NULL);
+		AeronTexture* target_tex = target ? Aeron_RenderTargetGetTexture(target) : NULL;
+		if (!target_tex) {
+			return 0;
+		}
+		s_panel_format = Aeron_TextureGetFormat(target_tex);
+		*hash_valid = 0; /* acquired: must be drawn this frame */
+	}
+	const AeronTextureFormat format = s_panel_format;
+	if (!base->rt || base->w != width || base->h != height || base->format != format) {
+		if (base->rt) {
+			Aeron_DestroyRenderTarget(base->rt);
+		}
+		base->rt = Aeron_CreateRenderTarget(&(AeronRenderTargetDesc) {
+			.width = width,
+			.height = height,
+			.format = format,
+			.debug_name = "xwa.vr_console.panel",
+		});
+		base->w = width;
+		base->h = height;
+		base->format = format;
+		base->valid = 0;
+		if (!base->rt) {
+			return 0;
+		}
+	}
+	/* Each eye: the content, then its overlay. */
+	AeronDrawList2DSprite content;
+	memset(&content, 0, sizeof content);
+	content.texture = Aeron_RenderTargetGetTexture(base->rt);
+	content.src_u1 = 1.0f;
+	content.src_v1 = 1.0f;
+	content.dst_w = (float)width;
+	content.dst_h = (float)height;
+	content.tint[0] = content.tint[1] = content.tint[2] = content.tint[3] = 1.0f;
+	content.blend = AERON_BLIT2D_BLEND_NONE;
+	content.filter = AERON_BLIT2D_FILTER_NEAREST;
 	s_vc.overlay_phase = 1;
 	s_vc.cut_count = 0;
 	s_mask.cmd = cmd;
 	s_mask.eye = 0;
 	s_mask.masks = 0;
 	s_vc.cur_list = lists[0];
-	AeronDrawList_Begin(lists[0], NULL, width, height, AERON_DRAWLIST2D_LOAD, NULL);
+	AeronDrawList_Begin(lists[0], NULL, width, height, AERON_DRAWLIST2D_CLEAR, NULL);
+	AeronDrawList_AddSprite(lists[0], &content);
 	overlay();
 	const int stereo = s_vc.cut_count > 0;
 	uint64_t hash = base_hash * 1099511628211ull ^ AeronDrawList_Hash(lists[0]);
@@ -1607,6 +1650,7 @@ static int vc_render_panel(AeronCommandBuffer* cmd, int layer, AeronDrawList2D* 
 		s_mask.eye = 1;
 		AeronDrawList_Begin(lists[1], NULL, width, height, AERON_DRAWLIST2D_LOAD, NULL);
 		AeronDrawList_SetOrigin(lists[1], width, 0);
+		AeronDrawList_AddSprite(lists[1], &content);
 		overlay();
 		hash = hash * 1099511628211ull ^ AeronDrawList_Hash(lists[1]);
 	}
@@ -1616,29 +1660,8 @@ static int vc_render_panel(AeronCommandBuffer* cmd, int layer, AeronDrawList2D* 
 		*hash_valid = 0; /* the masks' pixels are not in the hash: always redraw */
 	}
 	if (!*hash_valid || hash != *shown_hash) {
-		AeronRenderTarget* target = Aeron_XrStereoPanelTarget(layer, NULL, NULL);
-		AeronTexture* target_tex = target ? Aeron_RenderTargetGetTexture(target) : NULL;
-		if (!target_tex) {
+		if (!target && !(target = Aeron_XrStereoPanelTarget(layer, NULL, NULL))) {
 			return 0;
-		}
-		const AeronTextureFormat format = Aeron_TextureGetFormat(target_tex);
-		if (!base->rt || base->w != width || base->h != height || base->format != format) {
-			if (base->rt) {
-				Aeron_DestroyRenderTarget(base->rt);
-			}
-			base->rt = Aeron_CreateRenderTarget(&(AeronRenderTargetDesc) {
-				.width = width,
-				.height = height,
-				.format = format,
-				.debug_name = "xwa.vr_console.panel",
-			});
-			base->w = width;
-			base->h = height;
-			base->format = format;
-			base->valid = 0;
-			if (!base->rt) {
-				return 0;
-			}
 		}
 		if (!base->valid || base->hash != base_hash) {
 			AeronDrawList_SetTarget(base->list, base->rt);
@@ -1646,19 +1669,28 @@ static int vc_render_panel(AeronCommandBuffer* cmd, int layer, AeronDrawList2D* 
 			base->hash = base_hash;
 			base->valid = 1;
 		}
-		for (int e = 0; e < (stereo ? 2 : 1); ++e) {
-			Aeron_CopyTextureCmd(cmd, &(AeronTextureCopyDesc) {
-				.source = Aeron_RenderTargetGetTexture(base->rt),
-				.destination = target_tex,
-				.destination_x = (uint32_t)(e * width),
-				.width = (uint32_t)width,
-				.height = (uint32_t)height,
-			});
-			if (AeronDrawList_Count(lists[e]) > 0) {
-				AeronDrawList_SetTarget(lists[e], target);
-				AeronDrawList_Render(lists[e], cmd);
+		/* One pass over the layer image: each eye's half is its content
+		 * plus overlay (nothing is loaded from memory). */
+		const int eyes = stereo ? 2 : 1;
+		for (int e = 0; e < eyes; ++e) {
+			AeronDrawList_SetTarget(lists[e], target);
+			if (!AeronDrawList_Prepare(lists[e], cmd)) {
+				return 0;
 			}
 		}
+		AeronRenderPass* pass = Aeron_BeginRenderPass(&(AeronRenderPassDesc) {
+			.color_target = target,
+			.clear_color = 1,
+			.command_buffer = cmd,
+			.debug_label = "VR panel",
+		});
+		if (!pass) {
+			return 0;
+		}
+		for (int e = 0; e < eyes; ++e) {
+			AeronDrawList_RenderIntoPass(lists[e], cmd, pass, target);
+		}
+		Aeron_EndRenderPass(pass);
 		*shown_hash = hash;
 		*hash_valid = 1;
 	}
