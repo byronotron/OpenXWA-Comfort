@@ -60,6 +60,9 @@ typedef enum XwaVrConsoleAction {
 	XWA_VRC_WING_REPORT,
 	XWA_VRC_WING_RESUPPLY,
 	XWA_VRC_WING_REINFORCE,
+	/* Voice commands only. */
+	XWA_VRC_TARGET_NEXT,
+	XWA_VRC_TARGET_PREV,
 	XWA_VRC_COUNT
 } XwaVrConsoleAction;
 

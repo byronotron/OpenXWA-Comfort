@@ -13,6 +13,7 @@
 #include "xwa/flight/flight.h"
 #include "xwa/flight/flight_display.h"
 #include "xwa/flight/hangar.h"
+#include "xwa/flight/hud/hud.h"
 #include "xwa/flight/mission/mission.h"
 #include "xwa/frontend/flight_loading.h"
 #include "xwa/frontend/frontend_display.h"
@@ -326,6 +327,22 @@ void XwaPort_GetVrConsoleState(XwaVrConsoleState* out) {
 	}
 }
 
+int XwaPort_VrInFlight(void) { return XwaPort_VrConsoleCraft() != NULL; }
+
+/* A line of our own in the in-flight message pane (where "entering area"
+ * reports appear), e.g. the voice command confirmations. Text in [brackets]
+ * is highlighted like the game's own messages. */
+void XwaPort_ShowFlightNote(const char* text) {
+	static char note[72];
+	if (!text || !text[0] || !XwaPort_VrConsoleCraft()) {
+		return;
+	}
+	snprintf(note, sizeof note, "%s", text);
+	g_msgSenderIff = 0;
+	msg_addMessagePtr(0, note);
+	msg_emitInFlightMessage(MSG_BLANK, g_localPlayer);
+}
+
 static void XwaPort_QueueKeyTimes(uint16_t key, int times) {
 	for (int i = 0; i < times; ++i) {
 		XwaPort_QueueFlightActionKey(key);
@@ -368,6 +385,8 @@ void XwaPort_VrConsoleAction(XwaVrConsoleAction action, int arg) {
 		[XWA_VRC_WING_REPORT] = KEY_SHIFT_U,
 		[XWA_VRC_WING_RESUPPLY] = KEY_SHIFT_B,
 		[XWA_VRC_WING_REINFORCE] = KEY_SHIFT_S,
+		[XWA_VRC_TARGET_NEXT] = KEY_T,
+		[XWA_VRC_TARGET_PREV] = KEY_Y,
 	};
 	const CraftData* craft = XwaPort_VrConsoleCraft();
 	if (!craft || (int)action <= XWA_VRC_NONE || (int)action >= XWA_VRC_COUNT) {

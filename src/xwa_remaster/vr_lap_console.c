@@ -1553,8 +1553,10 @@ static void vc_card_draw(void) {
 					   W - 236.0f, W * 0.5f);
 	vc_text(W * 0.5f - 148.0f - 80.0f, cy + 318.0f, "LEFT", 22.0f, 1, VC_CYAN, 0.9f);
 	vc_text(W * 0.5f + 148.0f + 80.0f, cy + 318.0f, "RIGHT", 22.0f, 1, VC_CYAN, 0.9f);
-	vc_text(W * 0.5f, H - 132.0f, "Flight stick (between your knees): right grip on it = fly, left grip = move it", 17.0f,
+	vc_text(W * 0.5f, H - 158.0f, "Flight stick (between your knees): right grip on it = fly, left grip = move it", 17.0f,
 			1, 0.85f, 0.97f, 1.0f, 0.95f);
+	vc_text(W * 0.5f, H - 132.0f, "Voice: double-tap a thumb rest, then say e.g. \"attack my target\", \"nearest enemy\"",
+			17.0f, 1, 0.85f, 0.97f, 1.0f, 0.95f);
 	vc_text(W * 0.5f, H - 104.0f, "Right stick flicks, grip+:  up  lasers > shields    down  shields > lasers", 17.0f, 1,
 			0.62f, 0.85f, 0.92f, 0.9f);
 	vc_text(W * 0.5f, H - 78.0f, "left  shield balance (S)    right  flagged targets (N)", 17.0f, 1, 0.62f, 0.85f,

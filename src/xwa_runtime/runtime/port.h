@@ -31,6 +31,10 @@ int XwaPort_QueueMouseLookToggle(void);
 /* VR lap console bridge (see xwa_remaster/vr_lap_console.h). */
 void XwaPort_GetVrConsoleState(XwaVrConsoleState* out);
 void XwaPort_VrConsoleAction(XwaVrConsoleAction action, int arg);
+/* 1 while flying the player's craft in VR (not loading, paused, hangar menu). */
+int XwaPort_VrInFlight(void);
+/* Shows `text` (up to 70 characters) in the in-flight message pane. */
+void XwaPort_ShowFlightNote(const char* text);
 /* Latched release of the flight mouse capture (Ctrl+Alt+M), so the pointer
  * returns to the OS while flight keeps running. Cleared by the hotkey, by a
  * click inside the window, or when the session leaves flight. */

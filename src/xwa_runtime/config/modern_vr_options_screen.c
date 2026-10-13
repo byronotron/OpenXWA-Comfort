@@ -36,6 +36,7 @@ enum {
 	VR_FLIGHT_STICK,
 	VR_STICK_TWIST,
 	VR_INVERT_PITCH,
+	VR_VOICE,
 	VR_BUTTON_CARD,
 	VR_ENVIRONMENT,
 	VR_RESOLUTION,
@@ -53,6 +54,8 @@ static const char* const k_scale_texts[] = { "0.60 (huge)", "0.70", "0.75", "0.8
 static const char* const k_scale_values[] = { "0.6", "0.7", "0.75", "0.8", "0.85", "0.9", "1.0", "1.1", "1.2" };
 static const char* const k_toggle_texts[] = { "Off", "On" };
 static const char* const k_toggle_values[] = { "0", "1" };
+static const char* const k_voice_texts[] = { "Off", "Double-tap Thumb Rest", "Hold Thumb Rest" };
+static const char* const k_voice_values[] = { "0", "doubletap", "hold" };
 static const char* const k_res_texts[] = { "70%", "80%", "90%", "100%", "110%", "120%" };
 static const char* const k_res_values[] = { "0.7", "0.8", "0.9", "1.0", "1.1", "1.2" };
 
@@ -68,6 +71,7 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "XWA_XR_FLIGHT_STICK", "Flight Stick", k_toggle_texts, k_toggle_values, 2, 1, 94 },
 	{ "XWA_XR_STICK_TWIST", "Stick Twist Rolls", k_toggle_texts, k_toggle_values, 2, 0, 96 },
 	{ "AERON_XR_INVERT_PITCH", "Invert Thumbstick Pitch", k_toggle_texts, k_toggle_values, 2, 0, 97 },
+	{ "XWA_XR_VOICE", "Voice Commands", k_voice_texts, k_voice_values, 3, 1, 98 },
 	{ "XWA_XR_BUTTON_CARD", "Button Card", k_toggle_texts, k_toggle_values, 2, 1, 92 },
 	{ "XWA_XR_ENVIRONMENT", "Menu Hangar", k_toggle_texts, k_toggle_values, 2, 1, 90 },
 	{ "AERON_XR_RESOLUTION_SCALE", "Resolution (restart)", k_res_texts, k_res_values, 6, 2, 86 },
@@ -86,7 +90,7 @@ static int vr_index_from_env(const VrSetting* setting) {
 	if (!env || !env[0]) {
 		return best;
 	}
-	if (setting->values == k_layout_values) {
+	if (setting->values == k_layout_values || setting->values == k_voice_values) {
 		for (int i = 0; i < setting->count; i++) {
 			if (SDL_strcasecmp(env, setting->values[i]) == 0) {
 				return i;
@@ -279,7 +283,7 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 		return 0;
 	}
 	vr_load();
-	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 70, cursor_row, VR_COUNT + 4);
+	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 52, cursor_row, VR_COUNT + 4);
 	XwaModernOptionsMenu_DrawTitle(&menu, "OpenXWA VR Options");
 
 	for (int i = 0; i < VR_COUNT; i++) {
@@ -296,6 +300,7 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 			SDL_setenv_unsafe(setting->key, setting->values[value], 1);
 			Aeron_LogInfo("xwa.config", "VR option %s=%s", setting->key, setting->values[value]);
 		}
+		menu.y -= 2; /* 18 px rows: the list has outgrown 20 */
 	}
 
 	if (XwaModernOptionsMenu_DrawAction(&menu, "Reset HUD Panel Positions", 93, 0)) {

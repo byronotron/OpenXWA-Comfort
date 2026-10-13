@@ -5,6 +5,7 @@
 #include "setup.h"
 #include "setup_screen.h"
 #include "vr_keyboard.h"
+#include "vr_voice.h"
 #include "window_icon.h"
 #include "xwa/config/game_config.h"
 #include "xwa_remaster/vr_cockpit_hud.h"
@@ -400,6 +401,9 @@ static void android_load_settings(void) {
 				  "#AERON_XR_THROTTLE_ZONE=30\n"
 				  "# 1 = right thumbstick back pushes the nose down (inverted pitch):\n"
 				  "#AERON_XR_INVERT_PITCH=0\n"
+				  "# Voice commands: double-tap a thumb rest, then speak (doubletap), or\n"
+				  "# speak while the thumb is on the rest (hold); 0 = off:\n"
+				  "#XWA_XR_VOICE=doubletap\n"
 				  "# Helmet HUD distance in metres and size:\n"
 				  "#XWA_XR_HUD_DISTANCE=3.0\n"
 				  "#XWA_XR_HUD_SCALE=0.65\n"
@@ -744,6 +748,8 @@ int main(int argc, char** argv) {
 				while (XwaVrConsole_PollAction(&console_action, &console_arg)) {
 					XwaPort_VrConsoleAction(console_action, console_arg);
 				}
+				/* Voice commands (push-to-talk on the thumb rests). */
+				XwaVrVoice_Update();
 				XwaPort_Tick(delta_us);
 			}
 			{
@@ -795,6 +801,7 @@ int main(int argc, char** argv) {
 
 	exit_code = Aeron_FatalErrorRequested() ? 1 : XwaPort_GetExitCode();
 	XwaVrKeyboard_Shutdown();
+	XwaVrVoice_Shutdown();
 	XwaRemaster_Shutdown();
 	XwaPort_Shutdown();
 	Aeron_Shutdown();

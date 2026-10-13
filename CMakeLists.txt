@@ -333,6 +333,8 @@ set(XWA_APP_SOURCES
     src/xwa_app/setup_screen.c
     src/xwa_app/vr_keyboard.c
     src/xwa_app/crash_report.c
+    src/xwa_app/voice_core.c
+    src/xwa_app/vr_voice.c
 )
 
 if(ANDROID)
@@ -350,7 +352,11 @@ target_link_libraries(xwa
         xwa_remaster
 )
 target_include_directories(xwa PRIVATE
-	${CMAKE_CURRENT_SOURCE_DIR}/src/xwa_app)
+	${CMAKE_CURRENT_SOURCE_DIR}/src/xwa_app
+	${CMAKE_CURRENT_SOURCE_DIR})
+if(UNIX)
+    target_link_libraries(xwa PRIVATE ${CMAKE_DL_LIBS})
+endif()
 
 set(XWA_AERON_SCENE3D_DEFAULTS
     "${CMAKE_CURRENT_SOURCE_DIR}/aeron/config/scene3d_defaults.yaml")
