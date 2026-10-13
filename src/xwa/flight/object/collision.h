@@ -145,4 +145,7 @@ void collide_collisions(void);
 }
 #endif
 
+/* OpenXWA: region index a hyperbuoy in prompt range leads to for this player, or -1. */
+int collide_PlayerHyperBuoyRegion(int playerIdx);
+
 #endif

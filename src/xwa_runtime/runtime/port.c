@@ -15,6 +15,7 @@
 #include "xwa/flight/hangar.h"
 #include "xwa/flight/hud/hud.h"
 #include "xwa/flight/mission/mission.h"
+#include "xwa/flight/object/collision.h"
 #include "xwa/frontend/flight_loading.h"
 #include "xwa/frontend/frontend_display.h"
 #include "xwa/frontend/frontend_flight.h"
@@ -325,6 +326,9 @@ void XwaPort_GetVrConsoleState(XwaVrConsoleState* out) {
 		out->memory_set[i] = slot >= 0 && (uint32_t)slot < g_objectTableSlotCount &&
 							 g_objectTable[slot].objectType != OBJ_None;
 	}
+	out->hyper_ready = player->hyperspacePhase == 0 && (craft->systemFlags & 0x80u) &&
+					   (craft->workingSubsystems & 0x80u) &&
+					   (player->pendingActionId == 10 || collide_PlayerHyperBuoyRegion(g_localPlayer) >= 0);
 }
 
 int XwaPort_VrInFlight(void) { return XwaPort_VrConsoleCraft() != NULL; }
@@ -422,6 +426,31 @@ void XwaPort_VrConsoleAction(XwaVrConsoleAction action, int arg) {
 				XwaPort_QueueFlightActionKey((uint16_t)(KEY_SHIFT_F5 + arg));
 			}
 			return;
+		case XWA_VRC_HYPERSPACE: {
+			/* The game offers the jump while the craft is at a hyperspace buoy
+			 * ("Hyperspace to ...?") and Space confirms it; the button works for
+			 * as long as the craft is there, also after that prompt timed out. */
+			PlayerData* player = &g_players[g_localPlayer];
+			const int region = player->pendingActionId == 10 ? player->pendingActionParam
+															 : collide_PlayerHyperBuoyRegion(g_localPlayer);
+			if (!(craft->systemFlags & 0x80u)) {
+				XwaPort_ShowFlightNote("[Hyperspace] This craft has no hyperdrive");
+			} else if (!(craft->workingSubsystems & 0x80u)) {
+				XwaPort_ShowFlightNote("[Hyperspace] Hyperdrive damaged");
+			} else if (player->hyperspacePhase != 0) {
+				/* Already jumping. */
+			} else if (region < 0) {
+				XwaPort_ShowFlightNote("[Hyperspace] Fly to a hyperspace buoy first");
+			} else {
+				if (player->pendingActionId != 10) {
+					player->pendingActionId = 10;
+					player->pendingActionParam = (int16_t)region;
+					player->pendingActionTimer = 708;
+				}
+				XwaPort_QueueFlightActionKey(KEY_SPACE);
+			}
+			return;
+		}
 		default:
 			XwaPort_QueueFlightActionKey(simple[action]);
 			return;

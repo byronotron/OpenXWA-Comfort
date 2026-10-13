@@ -63,6 +63,7 @@ typedef enum XwaVrConsoleAction {
 	/* Voice commands only. */
 	XWA_VRC_TARGET_NEXT,
 	XWA_VRC_TARGET_PREV,
+	XWA_VRC_HYPERSPACE, /* jump from a hyperspace buoy (confirms its prompt) */
 	XWA_VRC_COUNT
 } XwaVrConsoleAction;
 
@@ -75,6 +76,8 @@ typedef struct XwaVrConsoleState {
 	int sfoils_closed;
 	int has_target;
 	int memory_set[3];
+	/* At a hyperspace buoy with a working hyperdrive: the jump is a press away. */
+	int hyper_ready;
 	/* Changes when a new mission starts (the button card returns to its
 	 * spot on the right). */
 	unsigned int mission_serial;

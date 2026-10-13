@@ -83,6 +83,7 @@ typedef struct VcButton {
 	int lit;
 	int danger;
 	int level; /* level cell: >0 when the cell is at or below the current level */
+	int hyper; /* the HYPERSPACE button: pulses orange-red while the jump is ready */
 } VcButton;
 
 typedef struct VcLabel {
@@ -569,14 +570,12 @@ static void vc_layout(void) {
 			vc_row(x, 326.0f, w, 52.0f, 4, l, a, NULL);
 		}
 		{
-			static const char* const l[4] = { "GUNNER", "AUTO-GUN", "FLARE", "EJECT" };
+			static const char* const l[4] = { "GUNNER", "AUTO-GUN", "FLARE", "HYPERSPACE" };
 			static const XwaVrConsoleAction a[4] = { XWA_VRC_GUNNER, XWA_VRC_AUTO_GUNNER, XWA_VRC_COUNTERMEASURE,
-													 XWA_VRC_NONE };
+													 XWA_VRC_HYPERSPACE };
 			vc_row(x, 388.0f, w, 52.0f, 4, l, a, row);
-			row[3]->hold_action = XWA_VRC_EJECT;
-			row[3]->hold_only = 1;
-			row[3]->danger = 1;
-			row[3]->sub = "hold";
+			row[3]->hyper = 1;
+			row[3]->sub = st->hyper_ready ? "ready" : "at a buoy";
 		}
 	}
 }
@@ -918,6 +917,8 @@ static void vc_text(float x, float y, const char* text, float size_px, int align
 /* Holo cyan from the console design. */
 #define VC_CYAN 0.498f, 0.910f, 1.0f
 #define VC_AMBER 1.0f, 0.710f, 0.278f
+/* Hyperspace ready: orange-red. */
+#define VC_HYPER 1.0f, 0.42f, 0.16f
 
 static void vc_draw_button(int i) {
 	const VcButton* b = &s_vc.buttons[i];
@@ -928,9 +929,15 @@ static void vc_draw_button(int i) {
 	}
 	const float flash = s_vc.flash[i] > 0.0f ? 1.0f : 0.0f;
 	float fill[4], border[4];
+	const int hyper_ready = b->hyper && s_vc.state.hyper_ready;
+	/* Ready to jump: a slow orange-red pulse (about one per 1.2 s). */
+	const float pulse = hyper_ready ? 0.5f + 0.5f * sinf(s_vc.clock * 2.0f * 3.14159265f / 1.2f) : 0.0f;
 	if (!b->enabled) {
 		vc_pma(fill, 0.42f, 0.48f, 0.50f, 0.05f);
 		vc_pma(border, 0.42f, 0.48f, 0.50f, 0.35f);
+	} else if (hyper_ready) {
+		vc_pma(fill, VC_HYPER, 0.22f + 0.38f * pulse + 0.1f * hover + 0.2f * (pressed || flash));
+		vc_pma(border, VC_HYPER, 0.75f + 0.25f * pulse);
 	} else if (b->danger) {
 		const float hold = pressed && b->hold_action != XWA_VRC_NONE
 							   ? fminf(1.0f, s_vc.hands[0].press_button == i ? s_vc.hands[0].press_time / VC_EJECT_HOLD_S
@@ -943,7 +950,12 @@ static void vc_draw_button(int i) {
 		vc_pma(fill, VC_CYAN, on + 0.22f * hover + 0.25f * (pressed || flash));
 		vc_pma(border, hover ? 1.0f : 0.498f, hover ? 1.0f : 0.910f, 1.0f, b->lit || hover ? 1.0f : 0.62f);
 	}
-	if (b->enabled && (b->lit || hover || pressed)) {
+	if (hyper_ready) {
+		float glow[4];
+		const float transparent[4] = { 0, 0, 0, 0 };
+		vc_pma(glow, VC_HYPER, 0.25f + 0.5f * pulse);
+		vc_rrect(b->x - 8.0f, b->y - 8.0f, b->w + 16.0f, b->h + 16.0f, 13.0f, 8.0f, 14.0f, transparent, glow);
+	} else if (b->enabled && (b->lit || hover || pressed)) {
 		float glow[4];
 		const float transparent[4] = { 0, 0, 0, 0 };
 		vc_pma(glow, VC_CYAN, b->lit ? 0.45f : hover ? 0.55f : 0.3f);
@@ -951,9 +963,9 @@ static void vc_draw_button(int i) {
 	}
 	vc_rrect(b->x, b->y, b->w, b->h, 7.0f, 2.0f, 1.0f, fill, border);
 
-	const float tr = !b->enabled ? 0.45f : b->danger ? 1.0f : 0.85f;
-	const float tg = !b->enabled ? 0.52f : b->danger ? 0.92f : 0.97f;
-	const float tb = !b->enabled ? 0.55f : b->danger ? 0.80f : 1.0f;
+	const float tr = !b->enabled ? 0.45f : hyper_ready ? 1.0f : b->danger ? 1.0f : 0.85f;
+	const float tg = !b->enabled ? 0.52f : hyper_ready ? 0.90f : b->danger ? 0.92f : 0.97f;
+	const float tb = !b->enabled ? 0.55f : hyper_ready ? 0.78f : b->danger ? 0.80f : 1.0f;
 	const float text_a = b->lit || pressed ? 1.0f : 0.9f;
 	float size = b->h >= 60.0f ? 22.0f : 20.0f;
 	/* "LINE ONE\nLINE TWO": two centred lines. */
@@ -2019,7 +2031,7 @@ static const char* const k_voice_target[] = { "nearest enemy",      "next target
 static const char* const k_voice_ship[] = { "match speed",       "countermeasures",   "s-foils",
 											"lasers to shields", "shields to lasers", "fire link",
 											"convergence",       "map",               "dock",
-											"pick up",           "release cargo" };
+											"pick up",           "release cargo",     "hyperspace" };
 
 static void vc_voice_column(float x, const char* title, const char* const* lines, int count) {
 	float rule[4];

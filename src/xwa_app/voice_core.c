@@ -202,6 +202,8 @@ static const XvCommand k_commands[] = {
 	/* Ship. */
 	{ XWA_VRC_MATCH_SPEED, 0, "Match speed",
 	  { "match speed", "match target speed", "match their speed", "match velocity", "match it" } },
+	{ XWA_VRC_HYPERSPACE, 0, "Hyperspace",
+	  { "hyperspace", "jump to hyperspace", "make the jump", "punch it", "engage hyperdrive", "light speed" } },
 	{ XWA_VRC_COUNTERMEASURE, 0, "Countermeasure",
 	  { "countermeasures", "flares", "chaff", "deploy countermeasures", "drop flares", "decoy" } },
 	{ XWA_VRC_SFOILS, 0, "S-foils",

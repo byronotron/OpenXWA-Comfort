@@ -6520,6 +6520,41 @@ static __inline void collide_HandleDepartureDockPrompt(int playerIdx, unsigned i
 	}
 }
 
+// OpenXWA: the region index a hyperbuoy within prompt range would take the player to, or -1 - the
+// same test as the "ask about hyperspace" prompt below, without side effects (for the VR console's
+// HYPERSPACE button).
+int collide_PlayerHyperBuoyRegion(int playerIdx) {
+	unsigned int idx;
+	const unsigned int objIdx = (uint16_t)g_players[playerIdx].objectIndex;
+	int result = -1;
+	const int savedRange = g_targetRangeScore;
+
+	if (g_players[playerIdx].hyperspacePhase != 0 || g_objectTable[objIdx].mobj == NULL ||
+		g_pilotData.missionDescriptionIds[g_pilotData.missionDirectoryId] == 1) {
+		return -1;
+	}
+	for (idx = g_activeRegionObjectSlotStart; idx < g_activeRegionCraftObjectSlotEnd && result < 0; ++idx) {
+		const ObjectRecord* o = &g_objectTable[idx];
+		int region;
+		if (o->objectType == OBJ_None || o->genusId != GENUS_SatelliteBuoy) {
+			continue;
+		}
+		region = collide_GetHyperRegionDesignationForPlayer(objIdx, idx, 0);
+		if (!region) {
+			region = collide_GetHyperRegionDesignationForPlayer(objIdx, idx, 1);
+		}
+		if (!region) {
+			continue;
+		}
+		pai_ObjectRefUpdateApproxRangeScore(objIdx, idx);
+		if ((unsigned int)g_targetRangeScore < 0x6000) {
+			result = region - 16;
+		}
+	}
+	g_targetRangeScore = savedRange;
+	return result;
+}
+
 // Offers the "ask about hyperspace" prompt when the player's craft is near a hyperbuoy designating a
 // reachable region and not already in or near hyperspace.
 static __inline void collide_HandleHyperBuoyPrompt(int playerIdx, unsigned int objIdx) {
