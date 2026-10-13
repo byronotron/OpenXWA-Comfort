@@ -15,6 +15,8 @@
 #include "aeron/render.h"
 #include "aeron/scene/scene3d.h"
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -34,6 +36,12 @@ typedef struct XwaVrGloveCapsule {
 	float a[3], b[3];
 	float radius;
 } XwaVrGloveCapsule;
+
+/* The skinned glove of hand 0 (left) / 1 (right) this frame: vertices and
+ * normals in LOCAL space (xyz) and its triangle list. Returns 0 when not
+ * shown. */
+int XwaVrGloves_Mesh(int hand, const float** local_xyz, const float** local_normals, int* vertex_count,
+					 const uint16_t** indices, int* index_count);
 
 /* Index fingertip of hand 0 (left) / 1 (right). Returns 0 when the hand is
  * not shown. `pointing` is set when the index finger is off the trigger. */

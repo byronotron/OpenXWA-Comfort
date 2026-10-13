@@ -237,6 +237,8 @@ typedef struct GlHand {
 	float tip_local[3];
 	XwaVrGloveCapsule capsules[24];
 	int capsule_count;
+	float* local;   /* skinned vertices in LOCAL space, xyz (for panel cut-outs) */
+	float* local_n; /* their normals in LOCAL space (unnormalized) */
 } GlHand;
 
 static struct {
@@ -668,6 +670,16 @@ void XwaVrGloves_Submit(AeronScene3D* scene, AeronCommandBuffer* cmd, const floa
 		}
 		x.units = units;
 		gl_instance(scene, h->mesh, &x, NULL);
+		if (!h->local) {
+			h->local = (float*)malloc((size_t)h->source.vertex_count * 3 * sizeof(float));
+			h->local_n = (float*)malloc((size_t)h->source.vertex_count * 3 * sizeof(float));
+		}
+		if (h->local && h->local_n) {
+			for (uint32_t i = 0; i < h->source.vertex_count; ++i) {
+				gl_local_point(&x, h->source.vertices[i].pos, &h->local[i * 3]);
+				m3_apply(&x.hand_rot, h->source.vertices[i].normal, &h->local_n[i * 3]);
+			}
+		}
 		if (hand == 1 && s_gl.pin_mesh) {
 			const M4 pin = m4_mul(&h->global[m->pin_bone], &m->pin_local);
 			gl_instance(scene, s_gl.pin_mesh, &x, &pin);
@@ -738,8 +750,24 @@ int XwaVrGloves_Capsules(int hand, XwaVrGloveCapsule* out, int max_out) {
 	return n;
 }
 
+int XwaVrGloves_Mesh(int hand, const float** local_xyz, const float** local_normals, int* vertex_count,
+					 const uint16_t** indices, int* index_count) {
+	if (hand < 0 || hand > 1 || !s_gl.hands[hand].shown || !s_gl.hands[hand].local || !s_gl.hands[hand].local_n) {
+		return 0;
+	}
+	const GlHand* h = &s_gl.hands[hand];
+	*local_xyz = h->local;
+	*local_normals = h->local_n;
+	*vertex_count = (int)h->source.vertex_count;
+	*indices = h->source.indices;
+	*index_count = (int)h->source.index_count;
+	return 1;
+}
+
 void XwaVrGloves_Shutdown(void) {
 	for (int h = 0; h < 2; ++h) {
+		free(s_gl.hands[h].local);
+		free(s_gl.hands[h].local_n);
 		if (s_gl.hands[h].mesh) {
 			AeronScene_MeshDestroy(s_gl.hands[h].mesh);
 		}

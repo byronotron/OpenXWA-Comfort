@@ -1080,11 +1080,234 @@ static void vc_draw_handles(const VcPlace* pl) {
 	}
 }
 
+/* ---- Glove silhouettes ------------------------------------------------
+ * The exact outline of each glove, as seen from the eye the list is drawn
+ * for: its skinned triangles (the part in front of the panel) projected
+ * onto the panel and rasterized into a small mask, which erases the panel
+ * there. The hole then matches the rendered hand, with no gap around it.
+ */
+enum { VC_MASK = 320, VC_MASK_MAX_VERTS = 16384 };
+
+static struct {
+	AeronCommandBuffer* cmd; /* for the mask uploads */
+	int eye;                 /* list being drawn: 0 left, 1 right */
+	int masks;               /* masks drawn into the current panel */
+	AeronTexture* tex[2][2]; /* [eye][hand] */
+	uint8_t px[VC_MASK * VC_MASK * 4];
+	float sx[VC_MASK_MAX_VERTS], sy[VC_MASK_MAX_VERTS], h[VC_MASK_MAX_VERTS];
+	uint8_t facing[VC_MASK_MAX_VERTS];
+} s_mask;
+
+/* One triangle (mask texel space) into the mask, coverage at texel centres
+ * (either winding). */
+static void vc_mask_tri(int mw, int mh, float x0, float y0, float x1, float y1, float x2, float y2) {
+	const float area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
+	if (fabsf(area) < 1e-6f) {
+		return;
+	}
+	if (area < 0.0f) {
+		float t = x1;
+		x1 = x2;
+		x2 = t;
+		t = y1;
+		y1 = y2;
+		y2 = t;
+	}
+	int ix0 = (int)fminf(x0, fminf(x1, x2)), iy0 = (int)fminf(y0, fminf(y1, y2));
+	int ix1 = (int)fmaxf(x0, fmaxf(x1, x2)) + 1, iy1 = (int)fmaxf(y0, fmaxf(y1, y2)) + 1;
+	ix0 = ix0 < 0 ? 0 : ix0;
+	iy0 = iy0 < 0 ? 0 : iy0;
+	ix1 = ix1 > mw ? mw : ix1;
+	iy1 = iy1 > mh ? mh : iy1;
+	if (ix0 >= ix1 || iy0 >= iy1) {
+		return;
+	}
+	/* Edge functions E = a*x + b*y + c, stepped incrementally. */
+	const float a0 = -(y1 - y0), b0 = x1 - x0, a1 = -(y2 - y1), b1 = x2 - x1, a2 = -(y0 - y2), b2 = x0 - x2;
+	const float sx = (float)ix0 + 0.5f, sy = (float)iy0 + 0.5f;
+	float r0 = a0 * (sx - x0) + b0 * (sy - y0);
+	float r1 = a1 * (sx - x1) + b1 * (sy - y1);
+	float r2 = a2 * (sx - x2) + b2 * (sy - y2);
+	for (int y = iy0; y < iy1; ++y) {
+		float e0 = r0, e1 = r1, e2 = r2;
+		uint8_t* row = &s_mask.px[(y * mw) * 4 + 3];
+		for (int x = ix0; x < ix1; ++x) {
+			if (e0 >= 0.0f && e1 >= 0.0f && e2 >= 0.0f) {
+				row[x * 4] = 255;
+			}
+			e0 += a0;
+			e1 += a1;
+			e2 += a2;
+		}
+		r0 += b0;
+		r1 += b1;
+		r2 += b2;
+	}
+}
+
+/* Is any of the hand's capsules over the current panel, in front of it? */
+static int vc_hand_near_panel(int hand) {
+	XwaVrGloveCapsule caps[24];
+	const int n = XwaVrGloves_Capsules(hand, caps, 24);
+	for (int c = 0; c < n; ++c) {
+		const float* p = s_vc.pose.position;
+		for (int e = 0; e < 2; ++e) {
+			const float* q = e ? caps[c].b : caps[c].a;
+			const float r[3] = { q[0] - p[0], q[1] - p[1], q[2] - p[2] };
+			const float m = caps[c].radius + 0.03f;
+			if (vc_dot(r, s_vc.az) > -m && fabsf(vc_dot(r, s_vc.ax)) < 0.5f * s_vc.cur_w_m + 0.15f &&
+				fabsf(vc_dot(r, s_vc.ay)) < 0.5f * s_vc.cur_h_m + 0.15f) {
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+
+static int vc_cut_glove_silhouette(int hand) {
+	const float* v;
+	const float* nrm;
+	const uint16_t* idx;
+	int vn, in;
+	if (!s_mask.cmd || !XwaVrGloves_Mesh(hand, &v, &nrm, &vn, &idx, &in) || vn > VC_MASK_MAX_VERTS) {
+		return 0;
+	}
+	if (!vc_hand_near_panel(hand)) {
+		return 1; /* nothing to cut */
+	}
+	/* Height above the panel (towards the viewer) and panel pixels. */
+	const float* c = s_vc.pose.position;
+	float bx0 = 1e9f, by0 = 1e9f, bx1 = -1e9f, by1 = -1e9f;
+	for (int i = 0; i < vn; ++i) {
+		const float* p = &v[i * 3];
+		const float r[3] = { p[0] - c[0], p[1] - c[1], p[2] - c[2] };
+		const float to_eye[3] = { s_vc.eye[0] - p[0], s_vc.eye[1] - p[1], s_vc.eye[2] - p[2] };
+		s_mask.h[i] = vc_dot(r, s_vc.az);
+		s_mask.facing[i] = vc_dot(&nrm[i * 3], to_eye) > 0.0f;
+		if (vc_project(p, &s_mask.sx[i], &s_mask.sy[i]) <= 0.0f) {
+			s_mask.h[i] = -1.0f; /* behind the eye: treat as hidden */
+			continue;
+		}
+		if (s_mask.h[i] > 0.0f) {
+			bx0 = fminf(bx0, s_mask.sx[i]);
+			by0 = fminf(by0, s_mask.sy[i]);
+			bx1 = fmaxf(bx1, s_mask.sx[i]);
+			by1 = fmaxf(by1, s_mask.sy[i]);
+		}
+	}
+	bx0 = fmaxf(bx0, 0.0f);
+	by0 = fmaxf(by0, 0.0f);
+	bx1 = fminf(bx1, s_vc.cur_w_px);
+	by1 = fminf(by1, s_vc.cur_h_px);
+	if (bx1 <= bx0 || by1 <= by0) {
+		return 1; /* in front of the panel, but not over it */
+	}
+	/* Texel size: at least two pixels (the bilinear edge stays under a
+	 * millimetre), so the hand fits in the mask with a
+	 * two-texel empty border (bilinear edges never sample past it). */
+	const float bw = bx1 - bx0, bh = by1 - by0;
+	const float scale = fmaxf(2.0f, fmaxf(bw, bh) / (float)(VC_MASK - 5));
+	const int mw = (int)ceilf(bw / scale) + 4, mh = (int)ceilf(bh / scale) + 4;
+	const float ox = bx0 - 2.0f * scale, oy = by0 - 2.0f * scale;
+	memset(s_mask.px, 0, (size_t)mw * (size_t)mh * 4);
+	for (int t = 0; t + 2 < in; t += 3) {
+		const int k[3] = { idx[t], idx[t + 1], idx[t + 2] };
+		if (k[0] >= vn || k[1] >= vn || k[2] >= vn) {
+			continue;
+		}
+		const int front = (s_mask.h[k[0]] > 0.0f) + (s_mask.h[k[1]] > 0.0f) + (s_mask.h[k[2]] > 0.0f);
+		/* The silhouette is the union of the faces turned towards the eye
+		 * (the back faces cover the same area again). */
+		if (front == 0 || !(s_mask.facing[k[0]] | s_mask.facing[k[1]] | s_mask.facing[k[2]])) {
+			continue;
+		}
+		/* Clip to the part in front of the panel: the panel covers the rest. */
+		float px[4], py[4];
+		int n = 0;
+		for (int e = 0; e < 3; ++e) {
+			const int a = k[e], b = k[(e + 1) % 3];
+			const float ha = s_mask.h[a], hb = s_mask.h[b];
+			if (ha > 0.0f) {
+				px[n] = s_mask.sx[a];
+				py[n] = s_mask.sy[a];
+				n++;
+			}
+			if ((ha > 0.0f) != (hb > 0.0f) && n < 4) {
+				/* The crossing lies on the panel: its panel pixel is the
+				 * point itself, whichever eye looks at it. */
+				const float u = ha / (ha - hb);
+				float q[3];
+				for (int d = 0; d < 3; ++d) {
+					q[d] = v[a * 3 + d] + (v[b * 3 + d] - v[a * 3 + d]) * u;
+				}
+				if (vc_project(q, &px[n], &py[n]) > 0.0f) {
+					n++;
+				}
+			}
+		}
+		for (int j = 0; j < n; ++j) {
+			px[j] = (px[j] - ox) / scale;
+			py[j] = (py[j] - oy) / scale;
+		}
+		for (int j = 1; j + 1 < n; ++j) {
+			vc_mask_tri(mw, mh, px[0], py[0], px[j], py[j], px[j + 1], py[j + 1]);
+		}
+	}
+	AeronTexture** tex = &s_mask.tex[s_mask.eye][hand];
+	if (!*tex) {
+		*tex = Aeron_CreateTexture(&(AeronTextureDesc) {
+			.width = VC_MASK,
+			.height = VC_MASK,
+			.mip_count = 1,
+			.format = AERON_TEXTURE_FORMAT_RGBA8_UNORM,
+			.usage = AERON_TEXTURE_USAGE_SAMPLED | AERON_TEXTURE_USAGE_TRANSFER_DST,
+			.debug_name = "xwa.vr_console.hand_mask",
+		});
+		if (!*tex) {
+			return 0;
+		}
+	}
+	/* Cycled: the same texture serves the next panel this frame. */
+	if (!Aeron_UploadTextureDataCmd(s_mask.cmd, &(AeronTextureUploadDesc) {
+			.texture = *tex,
+			.width = mw,
+			.height = mh,
+			.pixels = s_mask.px,
+			.pitch = mw * 4,
+			.pixel_format = AERON_PIXEL_FORMAT_RGBA8888,
+			.cycle = 1,
+		})) {
+		return 0;
+	}
+	AeronDrawList2DSprite sp;
+	memset(&sp, 0, sizeof sp);
+	sp.texture = *tex;
+	sp.src_u0 = 1.0f / (float)VC_MASK;
+	sp.src_v0 = 1.0f / (float)VC_MASK;
+	sp.src_u1 = (float)(mw - 1) / (float)VC_MASK;
+	sp.src_v1 = (float)(mh - 1) / (float)VC_MASK;
+	sp.dst_x = ox + scale;
+	sp.dst_y = oy + scale;
+	sp.dst_w = (float)(mw - 2) * scale;
+	sp.dst_h = (float)(mh - 2) * scale;
+	sp.tint[0] = sp.tint[1] = sp.tint[2] = sp.tint[3] = 1.0f;
+	sp.blend = AERON_BLIT2D_BLEND_ERASE;
+	sp.filter = AERON_BLIT2D_FILTER_LINEAR;
+	AeronDrawList_AddSprite(s_vc.cur_list, &sp);
+	s_vc.cut_count++;
+	s_mask.masks++;
+	return 1;
+}
+
 /* The console is a layer drawn over the 3D view: wherever a glove is
  * between the eye and the current panel, cut the panel away so the hand
  * shows in front of it. */
 static void vc_cut_gloves(void) {
 	for (int h = 0; h < 2; ++h) {
+		if (vc_cut_glove_silhouette(h)) {
+			continue;
+		}
+		/* No mesh: the capsule approximation. */
 		XwaVrGloveCapsule caps[24];
 		const int n = XwaVrGloves_Capsules(h, caps, 24);
 		for (int c = 0; c < n; ++c) {
@@ -1339,6 +1562,9 @@ static int vc_render_panel(AeronCommandBuffer* cmd, int layer, AeronDrawList2D* 
 	s_vc.cur_list = lists[0];
 	memcpy(s_vc.eye, views[0].position, sizeof s_vc.eye);
 	s_vc.cut_count = 0;
+	s_mask.cmd = cmd;
+	s_mask.eye = 0;
+	s_mask.masks = 0;
 	AeronDrawList_Begin(lists[0], NULL, width, height, AERON_DRAWLIST2D_CLEAR, NULL);
 	draw();
 	const int stereo = s_vc.cut_count > 0;
@@ -1346,10 +1572,15 @@ static int vc_render_panel(AeronCommandBuffer* cmd, int layer, AeronDrawList2D* 
 	if (stereo) {
 		s_vc.cur_list = lists[1];
 		memcpy(s_vc.eye, views[1].position, sizeof s_vc.eye);
+		s_mask.eye = 1;
 		AeronDrawList_Begin(lists[1], NULL, width, height, AERON_DRAWLIST2D_LOAD, NULL);
 		AeronDrawList_SetOrigin(lists[1], width, 0);
 		draw();
 		hash = hash * 1099511628211ull ^ AeronDrawList_Hash(lists[1]);
+	}
+	s_mask.cmd = NULL;
+	if (s_mask.masks) {
+		*hash_valid = 0; /* the masks' pixels are not in the hash: always redraw */
 	}
 	if (!*hash_valid || hash != *shown_hash) {
 		AeronRenderTarget* target = Aeron_XrStereoPanelTarget(layer, NULL, NULL);
