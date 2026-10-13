@@ -459,6 +459,33 @@ static void android_load_settings(void) {
 	fclose(f);
 }
 
+/* Foveation shim (packaging/quest/vkshim): its log, its state, and the
+ * marker file that is present while a start with it has not proven itself. */
+static char g_shim_guard[1024];
+static int (*g_shim_take_log)(char* out, int size);
+static int (*g_shim_foveating)(void);
+
+static void shim_frame(void) {
+	static int frames;
+	if (g_shim_take_log) {
+		char text[4096];
+		if (g_shim_take_log(text, (int)sizeof text) > 0) {
+			for (char* line = strtok(text, "\n"); line; line = strtok(NULL, "\n")) {
+				if (line[0] == '!') {
+					Aeron_LogWarn("vkshim", "%s", line + 1);
+				} else {
+					Aeron_LogInfo("vkshim", "%s", line + 1);
+				}
+			}
+		}
+	}
+	/* Proven: foveating for a while, or running for a minute. */
+	if (g_shim_guard[0] && ((g_shim_foveating && g_shim_foveating() && ++frames > 300) || frames++ > 4000)) {
+		remove(g_shim_guard);
+		g_shim_guard[0] = '\0';
+	}
+}
+
 /* Read before Aeron_Init: the XR swapchains are sized at session start. */
 static void android_xr_defaults(void) {
 	const char* profile = SDL_getenv("XWA_QUEST_PROFILE");
@@ -473,15 +500,38 @@ static void android_xr_defaults(void) {
 		 * (packaging/quest/vkshim), which adds a fragment density map to the
 		 * 3D scene's pass. Only when the shim is there to load. */
 		const char* fov = SDL_getenv("XWA_XR_FOVEATION");
-		if (!(fov && (fov[0] == '0' || SDL_strcasecmp(fov, "off") == 0))) {
+		const char* external = SDL_GetAndroidExternalStoragePath();
+		FILE* guard = NULL;
+		if (external && external[0]) {
+			snprintf(g_shim_guard, sizeof g_shim_guard, "%s/openxwa-foveation-start", external);
+			guard = fopen(g_shim_guard, "r");
+		}
+		if (guard) {
+			/* The last start with the shim never got going: run without it and
+			 * leave it off (the VR options turn it back on). */
+			fclose(guard);
+			remove(g_shim_guard);
+			g_shim_guard[0] = '\0';
+			SDL_setenv_unsafe("XWA_XR_FOVEATION", "0", 1);
+			XwaModernVrOptions_SaveValue("XWA_XR_FOVEATION", "0");
+			Aeron_LogWarn("xwa.config", "foveation: the last start with it failed, so it is now off");
+		} else if (!(fov && (fov[0] == '0' || SDL_strcasecmp(fov, "off") == 0))) {
 			void* shim = dlopen("libopenxwa_vkshim.so", RTLD_NOW | RTLD_LOCAL);
 			if (shim && dlsym(shim, "vkGetInstanceProcAddr")) {
 				SDL_SetHint(SDL_HINT_VULKAN_LIBRARY, "libopenxwa_vkshim.so");
+				g_shim_take_log = (int (*)(char*, int))dlsym(shim, "OpenXWA_VkShim_TakeLog");
+				g_shim_foveating = (int (*)(void))dlsym(shim, "OpenXWA_VkShim_Foveating");
+				if (g_shim_guard[0] && (guard = fopen(g_shim_guard, "w")) != NULL) {
+					fclose(guard);
+				}
 				Aeron_LogInfo("xwa.config", "Vulkan through the foveation shim (XWA_XR_FOVEATION=%s)",
 							  fov && fov[0] ? fov : "low");
 			} else {
+				g_shim_guard[0] = '\0';
 				Aeron_LogWarn("xwa.config", "foveation shim not found: %s", dlerror());
 			}
+		} else {
+			g_shim_guard[0] = '\0';
 		}
 	}
 	{
@@ -724,6 +774,9 @@ int main(int argc, char** argv) {
 		int xr_paused = 0;
 		while (!Aeron_QuitRequested() && !XwaPort_ShouldQuit()) {
 			const int32_t delta_us = Aeron_BeginFrame();
+#if defined(SDL_PLATFORM_ANDROID)
+			shim_frame();
+#endif
 			/* Before the game reads input: the VR keyboard consumes its clicks. */
 			XwaVrKeyboard_BeginFrame(delta_us);
 			const int xr_unfocused = xr_auto_pause && Aeron_XrIsUnfocused();

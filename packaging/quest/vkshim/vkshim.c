@@ -39,8 +39,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Logs to logcat (liblog, looked up at run time) and to the game's log file
- * (AERON_LOG_FILE). */
+static pthread_mutex_t g_log_lock = PTHREAD_MUTEX_INITIALIZER;
+static char g_log[4096];
+
+/* Logs to logcat (liblog, looked up at run time) and keeps the line for the
+ * game's log. */
 static void shim_log(int prio, const char* fmt, ...) {
 	char text[512];
 	va_list ap;
@@ -57,12 +60,34 @@ static void shim_log(int prio, const char* fmt, ...) {
 	if (print) {
 		print(prio, "openxwa.vkshim", "%s", text);
 	}
-	const char* path = getenv("AERON_LOG_FILE");
-	FILE* f = path && path[0] ? fopen(path, "a") : NULL;
-	if (f) {
-		fprintf(f, "        %s vkshim: %s\n", prio >= 5 ? "WARN " : "INFO ", text);
-		fclose(f);
+	/* Kept for the game, which forwards it to its own log
+	 * (OpenXWA_VkShim_TakeLog). */
+	pthread_mutex_lock(&g_log_lock);
+	const size_t used = strlen(g_log), add = strlen(text);
+	if (used + add + 3 < sizeof g_log) {
+		g_log[used] = prio >= 5 ? '!' : ' ';
+		memcpy(g_log + used + 1, text, add);
+		g_log[used + 1 + add] = '\n';
+		g_log[used + 2 + add] = '\0';
 	}
+	pthread_mutex_unlock(&g_log_lock);
+}
+
+/* Moves the messages logged so far into `out` (lines; a leading '!' marks a
+ * warning). Returns their length. */
+__attribute__((visibility("default"))) int OpenXWA_VkShim_TakeLog(char* out, int size) {
+	pthread_mutex_lock(&g_log_lock);
+	int n = (int)strlen(g_log);
+	if (n >= size) {
+		n = size - 1;
+	}
+	if (n > 0) {
+		memcpy(out, g_log, (size_t)n);
+	}
+	out[n > 0 ? n : 0] = '\0';
+	g_log[0] = '\0';
+	pthread_mutex_unlock(&g_log_lock);
+	return n;
 }
 #define LOGI(...) shim_log(4, __VA_ARGS__)
 #define LOGW(...) shim_log(5, __VA_ARGS__)
@@ -462,15 +487,15 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateDevice(VkPhysicalDevice phys, c
 	/* Does the device have it? */
 	PFN_vkEnumerateDeviceExtensionProperties enum_ext =
 		(PFN_vkEnumerateDeviceExtensionProperties)g_real_gipa(g_instance, "vkEnumerateDeviceExtensionProperties");
+	/* The KHR entry points first: SDL enables that instance extension, while
+	 * the core 1.1 names may be unusable on a Vulkan 1.0 instance. */
 	PFN_vkGetPhysicalDeviceFeatures2 features2 =
-		(PFN_vkGetPhysicalDeviceFeatures2)g_real_gipa(g_instance, "vkGetPhysicalDeviceFeatures2");
+		(PFN_vkGetPhysicalDeviceFeatures2)g_real_gipa(g_instance, "vkGetPhysicalDeviceFeatures2KHR");
 	PFN_vkGetPhysicalDeviceProperties2 props2 =
-		(PFN_vkGetPhysicalDeviceProperties2)g_real_gipa(g_instance, "vkGetPhysicalDeviceProperties2");
-	if (!features2) {
-		features2 = (PFN_vkGetPhysicalDeviceFeatures2)g_real_gipa(g_instance, "vkGetPhysicalDeviceFeatures2KHR");
-	}
-	if (!props2) {
-		props2 = (PFN_vkGetPhysicalDeviceProperties2)g_real_gipa(g_instance, "vkGetPhysicalDeviceProperties2KHR");
+		(PFN_vkGetPhysicalDeviceProperties2)g_real_gipa(g_instance, "vkGetPhysicalDeviceProperties2KHR");
+	if (!features2 || !props2) {
+		LOGW("no vkGetPhysicalDevice*2KHR: foveation off");
+		return real(phys, ci, a, out);
 	}
 	PFN_vkGetPhysicalDeviceMemoryProperties memprops =
 		(PFN_vkGetPhysicalDeviceMemoryProperties)g_real_gipa(g_instance, "vkGetPhysicalDeviceMemoryProperties");
