@@ -178,6 +178,9 @@ static struct {
 	const VcPlace* cur_place;
 	float cur_w_m, cur_h_m, cur_w_px, cur_h_px;
 	int cut_count;
+	/* Drawing the panel's cached content (no cut-outs, no cursors), or the
+	 * per-eye overlay drawn on top of it each frame. */
+	int overlay_phase;
 	/* The lap console's right-eye list and what its layer shows. */
 	AeronDrawList2D* list_r;
 	uint64_t hash;
@@ -1445,6 +1448,11 @@ static void vc_draw(void) {
 	for (int i = 0; i < s_vc.button_count; ++i) {
 		vc_draw_button(i);
 	}
+}
+
+/* Per-eye overlay of the lap console: the glove cut-outs, then the cursors. */
+static void vc_cut_gloves(void);
+static void vc_console_overlay(void) {
 	vc_cut_gloves();
 	/* Cursors: a ring that closes in as the tip nears the surface, or a
 	 * dot where the ray lands. */
@@ -1552,46 +1560,104 @@ static int vc_in_view(const AeronXrPanel* pose, float w, float h, const AeronXrV
  * eye sees, else the panel shows a dark rim beside the glove like a
  * shadow), and redraws its layer only when that changed. Fills the quads
  * (`pose` in out[0]) and returns their count. */
+/* A panel's own content (everything but the per-eye cut-outs and cursors),
+ * kept in its own image and redrawn only when it changes: each frame the
+ * layer is then one copy per eye plus the small overlay. */
+typedef struct VcBase {
+	AeronRenderTarget* rt;
+	AeronDrawList2D* list;
+	uint64_t hash;
+	int valid, w, h;
+	AeronTextureFormat format;
+} VcBase;
+static VcBase s_base[AERON_XR_PANEL_COUNT];
+
 static int vc_render_panel(AeronCommandBuffer* cmd, int layer, AeronDrawList2D* lists[2], void (*draw)(void),
-						   const AeronXrView views[2], AeronXrPanel out[2], int width, int height, float w_m,
-						   float h_m, uint64_t* shown_hash, int* hash_valid) {
+						   void (*overlay)(void), const AeronXrView views[2], AeronXrPanel out[2], int width,
+						   int height, float w_m, float h_m, uint64_t* shown_hash, int* hash_valid) {
 	const AeronXrPanel pose = out[0];
-	if (!vc_in_view(&pose, w_m, h_m, views)) {
+	if (!vc_in_view(&pose, w_m, h_m, views) || layer < 0 || layer >= AERON_XR_PANEL_COUNT) {
 		return 0; /* nothing to draw or show; the layer keeps its image */
 	}
-	s_vc.cur_list = lists[0];
+	VcBase* base = &s_base[layer];
+	if (!base->list && !(base->list = AeronDrawList_Create(0))) {
+		return 0;
+	}
+	/* The content. */
+	s_vc.overlay_phase = 0;
+	s_vc.cur_list = base->list;
 	memcpy(s_vc.eye, views[0].position, sizeof s_vc.eye);
+	AeronDrawList_Begin(base->list, NULL, width, height, AERON_DRAWLIST2D_CLEAR, NULL);
+	draw();
+	const uint64_t base_hash = AeronDrawList_Hash(base->list);
+	/* Each eye's overlay. */
+	s_vc.overlay_phase = 1;
 	s_vc.cut_count = 0;
 	s_mask.cmd = cmd;
 	s_mask.eye = 0;
 	s_mask.masks = 0;
-	AeronDrawList_Begin(lists[0], NULL, width, height, AERON_DRAWLIST2D_CLEAR, NULL);
-	draw();
+	s_vc.cur_list = lists[0];
+	AeronDrawList_Begin(lists[0], NULL, width, height, AERON_DRAWLIST2D_LOAD, NULL);
+	overlay();
 	const int stereo = s_vc.cut_count > 0;
-	uint64_t hash = AeronDrawList_Hash(lists[0]);
+	uint64_t hash = base_hash * 1099511628211ull ^ AeronDrawList_Hash(lists[0]);
 	if (stereo) {
 		s_vc.cur_list = lists[1];
 		memcpy(s_vc.eye, views[1].position, sizeof s_vc.eye);
 		s_mask.eye = 1;
 		AeronDrawList_Begin(lists[1], NULL, width, height, AERON_DRAWLIST2D_LOAD, NULL);
 		AeronDrawList_SetOrigin(lists[1], width, 0);
-		draw();
+		overlay();
 		hash = hash * 1099511628211ull ^ AeronDrawList_Hash(lists[1]);
 	}
+	s_vc.overlay_phase = 0;
 	s_mask.cmd = NULL;
 	if (s_mask.masks) {
 		*hash_valid = 0; /* the masks' pixels are not in the hash: always redraw */
 	}
 	if (!*hash_valid || hash != *shown_hash) {
 		AeronRenderTarget* target = Aeron_XrStereoPanelTarget(layer, NULL, NULL);
-		if (!target) {
+		AeronTexture* target_tex = target ? Aeron_RenderTargetGetTexture(target) : NULL;
+		if (!target_tex) {
 			return 0;
 		}
-		AeronDrawList_SetTarget(lists[0], target);
-		AeronDrawList_Render(lists[0], cmd);
-		if (stereo) {
-			AeronDrawList_SetTarget(lists[1], target);
-			AeronDrawList_Render(lists[1], cmd);
+		const AeronTextureFormat format = Aeron_TextureGetFormat(target_tex);
+		if (!base->rt || base->w != width || base->h != height || base->format != format) {
+			if (base->rt) {
+				Aeron_DestroyRenderTarget(base->rt);
+			}
+			base->rt = Aeron_CreateRenderTarget(&(AeronRenderTargetDesc) {
+				.width = width,
+				.height = height,
+				.format = format,
+				.debug_name = "xwa.vr_console.panel",
+			});
+			base->w = width;
+			base->h = height;
+			base->format = format;
+			base->valid = 0;
+			if (!base->rt) {
+				return 0;
+			}
+		}
+		if (!base->valid || base->hash != base_hash) {
+			AeronDrawList_SetTarget(base->list, base->rt);
+			AeronDrawList_Render(base->list, cmd);
+			base->hash = base_hash;
+			base->valid = 1;
+		}
+		for (int e = 0; e < (stereo ? 2 : 1); ++e) {
+			Aeron_CopyTextureCmd(cmd, &(AeronTextureCopyDesc) {
+				.source = Aeron_RenderTargetGetTexture(base->rt),
+				.destination = target_tex,
+				.destination_x = (uint32_t)(e * width),
+				.width = (uint32_t)width,
+				.height = (uint32_t)height,
+			});
+			if (AeronDrawList_Count(lists[e]) > 0) {
+				AeronDrawList_SetTarget(lists[e], target);
+				AeronDrawList_Render(lists[e], cmd);
+			}
 		}
 		*shown_hash = hash;
 		*hash_valid = 1;
@@ -1694,7 +1760,8 @@ int XwaVrConsole_Frame(AeronCommandBuffer* cmd, int width, int height, const Aer
 		}
 	}
 	AeronDrawList2D* lists[2] = { s_vc.list, s_vc.list_r };
-	return vc_render_panel(cmd, AERON_XR_PANEL_CONSOLE, lists, vc_draw, views, out, width, height, VC_WIDTH_M,
+	return vc_render_panel(cmd, AERON_XR_PANEL_CONSOLE, lists, vc_draw, vc_console_overlay, views, out, width,
+						   height, VC_WIDTH_M,
 						   VC_HEIGHT_M, &s_vc.hash, &s_vc.hash_valid);
 }
 
@@ -1906,7 +1973,6 @@ static void vc_card_draw(void) {
 			0.62f, 0.85f, 0.92f, 0.9f);
 	vc_text(W * 0.5f, H - 78.0f, "left  shield balance (S)    right  flagged targets (N)", 17.0f, 1, 0.62f, 0.85f,
 			0.92f, 0.9f);
-	vc_cut_gloves();
 }
 
 /* The voice command list (left card). Keep in step with the command table
@@ -1958,7 +2024,6 @@ static void vc_voice_draw(void) {
 	vc_voice_column(688.0f, "SHIP", k_voice_ship, (int)(sizeof k_voice_ship / sizeof k_voice_ship[0]));
 	vc_text(W * 0.5f, H - 84.0f, "Your own words work too: \"wingmen, go after my target\", \"shoot flares\"", 17.0f, 1,
 			0.62f, 0.85f, 0.92f, 0.9f);
-	vc_cut_gloves();
 }
 
 static int vc_card_enabled_kind(int card) {
@@ -2060,7 +2125,8 @@ int XwaVrConsole_CardFrame(AeronCommandBuffer* cmd, int card, int width, int hei
 	const float lap_alpha = s_vc.alpha;
 	s_vc.alpha = cd->alpha;
 	const int n = vc_render_panel(cmd, card == VC_CARD_VOICE ? AERON_XR_PANEL_CARD2 : AERON_XR_PANEL_CARD, cd->list,
-								  card == VC_CARD_VOICE ? vc_voice_draw : vc_card_draw, views, out, width, height,
+								  card == VC_CARD_VOICE ? vc_voice_draw : vc_card_draw, vc_cut_gloves, views, out,
+								  width, height,
 								  VC_CARD_W_M, VC_CARD_H_M, &cd->hash, &cd->hash_valid);
 	s_vc.alpha = lap_alpha;
 	return n;
@@ -2111,6 +2177,23 @@ void XwaVrConsole_Shutdown(void) {
 	}
 	if (s_vc.list_r) {
 		AeronDrawList_Destroy(s_vc.list_r);
+	}
+	for (int i = 0; i < AERON_XR_PANEL_COUNT; ++i) {
+		if (s_base[i].list) {
+			AeronDrawList_Destroy(s_base[i].list);
+		}
+		if (s_base[i].rt) {
+			Aeron_DestroyRenderTarget(s_base[i].rt);
+		}
+	}
+	memset(s_base, 0, sizeof s_base);
+	for (int e = 0; e < 2; ++e) {
+		for (int h = 0; h < 2; ++h) {
+			if (s_mask.tex[e][h]) {
+				Aeron_DestroyTexture(s_mask.tex[e][h]);
+				s_mask.tex[e][h] = NULL;
+			}
+		}
 	}
 	if (s_vc.font_state == 1) {
 		AeronFontAtlas_Release(&s_vc.font);
