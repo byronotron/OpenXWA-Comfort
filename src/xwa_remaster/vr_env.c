@@ -77,6 +77,7 @@ typedef struct EnvShip {
 	const char* opt;
 	float yaw, pitch, dist;
 	float nose[3], up[3];
+	int aim; /* 1-based k_endor index the nose points at (0 = use nose) */
 } EnvShip;
 
 #define ENV_DS_YAW 36.0f
@@ -85,14 +86,15 @@ typedef struct EnvShip {
 
 static const EnvShip k_endor[] = {
 	{ "MilleniumFalcon2", -33.0f, -24.0f, 36.0f, { 0.62f, 0.72f, 0.30f }, { -0.35f, -0.25f, 0.9f } },
-	{ "Xwing", 38.0f, -30.0f, 40.0f, ENV_DS_NOSE, { 0.2f, -0.4f, 0.9f } },
-	{ "Xwing", 46.0f, -22.0f, 65.0f, ENV_DS_NOSE, { -0.3f, -0.3f, 0.9f } },
-	{ "Xwing", 30.0f, -34.0f, 85.0f, ENV_DS_NOSE, { 0.0f, -0.3f, 0.95f } },
-	{ "TieFighter", 44.0f, 4.0f, 160.0f, { -0.6f, -0.7f, -0.2f }, { 0.0f, 0.0f, 1.0f } },
-	{ "TieFighter", 52.0f, 12.0f, 210.0f, { -0.5f, -0.8f, -0.1f }, { 0.2f, 0.0f, 1.0f } },
+	/* X-wings and TIEs in a dogfight: each nose on its target. */
+	{ "Xwing", 38.0f, -30.0f, 40.0f, ENV_DS_NOSE, { 0.2f, -0.4f, 0.9f }, 5 },
+	{ "Xwing", 46.0f, -22.0f, 65.0f, ENV_DS_NOSE, { -0.3f, -0.3f, 0.9f }, 19 },
+	{ "Xwing", 30.0f, -34.0f, 85.0f, ENV_DS_NOSE, { 0.0f, -0.3f, 0.95f }, 6 },
+	{ "TieFighter", 44.0f, 4.0f, 160.0f, { -0.6f, -0.7f, -0.2f }, { 0.0f, 0.0f, 1.0f }, 2 },
+	{ "TieFighter", 52.0f, 12.0f, 210.0f, { -0.5f, -0.8f, -0.1f }, { 0.2f, 0.0f, 1.0f }, 4 },
 	{ "TieFighter", 20.0f, 32.0f, 260.0f, { -0.4f, -0.8f, -0.3f }, { 0.0f, 0.1f, 1.0f } },
-	/* The Falcon's target, below the screen. */
-	{ "TieFighter", -10.0f, -36.0f, 110.0f, { -0.4f, -0.9f, 0.1f }, { 0.0f, 0.0f, 1.0f } },
+	/* The Falcon's target, below the screen, firing back. */
+	{ "TieFighter", -10.0f, -36.0f, 110.0f, { -0.4f, -0.9f, 0.1f }, { 0.0f, 0.0f, 1.0f }, 1 },
 	{ "ImperialStarDestroyer2", 27.0f, 12.0f, 10000.0f, { -0.8f, -0.5f, -0.1f }, { 0.0f, 0.0f, 1.0f } },
 	{ "ImperialStarDestroyer2", 47.0f, 16.0f, 13000.0f, { -0.8f, -0.55f, -0.05f }, { 0.05f, 0.0f, 1.0f } },
 	{ "CalamariCruiserNew", -44.0f, 8.0f, 6000.0f, { 0.8f, 0.55f, 0.1f }, { 0.0f, 0.0f, 1.0f } },
@@ -105,11 +107,32 @@ static const EnvShip k_endor[] = {
 	{ "Bwing", -85.2f, -2.4f, 24.1f, { 0.15f, 1.0f, 0.05f }, { 0.9f, 0.0f, 0.4f } },
 	{ "TieInterceptor", 92.6f, 5.2f, 22.1f, { -0.2f, 1.0f, 0.1f }, { 0.0f, 0.0f, 1.0f } },
 	{ "TieInterceptor", 76.0f, 13.6f, 29.7f, { -0.2f, 1.0f, 0.15f }, { -0.2f, 0.0f, 1.0f } },
+	/* Hit by the second X-wing: half inside its explosion (ENV_VICTIM). */
+	{ "TieFighter", 50.0f, -8.0f, 85.0f, { -0.3f, -0.5f, 0.2f }, { 0.3f, 0.0f, 1.0f } },
 };
 #define ENV_ENDOR_COUNT ((int)(sizeof k_endor / sizeof k_endor[0]))
 #define ENV_FALCON 0
 #define ENV_FALCON_TARGET 7
 #define ENV_BURST 14
+#define ENV_VICTIM 18
+
+/* Frozen laser salvos: shooter -> target (k_endor indices), X-wing (four
+ * wingtip cannons, red) or TIE (two chin guns, green), as spans of the
+ * shooter-target distance along the shooter's nose. */
+typedef struct EnvSalvo {
+	int shooter, target, xwing;
+	float spans[2][2];
+	int span_count;
+} EnvSalvo;
+
+static const EnvSalvo k_salvos[] = {
+	{ 1, 4, 1, { { 0.20f, 0.32f } }, 1 },
+	{ 2, ENV_VICTIM, 1, { { 0.25f, 0.40f } }, 1 },
+	{ 3, 5, 1, { { 0.20f, 0.30f } }, 1 },
+	{ 4, 1, 0, { { 0.15f, 0.25f }, { 0.40f, 0.50f } }, 2 },
+	{ 5, 3, 0, { { 0.15f, 0.25f }, { 0.40f, 0.50f } }, 2 },
+	{ 7, 0, 0, { { 0.20f, 0.30f }, { 0.45f, 0.55f } }, 2 },
+};
 
 /* Sprites from the game's resource DATs (group, sprite id) plus the logo
  * and a generated beam profile. */
@@ -363,6 +386,25 @@ static void env_endor_pos(int i, float out[3]) {
 	}
 }
 
+/* Orthonormal nose / right / up of k_endor[i], the nose aimed at its
+ * target when it has one. */
+static void env_endor_basis(int i, float n[3], float r[3], float u[3]) {
+	const EnvShip* e = &k_endor[i];
+	memcpy(n, e->nose, 3 * sizeof(float));
+	if (e->aim > 0 && e->aim <= ENV_ENDOR_COUNT) {
+		float from[3], to[3];
+		env_endor_pos(i, from);
+		env_endor_pos(e->aim - 1, to);
+		for (int a = 0; a < 3; ++a) {
+			n[a] = to[a] - from[a];
+		}
+	}
+	env_norm(n);
+	env_cross(n, e->up, r);
+	env_norm(r);
+	env_cross(r, n, u);
+}
+
 static void env_layout(void) {
 	s_env.count = 0;
 	if (s_env.mode == ENV_ENDOR) {
@@ -375,7 +417,9 @@ static void env_layout(void) {
 			env_endor_pos(i, pos);
 			s_env.mesh_of[s_env.count] = c;
 			s_env.far[s_env.count] = k_endor[i].dist > 1000.0f;
-			env_pose_matrix(k_endor[i].nose, k_endor[i].up, pos, s_env.transform[s_env.count]);
+			float n[3], r[3], u[3];
+			env_endor_basis(i, n, r, u);
+			env_pose_matrix(n, u, pos, s_env.transform[s_env.count]);
 			s_env.count++;
 		}
 		return;
@@ -811,6 +855,58 @@ static void env_submit_endor_sprites(AeronScene3D* scene) {
 		env_facing(p, 2400.0f * k, 0.0f, c);
 		env_quad(scene, ENV_TEX_BLAST, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
 		env_facing(q, 1300.0f * k, 40.0f, c);
+		env_quad(scene, ENV_TEX_FIRE, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
+	}
+	/* The dogfight: frozen salvos along each shooter's nose. */
+	for (size_t si = 0; si < sizeof k_salvos / sizeof k_salvos[0]; ++si) {
+		const EnvSalvo* sv = &k_salvos[si];
+		float from[3], to[3], n[3], r[3], u[3];
+		env_endor_pos(sv->shooter, from);
+		env_endor_pos(sv->target, to);
+		env_endor_basis(sv->shooter, n, r, u);
+		const float dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2];
+		const float dist = sqrtf(dx * dx + dy * dy + dz * dz);
+		static const float xw_guns[4][2] = { { 5.2f, 1.3f }, { -5.2f, 1.3f }, { 5.2f, -1.3f }, { -5.2f, -1.3f } };
+		static const float tie_guns[2][2] = { { 0.6f, -1.0f }, { -0.6f, -1.0f } };
+		const float(*guns)[2] = sv->xwing ? xw_guns : tie_guns;
+		const int gun_count = sv->xwing ? 4 : 2;
+		static const float red[4] = { 2.4f, 0.35f, 0.25f, 1.0f };
+		static const float green[4] = { 0.4f, 2.4f, 0.45f, 1.0f };
+		for (int sp = 0; sp < sv->span_count; ++sp) {
+			for (int g = 0; g < gun_count; ++g) {
+				float a0[3], a1[3];
+				for (int a = 0; a < 3; ++a) {
+					const float gun = from[a] + (r[a] * guns[g][0] + u[a] * guns[g][1]) * k;
+					a0[a] = gun + n[a] * dist * sv->spans[sp][0];
+					a1[a] = gun + n[a] * dist * sv->spans[sp][1];
+				}
+				env_beam(scene, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, a0, a1, 0.4f * k, sv->xwing ? red : green);
+			}
+		}
+	}
+	/* The stricken TIE: an explosion over its right half, a little in front
+	 * of it so the depth test keeps the near half visible. */
+	{
+		float p[3], f[3], r[3];
+		static const float z[3] = { 0.0f, 0.0f, 1.0f };
+		env_endor_pos(ENV_VICTIM, p);
+		for (int a = 0; a < 3; ++a) {
+			f[a] = p[a] - s_env.view_pos[a];
+		}
+		env_norm(f);
+		env_cross(f, z, r);
+		env_norm(r);
+		static const float white[4] = { 1.5f, 1.4f, 1.3f, 1.0f };
+		float q[3];
+		for (int a = 0; a < 3; ++a) {
+			q[a] = p[a] + (r[a] * 4.5f - f[a] * 5.0f) * k;
+		}
+		env_facing(q, 13.0f * k, 0.0f, c);
+		env_quad(scene, ENV_TEX_BLAST, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
+		for (int a = 0; a < 3; ++a) {
+			q[a] = p[a] + (r[a] * 5.5f + z[a] * 1.2f - f[a] * 5.5f) * k;
+		}
+		env_facing(q, 7.0f * k, 30.0f, c);
 		env_quad(scene, ENV_TEX_FIRE, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
 	}
 	/* Two bolts from the Falcon's top turret toward the TIE below the
