@@ -235,7 +235,31 @@ static void vr_write_cfg(const char* const* keys, const char* const* values, int
 		}
 	}
 	free(text);
-	Aeron_LogInfo("xwa.config", "VR settings saved to %s", path);
+	/* Read it back: a setting that does not stick should say so. */
+	{
+		FILE* check = fopen(path, "rb");
+		char line[2048];
+		int found[32] = { 0 };
+		while (check && fgets(line, sizeof line, check)) {
+			for (int i = 0; i < count; i++) {
+				const size_t n = strlen(keys[i]);
+				if (strncmp(line, keys[i], n) == 0 && line[n] == '=' &&
+					strncmp(line + n + 1, values[i], strlen(values[i])) == 0) {
+					found[i] = 1;
+				}
+			}
+		}
+		if (check) {
+			fclose(check);
+		}
+		for (int i = 0; i < count; i++) {
+			if (found[i]) {
+				Aeron_LogInfo("xwa.config", "VR setting saved: %s=%s (%s)", keys[i], values[i], path);
+			} else {
+				Aeron_LogError("xwa.config", "VR setting NOT saved: %s=%s (%s)", keys[i], values[i], path);
+			}
+		}
+	}
 #else
 	(void)keys;
 	(void)values;

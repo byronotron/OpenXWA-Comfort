@@ -4,6 +4,7 @@
 #include "aeron/asset/opt_model.h"
 #include "aeron/log.h"
 #include "aeron/scene/billboard.h"
+#include "aeron/scene/draw_list2d.h"
 #include "aeron/scene/mesh.h"
 #include "aeron/vfs.h"
 #include "aeron/xr.h"
@@ -198,6 +199,10 @@ static struct {
 	AeronTexture* tex[ENV_TEX_COUNT];
 	int tex_w[ENV_TEX_COUNT], tex_h[ENV_TEX_COUNT];
 	int tex_tried[ENV_TEX_COUNT];
+	/* The frame as its own layer over the screen. */
+	AeronDrawList2D* frame_list;
+	int frame_drawn, frame_layer_ok;
+	float frame_tint;
 } s_env;
 
 static float env_float(const char* name, float fallback) {
@@ -848,14 +853,16 @@ static const float k_frame_opening[4] = { 123.5f, 138.0f, 1139.5f, 900.0f }; /* 
  * distance is k * metres for the stereo to agree with the quad layer). */
 typedef struct EnvScreen {
 	float dist, w, h, lift, k;
-	/* The frame's plane, XWA_XR_FRAME_DEPTH (0.2 m) behind the picture so
-	 * the picture floats in front of it, and the scale that keeps the
-	 * frame's opening lined up with the picture from the viewer. */
+	/* The picture as the frame's opening shows it: the screen's picture
+	 * divided by XWA_XR_FRAME_OVERSCAN (1.05), so the frame covers its
+	 * edges. The frame sits XWA_XR_FRAME_DEPTH (0.05 m) in front of the
+	 * picture, scaled so its opening lines up from the viewer. */
+	float pic_w, pic_h;
 	float frame_dist, frame_scale;
 } EnvScreen;
 
 static void env_screen(EnvScreen* out) {
-	float dist = 2.1f, sw = 2.0f, sh = 1.5f, lift = 0.0f;
+	float dist = 2.1f, sw = 2.1f, sh = 1.575f, lift = 0.0f;
 	if (!Aeron_XrVirtualScreenGeometry(&dist, &sw, &sh, &lift)) {
 		dist = env_float("AERON_XR_SCREEN_DISTANCE", dist);
 		sw = env_float("AERON_XR_SCREEN_WIDTH", sw);
@@ -867,39 +874,111 @@ static void env_screen(EnvScreen* out) {
 	out->dist = dist;
 	out->lift = lift;
 	out->k = AERON_OPT_UNITS_PER_METER * env_float("XWA_XR_WORLD_SCALE", 1.0f);
-	out->frame_dist = dist + fmaxf(env_float("XWA_XR_FRAME_DEPTH", 0.2f), 0.004f);
+	const float overscan = fmaxf(env_float("XWA_XR_FRAME_OVERSCAN", 1.05f), 0.5f);
+	out->pic_w = out->w / overscan;
+	out->pic_h = out->h / overscan;
+	out->frame_dist = fmaxf(dist - env_float("XWA_XR_FRAME_DEPTH", 0.05f), 0.2f);
 	out->frame_scale = dist > 0.01f ? out->frame_dist / dist : 1.0f;
 }
 
-/* Height (metres) the frame rises above the top of the picture. */
+/* Height (metres, in the picture's plane) the frame rises above the top of
+ * the picture. */
 static float env_frame_top(const EnvScreen* sc) {
 	if (!s_env.tex[ENV_TEX_FRAME]) {
 		return 0.0f;
 	}
-	return k_frame_opening[1] * sc->w / (k_frame_opening[2] - k_frame_opening[0]);
+	return k_frame_opening[1] * sc->pic_w / (k_frame_opening[2] - k_frame_opening[0]);
 }
 
+/* The frame quad in head-relative metres: centre (x right, y up, z ahead)
+ * and size. */
+static void env_frame_quad(const EnvScreen* sc, float centre[3], float size[2]) {
+	const float px = sc->frame_scale * sc->pic_w / (k_frame_opening[2] - k_frame_opening[0]);
+	const float tw = (float)s_env.tex_w[ENV_TEX_FRAME], th = (float)s_env.tex_h[ENV_TEX_FRAME];
+	size[0] = tw * px;
+	size[1] = th * px;
+	/* Image centre relative to the opening's centre (image y runs down). */
+	centre[0] = (0.5f * tw - 0.5f * (k_frame_opening[0] + k_frame_opening[2])) * px;
+	centre[1] = sc->lift * sc->frame_scale - (0.5f * th - 0.5f * (k_frame_opening[1] + k_frame_opening[3])) * px;
+	centre[2] = sc->frame_dist;
+}
+
+/* Fallback when there is no frame layer: the frame as a scene sprite
+ * (under the picture, which the compositor draws on top). */
 static void env_submit_frame(AeronScene3D* scene) {
-	if (!s_env.tex[ENV_TEX_FRAME]) {
+	if (!s_env.tex[ENV_TEX_FRAME] || s_env.frame_layer_ok) {
 		return;
 	}
 	EnvScreen sc;
 	env_screen(&sc);
-	const float k = sc.k, lift = sc.lift * sc.frame_scale;
-	/* metres per image pixel, in the frame's (scaled) plane */
-	const float px = sc.frame_scale * sc.w / (k_frame_opening[2] - k_frame_opening[0]);
-	const float fw = (float)s_env.tex_w[ENV_TEX_FRAME] * px, fh = (float)s_env.tex_h[ENV_TEX_FRAME] * px;
-	/* Frame centre relative to the screen centre (image y runs down). */
-	const float dx = (0.5f * (float)s_env.tex_w[ENV_TEX_FRAME] - 0.5f * (k_frame_opening[0] + k_frame_opening[2])) * px;
-	const float dz = -(0.5f * (float)s_env.tex_h[ENV_TEX_FRAME] - 0.5f * (k_frame_opening[1] + k_frame_opening[3])) * px;
-	const float center[3] = { s_env.view_pos[0] + dx * k, s_env.view_pos[1] + sc.frame_dist * k,
-							  s_env.view_pos[2] + (lift + dz) * k };
-	const float ax[3] = { 0.5f * fw * k, 0.0f, 0.0f };
-	const float ay[3] = { 0.0f, 0.0f, 0.5f * fh * k };
+	float q[3], size[2];
+	env_frame_quad(&sc, q, size);
+	const float k = sc.k;
+	const float center[3] = { s_env.view_pos[0] + q[0] * k, s_env.view_pos[1] + q[2] * k,
+							  s_env.view_pos[2] + q[1] * k };
+	const float ax[3] = { 0.5f * size[0] * k, 0.0f, 0.0f };
+	const float ay[3] = { 0.0f, 0.0f, 0.5f * size[1] * k };
 	float c[4][3];
 	env_rect(center, ax, ay, c);
 	static const float tint[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 	env_quad(scene, ENV_TEX_FRAME, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, tint);
+}
+
+int XwaVrEnv_CommitFrameLayer(AeronCommandBuffer* cmd, float brightness) {
+	if (!cmd || !s_env.tex[ENV_TEX_FRAME] || s_env.tex_w[ENV_TEX_FRAME] > AERON_XR_FRAME_WIDTH ||
+		s_env.tex_h[ENV_TEX_FRAME] > AERON_XR_FRAME_HEIGHT) {
+		s_env.frame_layer_ok = 0;
+		return 0;
+	}
+	const float tint = fminf(fmaxf(brightness, 0.0f), 1.0f);
+	if (!s_env.frame_drawn || fabsf(tint - s_env.frame_tint) > 0.004f) {
+		int w = 0, h = 0;
+		AeronRenderTarget* target = Aeron_XrStereoPanelTarget(AERON_XR_PANEL_FRAME, &w, &h);
+		if (!target) {
+			s_env.frame_layer_ok = 0;
+			return 0;
+		}
+		if (!s_env.frame_list) {
+			s_env.frame_list = AeronDrawList_Create(8);
+		}
+		if (!s_env.frame_list) {
+			s_env.frame_layer_ok = 0;
+			return 0;
+		}
+		AeronDrawList_Begin(s_env.frame_list, target, w, h, AERON_DRAWLIST2D_CLEAR, NULL);
+		AeronDrawList2DSprite sp;
+		memset(&sp, 0, sizeof sp);
+		sp.texture = s_env.tex[ENV_TEX_FRAME];
+		sp.src_u1 = 1.0f;
+		sp.src_v1 = 1.0f;
+		sp.dst_w = (float)s_env.tex_w[ENV_TEX_FRAME];
+		sp.dst_h = (float)s_env.tex_h[ENV_TEX_FRAME];
+		sp.tint[0] = sp.tint[1] = sp.tint[2] = tint;
+		sp.tint[3] = 1.0f;
+		sp.blend = AERON_BLIT2D_BLEND_NONE; /* premultiplied texels as they are */
+		sp.filter = AERON_BLIT2D_FILTER_NEAREST;
+		AeronDrawList_AddSprite(s_env.frame_list, &sp);
+		AeronDrawList_Render(s_env.frame_list, cmd);
+		s_env.frame_drawn = 1;
+		s_env.frame_tint = tint;
+	}
+	EnvScreen sc;
+	env_screen(&sc);
+	float q[3], size[2];
+	env_frame_quad(&sc, q, size);
+	AeronXrPanel p;
+	memset(&p, 0, sizeof p);
+	p.rect[2] = s_env.tex_w[ENV_TEX_FRAME];
+	p.rect[3] = s_env.tex_h[ENV_TEX_FRAME];
+	p.position[0] = q[0];
+	p.position[1] = q[1];
+	p.position[2] = -q[2]; /* OpenXR: -Z ahead */
+	p.orientation[3] = 1.0f;
+	p.size[0] = size[0];
+	p.size[1] = size[1];
+	Aeron_XrStereoCommitPanelLayer(AERON_XR_PANEL_FRAME, &p, 1);
+	s_env.frame_layer_ok = 1;
+	return 1;
 }
 
 static void env_submit_endor_sprites(AeronScene3D* scene) {
@@ -1025,11 +1104,11 @@ static void env_submit_endor_sprites(AeronScene3D* scene) {
 		env_screen(&sc);
 		/* In the frame's plane, above it. */
 		const float f = sc.frame_scale;
-		const float lw = 0.6f * sc.w * f * env_float("XWA_XR_LOGO_SCALE", 1.0f);
+		const float lw = 0.6f * sc.pic_w * f * env_float("XWA_XR_LOGO_SCALE", 1.0f);
 		const float lh = lw * (float)s_env.tex_h[ENV_TEX_LOGO] / (float)s_env.tex_w[ENV_TEX_LOGO];
 		const float center[3] = { s_env.view_pos[0], s_env.view_pos[1] + (sc.frame_dist + 0.02f) * sc.k,
 								  s_env.view_pos[2] +
-									  ((sc.lift + 0.5f * sc.h + env_frame_top(&sc)) * f + 0.05f + 0.5f * lh) * sc.k };
+									  ((sc.lift + 0.5f * sc.pic_h + env_frame_top(&sc)) * f + 0.05f + 0.5f * lh) * sc.k };
 		const float ax[3] = { 0.5f * lw * sc.k, 0.0f, 0.0f };
 		const float ay[3] = { 0.0f, 0.0f, 0.5f * lh * sc.k };
 		env_rect(center, ax, ay, c);
@@ -1071,6 +1150,9 @@ void XwaVrEnv_Release(void) {
 		if (s_env.tex[i]) {
 			Aeron_DestroyTexture(s_env.tex[i]);
 		}
+	}
+	if (s_env.frame_list) {
+		AeronDrawList_Destroy(s_env.frame_list);
 	}
 	memset(&s_env, 0, sizeof s_env);
 }

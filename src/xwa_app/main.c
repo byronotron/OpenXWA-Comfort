@@ -401,7 +401,7 @@ static void android_load_settings(void) {
 				  "# battle), hangar (the carrier hangar) or 0 (off). Endor brightness\n"
 				  "# (1 = full) and logo size:\n"
 				  "#XWA_XR_ENVIRONMENT=endor\n"
-				  "#XWA_XR_ENDOR_BRIGHTNESS=1.0\n"
+				  "#XWA_XR_ENDOR_BRIGHTNESS=0.8\n"
 				  "#XWA_XR_LOGO_SCALE=1.0\n"
 				  "# Hangar view: x,y (hangar units, ~41 per metre), turn in degrees, eye\n"
 				  "# height in metres; parked craft OPT name (0 = none):\n"
@@ -432,7 +432,7 @@ static void android_load_settings(void) {
 				  "#XWA_XR_HUD_DISTANCE=3.0\n"
 				  "#XWA_XR_HUD_SCALE=0.65\n"
 				  "#AERON_XR_SCREEN_DISTANCE=2.1\n"
-				  "#AERON_XR_SCREEN_WIDTH=2.0\n"
+				  "#AERON_XR_SCREEN_WIDTH=2.1\n"
 				  "#AERON_XR_THROTTLE_RATE=0.8\n"
 				  "# Skip the Quest render defaults (SSAO/MSAA/... follow the in-game options):\n"
 				  "#XWA_QUEST_PROFILE=0\n",
@@ -461,6 +461,12 @@ static void android_load_settings(void) {
 		SDL_setenv_unsafe(key, eq + 1, 1);
 	}
 	fclose(f);
+	{
+		const char* res = SDL_getenv("AERON_XR_RESOLUTION_SCALE");
+		const char* fov = SDL_getenv("XWA_XR_FOVEATION");
+		Aeron_LogInfo("xwa.config", "settings from %s: resolution %s, foveation %s", path, res ? res : "(default)",
+					  fov ? fov : "(default)");
+	}
 }
 
 /* Foveation shim (packaging/quest/vkshim): its log, its state, and the

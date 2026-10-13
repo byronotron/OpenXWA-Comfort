@@ -3949,6 +3949,7 @@ static int g_xr_hud_w, g_xr_hud_h;
 /* Scale of the eye output after tonemapping (linear light); the menu
  * environment dims itself with it. */
 static float s_xr_eye_gain = 1.0f;
+static float s_xr_eye_gain_last = 1.0f; /* the menu environment's, for its frame layer */
 
 static int fl_xr_output_eye(AeronCommandBuffer* cmd, AeronRenderTarget* target, AeronTextureFormat format,
 							AeronTexture* bloom_tex) {
@@ -5237,7 +5238,7 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 	 * applied in linear light. The mostly black space scene keeps its own
 	 * XWA_XR_ENDOR_BRIGHTNESS (default full). */
 	const float brightness =
-		fminf(fmaxf(space ? fl_xr_env("XWA_XR_ENDOR_BRIGHTNESS", 1.0f) : fl_xr_env("XWA_XR_ENV_BRIGHTNESS", 0.4f),
+		fminf(fmaxf(space ? fl_xr_env("XWA_XR_ENDOR_BRIGHTNESS", 0.8f) : fl_xr_env("XWA_XR_ENV_BRIGHTNESS", 0.4f),
 					0.0f),
 			  1.0f);
 	/* Films: the displayed brightness eases down to XWA_XR_ENV_FILM_DIM (half). */
@@ -5247,9 +5248,11 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 			 fl_xr_output_eye(cmd, xr_frame.eye_targets[0], xr_frame.format, NULL) &&
 			 AeronScene_SetCamera(s.scene, &eyes[1]) && AeronScene_Render(s.scene, cmd) &&
 			 fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format, NULL);
+	s_xr_eye_gain_last = s_xr_eye_gain;
 	s_xr_eye_gain = 1.0f;
 	if (ok) {
 		Aeron_XrStereoCommitBackdrop();
+		(void)XwaVrEnv_CommitFrameLayer(cmd, powf(s_xr_eye_gain_last, 1.0f / 2.2f));
 		/* The pointer beam over the screen (beam layer). */
 		AeronXrPanel beam;
 		if (xr_frame.beam_target &&
