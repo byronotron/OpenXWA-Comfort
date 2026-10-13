@@ -2,13 +2,20 @@
 #define XWA_REMASTER_VR_ENV_H
 
 /*
- * VR environment for the 2D screens (concourse, briefings, menus, films):
- * the game's own carrier hangar (Hangar.opt and its props, laid out like
- * the in-mission hangar) built from the installed game data, drawn in
- * stereo around the flat virtual screen.
+ * VR environment for the 2D screens (concourse, briefings, menus, films),
+ * built from the installed game data and drawn in stereo around the flat
+ * virtual screen. XWA_XR_ENVIRONMENT selects it:
+ *   endor (default) — a still of the Battle of Endor after the box art:
+ *                     game craft, the Death Star II and Endor sprites, the
+ *                     logo above the screen (vr/logo.rgba, shipped in the
+ *                     APK assets);
+ *   hangar          — the carrier hangar (Hangar.opt and its props, laid
+ *                     out like the in-mission hangar);
+ *   0               — off.
  *
- * Space: XWA world axes (x right, y forward, z up) in world units, with
- * the hangar's origin (the classic launch reference) at 0.
+ * Space: XWA world axes (x right, y forward, z up) in world units; the
+ * hangar's origin is the classic launch reference, the Endor scene's the
+ * viewer.
  */
 
 #include "aeron/render.h"
@@ -20,6 +27,9 @@ extern "C" {
 
 /* XWA_XR_ENVIRONMENT (default on). */
 int XwaVrEnv_Enabled(void);
+
+/* The space scene (lit by a sun, not the hangar lights) is selected. */
+int XwaVrEnv_IsSpace(void);
 
 /* Loads the environment a piece per call (no open pass on `cmd`) so menus
  * never stall. Returns 1 once the hangar itself can be drawn. */

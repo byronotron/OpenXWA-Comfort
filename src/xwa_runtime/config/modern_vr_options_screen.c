@@ -63,6 +63,8 @@ static const char* const k_res_texts[] = { "70%", "80%", "90%", "100%", "110%", 
 static const char* const k_res_values[] = { "0.7", "0.8", "0.9", "1.0", "1.1", "1.2" };
 static const char* const k_fov_texts[] = { "Off", "Low", "Medium", "High" };
 static const char* const k_fov_values[] = { "0", "low", "medium", "high" };
+static const char* const k_env_texts[] = { "Off", "Battle of Endor", "Hangar" };
+static const char* const k_env_values[] = { "0", "endor", "hangar" };
 static const char* const k_refresh_texts[] = { "Headset Setting", "72 Hz", "80 Hz", "90 Hz", "120 Hz" };
 static const char* const k_refresh_values[] = { "0", "72", "80", "90", "120" };
 
@@ -80,7 +82,7 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "AERON_XR_INVERT_PITCH", "Invert Thumbstick Pitch", k_toggle_texts, k_toggle_values, 2, 0, 97 },
 	{ "XWA_XR_VOICE", "Voice Commands", k_voice_texts, k_voice_values, 3, 1, 98 },
 	{ "XWA_XR_BUTTON_CARD", "Button Card", k_toggle_texts, k_toggle_values, 2, 1, 92 },
-	{ "XWA_XR_ENVIRONMENT", "Menu Hangar", k_toggle_texts, k_toggle_values, 2, 1, 90 },
+	{ "XWA_XR_ENVIRONMENT", "Menu Scene", k_env_texts, k_env_values, 3, 1, 90 },
 	{ "AERON_XR_RESOLUTION_SCALE", "Resolution (restart)", k_res_texts, k_res_values, 6, 2, 86 },
 	{ "AERON_XR_REFRESH_RATE", "Refresh Rate", k_refresh_texts, k_refresh_values, 5, 0, 99 },
 	{ "XWA_XR_GPU_OPT", "GPU Optimizations", k_toggle_texts, k_toggle_values, 2, 1, 79 },
@@ -100,7 +102,8 @@ static int vr_index_from_env(const VrSetting* setting) {
 	if (!env || !env[0]) {
 		return best;
 	}
-	if (setting->values == k_layout_values || setting->values == k_voice_values || setting->values == k_fov_values) {
+	if (setting->values == k_layout_values || setting->values == k_voice_values || setting->values == k_fov_values ||
+		setting->values == k_env_values) {
 		for (int i = 0; i < setting->count; i++) {
 			if (SDL_strcasecmp(env, setting->values[i]) == 0) {
 				return i;

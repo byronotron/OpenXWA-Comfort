@@ -5103,15 +5103,52 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd) {
 		ambient.pos_z[c] = ceiling;
 		ambient.neg_z[c] = floor;
 	}
+	XwaDirLight lights[2];
+	int light_count = 1;
+	lights[0] = key;
+	const int space = XwaVrEnv_IsSpace();
+	if (space) {
+		/* Endor: a warm sun from the upper left behind the viewer, a faint
+		 * green bounce off the moon below right, deep-space ambient. */
+		static const float sun[3] = { -0.55f, 0.35f, 0.75f };
+		static const float bounce[3] = { 0.55f, 0.35f, -0.75f };
+		memset(lights, 0, sizeof lights);
+		const float ls = sqrtf(sun[0] * sun[0] + sun[1] * sun[1] + sun[2] * sun[2]);
+		const float lb = sqrtf(bounce[0] * bounce[0] + bounce[1] * bounce[1] + bounce[2] * bounce[2]);
+		for (int a = 0; a < 3; a++) {
+			lights[0].world_dir[a] = sun[a] / ls;
+			lights[1].world_dir[a] = bounce[a] / lb;
+		}
+		lights[0].intensity = fl_xr_env("XWA_XR_ENDOR_SUN", 1.6f);
+		lights[0].color[0] = 1.0f;
+		lights[0].color[1] = 0.95f;
+		lights[0].color[2] = 0.88f;
+		lights[1].intensity = 0.3f;
+		lights[1].color[0] = 0.55f;
+		lights[1].color[1] = 0.85f;
+		lights[1].color[2] = 0.6f;
+		light_count = 2;
+		for (int c = 0; c < 3; c++) {
+			ambient.pos_x[c] = ambient.neg_x[c] = ambient.pos_y[c] = ambient.neg_y[c] = 0.05f;
+			ambient.pos_z[c] = 0.06f;
+		}
+		ambient.neg_z[0] = 0.04f;
+		ambient.neg_z[1] = 0.08f;
+		ambient.neg_z[2] = 0.05f;
+	}
 	if (!fl_configure_clustered_lights(s.scene)) {
 		return 0;
 	}
-	XwaRemasterShip_SetPbrEnv(s.scene, &key, 1, NULL, s.camera_local, NULL, NULL, &ambient, NULL);
+	XwaRemasterShip_SetPbrEnv(s.scene, lights, light_count, NULL, s.camera_local, NULL, NULL, &ambient, NULL);
 
 	/* Dimmed so the hangar does not compete with the screen:
 	 * XWA_XR_ENV_BRIGHTNESS is the displayed brightness (0.4 = 60 % darker),
-	 * applied in linear light. */
-	const float brightness = fminf(fmaxf(fl_xr_env("XWA_XR_ENV_BRIGHTNESS", 0.4f), 0.0f), 1.0f);
+	 * applied in linear light. The mostly black space scene keeps its own
+	 * XWA_XR_ENDOR_BRIGHTNESS (default full). */
+	const float brightness =
+		fminf(fmaxf(space ? fl_xr_env("XWA_XR_ENDOR_BRIGHTNESS", 1.0f) : fl_xr_env("XWA_XR_ENV_BRIGHTNESS", 0.4f),
+					0.0f),
+			  1.0f);
 	s_xr_eye_gain = powf(brightness, 2.2f);
 	int ok = AeronScene_Render(s.scene, cmd) &&
 			 fl_xr_output_eye(cmd, xr_frame.eye_targets[0], xr_frame.format, NULL) &&
