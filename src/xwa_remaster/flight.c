@@ -3875,6 +3875,9 @@ static AeronScenePresentChain* fl_xr_chain(AeronTextureFormat format) {
 	return s_xr_present;
 }
 
+/* Size the HUD was laid out for this frame (the VR HUD targets' size). */
+static int g_xr_hud_w, g_xr_hud_h;
+
 /* Bloom + tonemap of the current scene RT into one eye target. */
 /* Scale of the eye output after tonemapping (linear light); the menu
  * environment dims itself with it. */
@@ -3916,6 +3919,8 @@ static int fl_xr_output_eye(AeronCommandBuffer* cmd, AeronRenderTarget* target, 
 
 /* overlay: 0 none, 1 the head HUD's panel outlines, 2 the aux (CMD) ones. */
 static int fl_xr_output_hud(AeronCommandBuffer* cmd, AeronRenderTarget* target, int parts, int overlay) {
+	const int w = g_xr_hud_w > 0 ? g_xr_hud_w : s.rt_w;
+	const int h = g_xr_hud_h > 0 ? g_xr_hud_h : s.rt_h;
 	AeronRenderPass* pass = Aeron_BeginRenderPass(&(AeronRenderPassDesc) {
 		.color_target = target,
 		.clear_color = 1,
@@ -3926,10 +3931,10 @@ static int fl_xr_output_hud(AeronCommandBuffer* cmd, AeronRenderTarget* target, 
 	if (!pass) {
 		return 0;
 	}
-	const AeronRectI full = { 0, 0, s.rt_w, s.rt_h };
+	const AeronRectI full = { 0, 0, w, h };
 	Aeron_SetViewport(pass, &full);
 	Aeron_SetScissor(pass, &full);
-	fl_draw_hud_parts(cmd, pass, target, s.rt_w, s.rt_h, parts);
+	fl_draw_hud_parts(cmd, pass, target, w, h, parts);
 	if (overlay && !s.suppress_hud) {
 		XwaVrCockpitHud_RenderOverlay(cmd, pass, target, overlay == 2);
 	}
@@ -4139,8 +4144,24 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		/* Cockpit panels: the targeting computer overlaps the MFDs on the
 		 * flat HUD at the eye's aspect, so it is drawn to its own target. */
 		XwaRemasterHud_SetCmdSplit(stereo_probe && probe.hud_aux_target && fl_xr_hud_layout() == FL_XR_HUD_COCKPIT);
+		/* VR HUD targets may be smaller than the eyes (AERON_XR_HUD_RESOLUTION):
+		 * lay the HUD out for their size, from the same camera. */
+		g_xr_hud_w = s.rt_w;
+		g_xr_hud_h = s.rt_h;
+		if (stereo_probe && probe.hud_width > 0 && probe.hud_height > 0) {
+			g_xr_hud_w = probe.hud_width;
+			g_xr_hud_h = probe.hud_height;
+		}
 	}
-	XwaRemasterHud_PrepareFrame(cmd, snap, assets, &flight_view, s.rt_w, s.rt_h);
+	if (g_xr_hud_w != s.rt_w || g_xr_hud_h != s.rt_h) {
+		XwaRemasterFlightView hud_view;
+		if (!XwaRemasterFlight_BuildView(cam, g_xr_hud_w, g_xr_hud_h, &hud_view)) {
+			return NULL;
+		}
+		XwaRemasterHud_PrepareFrame(cmd, snap, assets, &hud_view, g_xr_hud_w, g_xr_hud_h);
+	} else {
+		XwaRemasterHud_PrepareFrame(cmd, snap, assets, &flight_view, s.rt_w, s.rt_h);
+	}
 	fl_quat_to_mat3(flight_view.camera.ori, s.crows);
 	const uint64_t host_time_us = XwaTime_GetElapsedUs();
 	if (cam->map_mode) {
@@ -4858,6 +4879,16 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	if (shift_cockpit) {
 		AeronScene_TranslateRange(s.scene, &cockpit_begin, &cockpit_end, cockpit_eye_shift[0]);
 	}
+	/* VR overdraw control (XWA_XR_DRAW_ORDER=0 restores the classic order):
+	 * near meshes first, sky and stars last behind them. Same image. The
+	 * hyperspace hook does not depth-test, so it keeps drawing first. */
+	{
+		const char* order_env = getenv("XWA_XR_DRAW_ORDER");
+		const char* opt_env   = getenv("XWA_XR_GPU_OPT");
+		const int   reorder   = stereo && !(order_env && order_env[0] == '0') && !(opt_env && opt_env[0] == '0');
+		AeronScene_SetOpaqueOrder(s.scene, reorder && s.before_opaque_mode != FL_BEFORE_OPAQUE_HYPERSPACE,
+								  reorder);
+	}
 	int render_ok = AeronScene_Render(s.scene, cmd);
 	if (render_ok && shift_cockpit) {
 		const float to_right[3] = { cockpit_eye_shift[1][0] - cockpit_eye_shift[0][0],
@@ -4877,6 +4908,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 																	&stars_params)) &&
 					AeronScene_Render(s.scene, cmd);
 	}
+	AeronScene_SetOpaqueOrder(s.scene, 0, 0);
 	if (!render_ok) {
 		AeronScene_SetPassHook(s.scene, AERON_SCENE_HOOK_BEFORE_OPAQUE, NULL, NULL);
 		s.before_opaque_mode = FL_BEFORE_OPAQUE_NONE;
@@ -4911,10 +4943,10 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		const int cmd_split = XwaRemasterHud_CmdSplit() && xr_frame.hud_aux_target;
 		if (cockpit) {
 			panel_count = s.suppress_hud ? 0
-										 : XwaVrCockpitHud_Build(s.rt_w, s.rt_h, fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f),
+										 : XwaVrCockpitHud_Build(g_xr_hud_w, g_xr_hud_h, fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f),
 																 cmd_split, snap->cockpit.model_name, panels,
 																 AERON_XR_MAX_PANELS);
-			XwaVrCockpitHud_PrepareOverlay(cmd, s.rt_w, s.rt_h);
+			XwaVrCockpitHud_PrepareOverlay(cmd, g_xr_hud_w, g_xr_hud_h);
 			if (panel_count == 0 && !s.suppress_hud) {
 				/* Nothing recognised in this HUD (e.g. an unusual HUD mode):
 				 * show it as the helmet sheet rather than not at all. */

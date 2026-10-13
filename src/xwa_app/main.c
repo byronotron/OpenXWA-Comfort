@@ -342,6 +342,18 @@ static void android_load_settings(void) {
 			fputs("# OpenXWA Quest settings. Remove the leading '#' to change a value.\n"
 				  "# Per-eye render resolution (lower = faster):\n"
 				  "#AERON_XR_RESOLUTION_SCALE=0.9\n"
+				  "# Size cap of the three HUD images, as a fraction of the recommended eye\n"
+				  "# size (a higher eye resolution then costs no extra HUD work):\n"
+				  "#AERON_XR_HUD_RESOLUTION=0.9\n"
+				  "# Display refresh rate in Hz (0 = the headset's setting; 72 gives the\n"
+				  "# most time per frame):\n"
+				  "#AERON_XR_REFRESH_RATE=0\n"
+				  "# GPU/CPU clock floor requested from the headset: 0, low, high, boost:\n"
+				  "#AERON_XR_PERF_LEVEL=high\n"
+				  "# 0 = turn off the GPU optimizations (A/B test; also in the VR options):\n"
+				  "#XWA_XR_GPU_OPT=1\n"
+				  "# 0 = classic draw order (sky first) instead of near meshes first:\n"
+				  "#XWA_XR_DRAW_ORDER=1\n"
 				  "# 1 = dynamic lights from lasers/explosions (costs GPU time in combat):\n"
 				  "#XWA_POINT_LIGHTS=0\n"
 				  "# Directional shadows in the 3D cockpit (1 = on, costs GPU time):\n"
@@ -449,6 +461,13 @@ static void android_xr_defaults(void) {
 	}
 	if (!SDL_getenv("AERON_XR_RESOLUTION_SCALE")) {
 		SDL_setenv_unsafe("AERON_XR_RESOLUTION_SCALE", "0.9", 1);
+	}
+	{
+		/* GPU Optimizations off (VR options A/B switch): no clock floor either. */
+		const char* opt = SDL_getenv("XWA_XR_GPU_OPT");
+		if (opt && opt[0] == '0' && !SDL_getenv("AERON_XR_PERF_LEVEL")) {
+			SDL_setenv_unsafe("AERON_XR_PERF_LEVEL", "0", 1);
+		}
 	}
 }
 
