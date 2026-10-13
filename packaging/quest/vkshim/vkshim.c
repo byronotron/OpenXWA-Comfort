@@ -470,6 +470,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateInstance(const VkInstanceCreate
 	if (r == VK_SUCCESS) {
 		g_instance = *out;
 	}
+	LOGI("vkCreateInstance: %d (API %u.%u)", r, ci && ci->pApplicationInfo ? VK_API_VERSION_MAJOR(ci->pApplicationInfo->apiVersion) : 0,
+		 ci && ci->pApplicationInfo ? VK_API_VERSION_MINOR(ci->pApplicationInfo->apiVersion) : 0);
 	return r;
 }
 
@@ -478,6 +480,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateInstance(const VkInstanceCreate
 static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateDevice(VkPhysicalDevice phys, const VkDeviceCreateInfo* ci,
 														const VkAllocationCallbacks* a, VkDevice* out) {
 	PFN_vkCreateDevice real = (PFN_vkCreateDevice)g_real_gipa(g_instance, "vkCreateDevice");
+	LOGI("vkCreateDevice (instance %s, level %d)", g_instance ? "known" : "UNKNOWN", shim_level());
 	if (!real) {
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
@@ -561,9 +564,24 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateDevice(VkPhysicalDevice phys, c
 	g_dev.device = *out;
 	g_dev.physical = phys;
 	g_dev.queue_family = ci->queueCreateInfoCount ? ci->pQueueCreateInfos[0].queueFamilyIndex : 0;
-	/* The implementation's map texel: the coarsest, so the map always covers
-	 * the framebuffer (and on Adreno min = max). */
-	g_dev.texel = prop.maxFragmentDensityTexelSize;
+	/* Map texel: the GPU derives it from the framebuffer / map size ratio
+	 * (rounded up to a power of two, clamped to [min, max]), so a map built
+	 * for 32 px texels is read at 32 px - fine enough for smooth zones (the
+	 * Quest reports 16..256; the maximum gave a 6x7 map of 256 px blocks). */
+	g_dev.texel.width = 32;
+	g_dev.texel.height = 32;
+	if (g_dev.texel.width < prop.minFragmentDensityTexelSize.width) {
+		g_dev.texel.width = prop.minFragmentDensityTexelSize.width;
+	}
+	if (g_dev.texel.height < prop.minFragmentDensityTexelSize.height) {
+		g_dev.texel.height = prop.minFragmentDensityTexelSize.height;
+	}
+	if (g_dev.texel.width > prop.maxFragmentDensityTexelSize.width) {
+		g_dev.texel.width = prop.maxFragmentDensityTexelSize.width;
+	}
+	if (g_dev.texel.height > prop.maxFragmentDensityTexelSize.height) {
+		g_dev.texel.height = prop.maxFragmentDensityTexelSize.height;
+	}
 	memprops(phys, &g_dev.memory);
 	g_dev.gdpa = (PFN_vkGetDeviceProcAddr)g_real_gipa(g_instance, "vkGetDeviceProcAddr");
 	DEV_LOAD(CreateRenderPass);
@@ -662,6 +680,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateRenderPass(VkDevice device, con
 	pthread_mutex_lock(&g_lock);
 	g_passes[g_pass_count++] = *out;
 	pthread_mutex_unlock(&g_lock);
+	static int logged;
+	if (logged < 4) {
+		logged++;
+		LOGI("multisampled render pass %d: density map attachment added (%u attachments)", logged,
+			 mine.attachmentCount);
+	}
 	return r;
 }
 
@@ -711,6 +735,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateFramebuffer(VkDevice device, co
 	VkFramebufferCreateInfo mine = *ci;
 	mine.attachmentCount = ci->attachmentCount + 1;
 	mine.pAttachments = views;
+	static int logged;
+	if (logged < 6) {
+		logged++;
+		LOGI("framebuffer %ux%u for a multisampled pass: %s density map", ci->width, ci->height,
+			 map == &g_eye ? "foveated" : "full");
+	}
 	return g_dev.CreateFramebuffer(device, &mine, a, out);
 }
 
@@ -744,6 +774,7 @@ static int shim_load(void) {
 		return 0;
 	}
 	g_real_gipa = (PFN_vkGetInstanceProcAddr)dlsym(g_lib, "vkGetInstanceProcAddr");
+	LOGI("loaded in front of libvulkan.so (%s)", g_real_gipa ? "ok" : "no vkGetInstanceProcAddr");
 	return g_real_gipa != NULL;
 }
 
