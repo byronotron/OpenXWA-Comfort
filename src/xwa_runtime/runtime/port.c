@@ -250,6 +250,15 @@ static void XwaPort_VrButtonTick(void) {
 static CraftData* XwaPort_VrConsoleCraft(void);
 static int XwaPort_VrChordEligible(int* hyper);
 
+/* The local player is in the map view (flight running, not in a menu). */
+static int XwaPort_VrMapOpen(void) {
+	if (!XwaFlightTask_IsActive() || g_inHangarReady || FlightDisplay_IsFrontendModalActive() ||
+		XwaFlightPauseTask_IsActive() || g_localPlayer < 0 || g_localPlayer >= XWA_PLAYER_COUNT) {
+		return 0;
+	}
+	return g_players[g_localPlayer].mapCameraState != 0;
+}
+
 /* Both triggers pulled together (within VR_CHORD_WINDOW_MS): lands in the
  * hangar when the game offers it ("press Space" near a mothership's bay)
  * and jumps to hyperspace at a buoy. While either is on offer the left
@@ -338,6 +347,9 @@ static void XwaPort_UpdateVrFlightButtons(int enabled) {
 			continue;
 		}
 		key = shifted ? g_xwaVrButtonBindings[button].shifted : g_xwaVrButtonBindings[button].plain;
+		if (button == AERON_XR_BUTTON_B && !shifted && XwaPort_VrMapOpen()) {
+			key = KEY_M; /* B leaves the map (the map view says so) */
+		}
 		if (XwaPort_QueueFlightActionKey(key)) {
 			XwaPort_VrButtonTick();
 		}
@@ -408,6 +420,8 @@ void XwaPort_GetVrConsoleState(XwaVrConsoleState* out) {
 }
 
 int XwaPort_VrInFlight(void) { return XwaPort_VrConsoleCraft() != NULL; }
+
+int XwaPort_VrInMap(void) { return Aeron_XrIsPresenting() && XwaPort_VrMapOpen(); }
 
 /* The two-trigger chord is on offer: landing in a hangar (the game's
  * pending "Space" action 2 near a mothership's bay) or a hyperspace jump
@@ -488,7 +502,13 @@ void XwaPort_VrConsoleAction(XwaVrConsoleAction action, int arg) {
 		[XWA_VRC_WING_REINFORCE] = KEY_SHIFT_S,
 		[XWA_VRC_TARGET_NEXT] = KEY_T,
 		[XWA_VRC_TARGET_PREV] = KEY_Y,
+		[XWA_VRC_TARGET_NAV] = KEY_N,
 	};
+	if (action == XWA_VRC_MAP && XwaPort_VrMapOpen()) {
+		/* The console is hidden in the map, but "close map" is still heard. */
+		XwaPort_QueueFlightActionKey(KEY_M);
+		return;
+	}
 	const CraftData* craft = XwaPort_VrConsoleCraft();
 	if (!craft || (int)action <= XWA_VRC_NONE || (int)action >= XWA_VRC_COUNT) {
 		return;

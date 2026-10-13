@@ -397,7 +397,8 @@ void XwaVrVoice_Update(void) {
 	/* Ask for the microphone and load the model already in the menus, so
 	 * the permission prompt does not interrupt a mission. */
 	const int ready = presenting && vv_setup();
-	const int flying = presenting && XwaPort_VrInFlight();
+	/* In flight, and in the map (to close it by voice). */
+	const int flying = presenting && (XwaPort_VrInFlight() || XwaPort_VrInMap());
 	if (!flying) {
 		if (s_vv.state == VV_LISTENING) {
 			vv_stop(0);

@@ -197,6 +197,8 @@ static const XvCommand k_commands[] = {
 	  { "newest target", "newest craft", "new arrival", "newest", "new target", "latest arrival" } },
 	{ XWA_VRC_TARGET_CLEAR, 0, "Target cleared",
 	  { "clear target", "cancel target", "no target", "drop target", "deselect target", "clear lock" } },
+	{ XWA_VRC_TARGET_NAV, 0, "Target nav buoy",
+	  { "nav buoy", "target nav buoy", "nav point", "next nav buoy", "navigation buoy", "hyperspace buoy" } },
 	{ XWA_VRC_SUBSYSTEM_NEXT, 0, "Next subsystem",
 	  { "next subsystem", "target subsystem", "subsystem", "next component", "target component" } },
 	/* Ship. */
@@ -245,6 +247,11 @@ static const char* const k_same[][2] = {
 	{ "sfoils", "foils" },      { "spoils", "foils" },      { "espoils", "foils" },
 	{ "aspoils", "foils" },     { "foyles", "foils" },      { "foyle", "foils" },
 	{ "foyls", "foils" },
+	/* Nav buoys: "navigation", "navpoint", and what "buoy" is often heard as. */
+	{ "navigation", "nav" },    { "navpoint", "nav point" }, { "navi", "nav" },
+	{ "buoys", "buoy" },        { "boy", "buoy" },          { "boys", "buoy" },
+	{ "bouy", "buoy" },         { "bui", "buoy" },          { "points", "point" },
+	{ "beacon", "buoy" },       { "waypoint", "nav point" },
 };
 
 static const char* const k_filler[] = {

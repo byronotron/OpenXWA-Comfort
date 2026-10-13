@@ -575,8 +575,15 @@ static void vc_layout(void) {
 			static const XwaVrConsoleAction a[4] = { XWA_VRC_GUNNER, XWA_VRC_AUTO_GUNNER, XWA_VRC_COUNTERMEASURE,
 													 XWA_VRC_HYPERSPACE };
 			vc_row(x, 388.0f, w, 52.0f, 4, l, a, row);
-			row[3]->hyper = 1;
-			row[3]->sub = st->hyper_ready ? "ready" : "at a buoy";
+			/* Away from a hyperspace buoy the button finds one (the N key). */
+			row[3]->hyper = st->hyper_ready;
+			if (st->hyper_ready) {
+				row[3]->sub = "ready";
+			} else {
+				row[3]->label = "NAV BUOY";
+				row[3]->action = XWA_VRC_TARGET_NAV;
+				row[3]->sub = "target next";
+			}
 		}
 	}
 }
@@ -1862,7 +1869,7 @@ static const VcCardLabel k_card_left[] = {
 
 static const VcCardLabel k_card_right[] = {
 	{ CTL_STICK, "Yaw / pitch", "click: my attacker (E)   grip+: (A)", 96.0f },
-	{ CTL_UPPER, "B: next target (T)", "grip+: previous target (Y)", 168.0f },
+	{ CTL_UPPER, "B: next target (T)", "grip+: previous (Y)   map: exit", 168.0f },
 	{ CTL_LOWER, "A: nearest enemy (R)", "grip+: nearest objective (O)", 232.0f },
 	{ CTL_MENU, "Meta: system menu", NULL, 296.0f },
 	{ CTL_GRIP, "Target in sights", "on the flight stick: fly with it", 380.0f },
@@ -2016,7 +2023,7 @@ static void vc_card_draw(void) {
 			17.0f, 1, 0.85f, 0.97f, 1.0f, 0.95f);
 	vc_text(W * 0.5f, H - 104.0f, "Right stick flicks, grip+:  up  lasers > shields    down  shields > lasers", 17.0f, 1,
 			0.62f, 0.85f, 0.92f, 0.9f);
-	vc_text(W * 0.5f, H - 78.0f, "left  shield balance (S)    right  flagged targets (N)", 17.0f, 1, 0.62f, 0.85f,
+	vc_text(W * 0.5f, H - 78.0f, "left  shield balance (S)    right  nav buoy (N)", 17.0f, 1, 0.62f, 0.85f,
 			0.92f, 0.9f);
 }
 
@@ -2028,7 +2035,7 @@ static const char* const k_voice_wing[] = { "attack my target", "cover me",     
 											"call reinforcements" };
 static const char* const k_voice_target[] = { "nearest enemy",      "next target",      "previous target",
 											  "target my attacker", "target objective", "newest target",
-											  "next subsystem",     "clear target" };
+											  "next subsystem",     "clear target",     "nav buoy" };
 static const char* const k_voice_ship[] = { "match speed",       "countermeasures",   "s-foils",
 											"lasers to shields", "shields to lasers", "fire link",
 											"convergence",       "map",               "dock",

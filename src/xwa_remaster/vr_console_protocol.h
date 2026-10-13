@@ -64,6 +64,7 @@ typedef enum XwaVrConsoleAction {
 	XWA_VRC_TARGET_NEXT,
 	XWA_VRC_TARGET_PREV,
 	XWA_VRC_HYPERSPACE, /* jump from a hyperspace buoy (confirms its prompt) */
+	XWA_VRC_TARGET_NAV, /* next navigation (hyperspace) buoy, the N key */
 	XWA_VRC_COUNT
 } XwaVrConsoleAction;
 

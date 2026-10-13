@@ -492,6 +492,7 @@ int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, int cmd
 	}
 
 	/* What each panel shows this frame. */
+	float now[CK_COUNT][4];
 	for (int p = 0; p < CK_COUNT; ++p) {
 		float acc[4];
 		int valid = 0;
@@ -516,6 +517,7 @@ int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, int cmd
 			}
 		}
 		if (valid) {
+			memcpy(now[p], acc, sizeof now[p]);
 			int latched = s_ck.latched_valid[p];
 			ck_union(s_ck.latched[p], &latched, acc);
 			s_ck.latched_valid[p] = 1;
@@ -606,6 +608,16 @@ int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, int cmd
 			if (best_area > 0.0f) {
 				memcpy(r, cut, sizeof cut);
 			}
+		}
+	}
+
+	/* Message panels show this frame's text only. Latched, they kept the
+	 * width of the longest message so far and took in pieces of the radar
+	 * pod frames left and right of a short one. (The pods are still cut
+	 * against the latched size above, so they stay put.) */
+	for (int p = CK_MESSAGES; p <= CK_MESSAGES_LOW; ++p) {
+		if (s_ck.visible[p]) {
+			memcpy(s_ck.rect[p], now[p], sizeof s_ck.rect[p]);
 		}
 	}
 

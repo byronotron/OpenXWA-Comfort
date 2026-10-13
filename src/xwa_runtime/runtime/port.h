@@ -33,6 +33,8 @@ void XwaPort_GetVrConsoleState(XwaVrConsoleState* out);
 void XwaPort_VrConsoleAction(XwaVrConsoleAction action, int arg);
 /* 1 while flying the player's craft in VR (not loading, paused, hangar menu). */
 int XwaPort_VrInFlight(void);
+/* In VR, the local player has the flight map open. */
+int XwaPort_VrInMap(void);
 /* Shows `text` (up to 70 characters) in the in-flight message pane. */
 void XwaPort_ShowFlightNote(const char* text);
 /* Latched release of the flight mouse capture (Ctrl+Alt+M), so the pointer

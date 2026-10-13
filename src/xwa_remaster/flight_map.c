@@ -3,6 +3,7 @@
 #include "aeron/scene/draw_list2d.h"
 #include "xwa_remaster/color.h"
 #include "xwa_remaster/text.h"
+#include "aeron/aeron.h"
 #include "aeron/scene/world.h"
 
 #include <math.h>
@@ -431,6 +432,14 @@ int XwaRemasterFlightMap_Prepare(AeronCommandBuffer* cmd, AeronScene3D* scene, c
 							snapshot->flight_camera.focus_obj_idx != 0xffff);
 	}
 	map_build_grid(snapshot, view);
+	if (font && Aeron_XrIsPresenting()) {
+		/* VR: the controllers have no M key; B (or the voice command) closes
+		 * the map. */
+		const float x = (float)view->viewport.x + 0.5f * (float)view->viewport.width;
+		const float y = (float)view->viewport.y + (float)view->viewport.height - 3.0f * line_height;
+		XwaRemasterText_AddFlightString(map_state.text, font, "Press B to exit the map (or say \"close map\")", x, y,
+										font_size, XWA_REMASTER_TEXT_ALIGN_CENTER, 0xFFFFE070u, &view->viewport);
+	}
 	if (!AeronDrawList_Prepare(map_state.annotations[0], cmd) ||
 		!AeronDrawList_Prepare(map_state.annotations[1], cmd) ||
 		!AeronDrawList_Prepare(map_state.grid, cmd) || !AeronDrawList_Prepare(map_state.text, cmd))

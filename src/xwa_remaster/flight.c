@@ -20,6 +20,8 @@
 #include "xwa_remaster/hud.h"
 #include "xwa_remaster/hud_fixed.h"
 #include "xwa_remaster/vr_cockpit_hud.h"
+#include "xwa_remaster/vr_hud_occlusion.h"
+#include "xwa_remaster/vr_hand_overlay.h"
 #include "xwa_remaster/vr_env.h"
 #include "xwa_remaster/vr_menu_beam.h"
 #include "xwa_remaster/vr_gloves.h"
@@ -3950,6 +3952,7 @@ static int g_xr_hud_w, g_xr_hud_h;
  * environment dims itself with it. */
 static float s_xr_eye_gain = 1.0f;
 static float s_xr_eye_gain_last = 1.0f; /* the menu environment's, for its frame layer */
+static AeronDrawList2D* s_xr_eye_alpha; /* drawn into the next eye output (its alpha) */
 
 static int fl_xr_output_eye(AeronCommandBuffer* cmd, AeronRenderTarget* target, AeronTextureFormat format,
 							AeronTexture* bloom_tex) {
@@ -3981,6 +3984,10 @@ static int fl_xr_output_eye(AeronCommandBuffer* cmd, AeronRenderTarget* target, 
 	Aeron_SetScissor(pass, &full);
 	AeronScenePresentChain_Draw(chain, pass, scene_tex, s.present_sampler, bloom_tex,
 								bloom_tex ? AeronSceneBloom_Intensity() : 0.0f, s.rt_w, s.rt_h, 1.0f, tint, 0);
+	if (s_xr_eye_alpha) {
+		/* The eye's alpha for the overlay layer (the hands in the menus). */
+		AeronDrawList_RenderIntoPass(s_xr_eye_alpha, cmd, pass, target);
+	}
 	Aeron_EndRenderPass(pass);
 	return 1;
 }
@@ -4003,6 +4010,10 @@ static int fl_xr_output_hud(AeronCommandBuffer* cmd, AeronRenderTarget* target, 
 	Aeron_SetViewport(pass, &full);
 	Aeron_SetScissor(pass, &full);
 	fl_draw_hud_parts(cmd, pass, target, w, h, parts);
+	if (parts == FL_HUD_WORLD) {
+		/* The cockpit hides the reticle and brackets behind it. */
+		XwaVrHudOcclusion_Render(cmd, pass, target);
+	}
 	if (overlay && !s.suppress_hud) {
 		XwaVrCockpitHud_RenderOverlay(cmd, pass, target, overlay == 2);
 	}
@@ -4860,6 +4871,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	 * g_cockpitViewActive override). Turret seats rotate the cockpit's
 	 * rotary meshes by the captured aim. */
 	const AeronSceneMark cockpit_begin = AeronScene_Mark(s.scene);
+	XwaVrHudOcclusion_Reset();
 	if (fl_cockpit_drawn(snap, cam) && cockpit_anchor) {
 		AeronSceneMesh* cockpit_mesh = XwaRemasterShip_MeshForName(snap->cockpit.model_name);
 		if (cockpit_mesh) {
@@ -4899,6 +4911,10 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 				}
 			}
 			AeronScene_AddMeshInstance(s.scene, &inst);
+			if (stereo) {
+				XwaVrHudOcclusion_SetCockpit(cockpit_mesh, m, inst.mesh_table, s.crows, s.camera_local,
+											 AERON_OPT_UNITS_PER_METER * fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f));
+			}
 			if (player_f) {
 				XwaRemasterGlowMarks_SubmitObject(s.scene, cmd, assets, snap, player_f, cockpit_mesh, m,
 												  inst.mesh_table, s.glow_mark_emissive_strength);
@@ -5030,6 +5046,12 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		 * unless the cockpit panels are not shown (then it stays in the head). */
 		const int cmd_aux = cmd_split && cockpit_active;
 		const int head_parts = split ? (cmd_aux ? FL_HUD_HEAD : FL_HUD_HEAD | FL_HUD_CMD) : FL_HUD_ALL;
+		if (split && !s.suppress_hud) {
+			AeronXrHudQuad occlude_quad;
+			fl_xr_hud_quad(&flight_view.camera, &occlude_quad, 0);
+			XwaVrHudOcclusion_Prepare(cmd, xr_frame.views, &occlude_quad, g_xr_hud_w > 0 ? g_xr_hud_w : s.rt_w,
+									  g_xr_hud_h > 0 ? g_xr_hud_h : s.rt_h);
+		}
 		if (fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format, s.present_bloom_tex) &&
 			fl_xr_output_hud(cmd, xr_frame.hud_target, head_parts, cockpit_active) &&
 			(!cmd_aux || fl_xr_output_hud(cmd, xr_frame.hud_aux_target, FL_HUD_CMD, 2)) &&
@@ -5165,6 +5187,9 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 	XwaVrEnv_Submit(s.scene);
 	XwaVrGloves_Submit(s.scene, cmd, rows, base.pos,
 					   AERON_OPT_UNITS_PER_METER * fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f));
+	/* The screen and its frame are layers over the eyes: the gloves reach in
+	 * front of them through a second, alpha-masked copy of the eyes. */
+	const int hands_over = XwaVrHandOverlay_Prepare(cmd, xr_frame.views, xr_frame.width, xr_frame.height);
 
 	/* The configured hangar relight: key light + ambient cube. */
 	XwaDirLight key;
@@ -5244,15 +5269,26 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 	/* Films: the displayed brightness eases down to XWA_XR_ENV_FILM_DIM (half). */
 	const float film_level = fminf(fmaxf(fl_xr_env("XWA_XR_ENV_FILM_DIM", 0.5f), 0.0f), 1.0f);
 	s_xr_eye_gain = powf(brightness * (1.0f - film_dim * (1.0f - film_level)), 2.2f);
-	int ok = AeronScene_Render(s.scene, cmd) &&
-			 fl_xr_output_eye(cmd, xr_frame.eye_targets[0], xr_frame.format, NULL) &&
-			 AeronScene_SetCamera(s.scene, &eyes[1]) && AeronScene_Render(s.scene, cmd) &&
-			 fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format, NULL);
+	int ok = AeronScene_Render(s.scene, cmd);
+	for (int e = 0; e < 2 && ok; ++e) {
+		if (e == 1) {
+			ok = AeronScene_SetCamera(s.scene, &eyes[1]) && AeronScene_Render(s.scene, cmd);
+			if (!ok) {
+				break;
+			}
+		}
+		s_xr_eye_alpha = hands_over ? XwaVrHandOverlay_List(e) : NULL;
+		ok = fl_xr_output_eye(cmd, xr_frame.eye_targets[e], xr_frame.format, NULL);
+		s_xr_eye_alpha = NULL;
+	}
 	s_xr_eye_gain_last = s_xr_eye_gain;
 	s_xr_eye_gain = 1.0f;
 	if (ok) {
 		Aeron_XrStereoCommitBackdrop();
 		(void)XwaVrEnv_CommitFrameLayer(cmd, powf(s_xr_eye_gain_last, 1.0f / 2.2f));
+		if (hands_over) {
+			Aeron_XrStereoCommitEyeOverlay();
+		}
 		/* The pointer beam over the screen (beam layer). */
 		AeronXrPanel beam;
 		if (xr_frame.beam_target &&
@@ -5275,6 +5311,8 @@ void XwaRemasterFlight_Shutdown(void) {
 		s_xr_present_format = AERON_TEXTURE_FORMAT_UNKNOWN;
 	}
 	XwaVrCockpitHud_Shutdown();
+	XwaVrHudOcclusion_Shutdown();
+	XwaVrHandOverlay_Shutdown();
 	XwaVrConsole_Shutdown();
 	XwaVrGloves_Shutdown();
 	XwaVrStick_Shutdown();
