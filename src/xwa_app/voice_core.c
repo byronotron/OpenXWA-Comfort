@@ -159,48 +159,98 @@ typedef struct XvCommand {
 static const XvCommand k_commands[] = {
 	/* Wingmen. */
 	{ XWA_VRC_WING_ATTACK, 0, "Wingmen: attack my target",
-	  { "attack my target", "wingmen attack", "attack target", "wingmen attack my target", "attack" } },
-	{ XWA_VRC_WING_COVER, 0, "Wingmen: cover me", { "cover me", "wingmen cover me", "protect me", "cover" } },
+	  { "attack my target", "go after my target", "take out my target", "engage my target", "attack target",
+		"attack" } },
+	{ XWA_VRC_WING_COVER, 0, "Wingmen: cover me",
+	  { "cover me", "protect me", "watch my back", "cover my six", "help me", "defend me" } },
 	{ XWA_VRC_WING_IGNORE, 0, "Wingmen: ignore my target",
-	  { "ignore target", "ignore my target", "wingmen ignore", "ignore" } },
-	{ XWA_VRC_WING_EVADE, 0, "Wingmen: evade", { "evade", "wingmen evade", "evasive action", "break off" } },
-	{ XWA_VRC_WING_WAIT, 0, "Wingmen: wait", { "wait", "wingmen wait", "hold position", "stand by" } },
-	{ XWA_VRC_WING_GO_AHEAD, 0, "Wingmen: go ahead", { "go ahead", "wingmen go ahead", "proceed", "carry on" } },
+	  { "ignore my target", "ignore target", "ignore", "leave my target", "leave it alone", "forget my target" } },
+	{ XWA_VRC_WING_EVADE, 0, "Wingmen: evade",
+	  { "evade", "evasive action", "evasive maneuvers", "break off", "break formation", "scatter" } },
+	{ XWA_VRC_WING_WAIT, 0, "Wingmen: wait",
+	  { "wait", "hold position", "stand by", "hold on", "stay here", "hold up" } },
+	{ XWA_VRC_WING_GO_AHEAD, 0, "Wingmen: go ahead",
+	  { "go ahead", "proceed", "carry on", "continue", "proceed with mission", "continue mission" } },
 	{ XWA_VRC_WING_HOME, 0, "Wingmen: head home",
-	  { "head home", "go home", "return to base", "return home", "wingmen go home" } },
-	{ XWA_VRC_WING_REPORT, 0, "Wingmen: report in", { "report in", "report", "status report", "wingmen report" } },
-	{ XWA_VRC_WING_RESUPPLY, 0, "Call for resupply", { "resupply", "call resupply", "request resupply" } },
+	  { "return to base", "go home", "head home", "head back", "back to base", "return home" } },
+	{ XWA_VRC_WING_REPORT, 0, "Wingmen: report in",
+	  { "report in", "status report", "report status", "sound off", "check in", "report" } },
+	{ XWA_VRC_WING_RESUPPLY, 0, "Call for resupply",
+	  { "call resupply", "request resupply", "resupply", "need supplies", "call for supplies", "reload" } },
 	{ XWA_VRC_WING_REINFORCE, 0, "Call for reinforcements",
-	  { "reinforcements", "call reinforcements", "request reinforcements", "send reinforcements" } },
+	  { "call reinforcements", "request reinforcements", "reinforcements", "need backup", "send backup",
+		"call for backup" } },
 	/* Targeting. */
 	{ XWA_VRC_TARGET_NEAREST_ENEMY, 0, "Target nearest enemy",
-	  { "nearest enemy", "target nearest enemy", "closest enemy", "target closest enemy" } },
-	{ XWA_VRC_TARGET_NEXT, 0, "Next target", { "next target", "target next" } },
-	{ XWA_VRC_TARGET_PREV, 0, "Previous target", { "previous target", "last target", "target previous" } },
+	  { "nearest enemy", "target nearest enemy", "closest enemy", "target closest enemy", "nearest fighter",
+		"enemy" } },
+	{ XWA_VRC_TARGET_NEXT, 0, "Next target",
+	  { "next target", "target next", "cycle target", "another target", "next one" } },
+	{ XWA_VRC_TARGET_PREV, 0, "Previous target",
+	  { "previous target", "last target", "target previous", "go back target" } },
 	{ XWA_VRC_TARGET_ATTACKER, 0, "Target my attacker",
-	  { "my attacker", "target my attacker", "who is attacking me", "target attacker" } },
+	  { "target my attacker", "my attacker", "who is attacking me", "who is shooting at me", "who is shooting me",
+		"target attacker" } },
 	{ XWA_VRC_TARGET_OBJECTIVE, 0, "Target objective",
-	  { "objective", "target objective", "nearest objective", "mission objective" } },
-	{ XWA_VRC_TARGET_NEWEST, 0, "Target newest craft", { "newest target", "newest craft", "new arrival", "newest" } },
-	{ XWA_VRC_TARGET_CLEAR, 0, "Target cleared", { "clear target", "cancel target", "no target" } },
-	{ XWA_VRC_SUBSYSTEM_NEXT, 0, "Next subsystem", { "next subsystem", "target subsystem", "subsystem" } },
+	  { "target objective", "objective", "nearest objective", "mission objective", "mission target" } },
+	{ XWA_VRC_TARGET_NEWEST, 0, "Target newest craft",
+	  { "newest target", "newest craft", "new arrival", "newest", "new target", "latest arrival" } },
+	{ XWA_VRC_TARGET_CLEAR, 0, "Target cleared",
+	  { "clear target", "cancel target", "no target", "drop target", "deselect target", "clear lock" } },
+	{ XWA_VRC_SUBSYSTEM_NEXT, 0, "Next subsystem",
+	  { "next subsystem", "target subsystem", "subsystem", "next component", "target component" } },
 	/* Ship. */
-	{ XWA_VRC_MATCH_SPEED, 0, "Match speed", { "match speed", "match target speed", "match its speed" } },
+	{ XWA_VRC_MATCH_SPEED, 0, "Match speed",
+	  { "match speed", "match target speed", "match their speed", "match velocity", "match it" } },
 	{ XWA_VRC_COUNTERMEASURE, 0, "Countermeasure",
-	  { "countermeasure", "countermeasures", "flares", "chaff", "deploy countermeasures" } },
-	{ XWA_VRC_SFOILS, 0, "S-foils", { "s foils", "toggle s foils", "lock s foils", "attack position", "foils" } },
+	  { "countermeasures", "flares", "chaff", "deploy countermeasures", "drop flares", "decoy" } },
+	{ XWA_VRC_SFOILS, 0, "S-foils",
+	  { "s foils", "toggle s foils", "lock s foils", "open s foils", "close s foils", "attack position" } },
 	{ XWA_VRC_LASERS_TO_SHIELDS, 0, "Lasers to shields",
-	  { "lasers to shields", "transfer lasers to shields", "laser energy to shields" } },
+	  { "lasers to shields", "transfer lasers to shields", "boost shields", "recharge shields", "power to shields",
+		"energy to shields" } },
 	{ XWA_VRC_SHIELDS_TO_LASERS, 0, "Shields to lasers",
-	  { "shields to lasers", "transfer shields to lasers", "shield energy to lasers" } },
-	{ XWA_VRC_FIRE_LINK, 0, "Fire link", { "fire link", "link fire", "fire mode", "link lasers" } },
-	{ XWA_VRC_CONVERGENCE, 0, "Convergence", { "convergence", "laser convergence" } },
-	{ XWA_VRC_MAP, 0, "Map", { "map", "open map", "show map", "close map" } },
-	{ XWA_VRC_DOCK, 0, "Dock", { "dock", "begin docking", "board" } },
-	{ XWA_VRC_PICKUP, 0, "Pick up", { "pick up", "pick it up", "grab it" } },
-	{ XWA_VRC_RELEASE, 0, "Release", { "release", "release cargo", "drop cargo" } },
+	  { "shields to lasers", "transfer shields to lasers", "boost lasers", "recharge lasers", "power to lasers",
+		"energy to lasers" } },
+	{ XWA_VRC_FIRE_LINK, 0, "Fire link",
+	  { "fire link", "link fire", "fire mode", "link lasers", "change fire mode", "dual fire" } },
+	{ XWA_VRC_CONVERGENCE, 0, "Convergence", { "convergence", "laser convergence", "converge" } },
+	{ XWA_VRC_MAP, 0, "Map", { "map", "open map", "show map", "close map", "tactical map", "map view" } },
+	{ XWA_VRC_DOCK, 0, "Dock", { "dock", "begin docking", "start docking", "board", "land" } },
+	{ XWA_VRC_PICKUP, 0, "Pick up", { "pick up", "pick it up", "grab it", "pick up cargo", "tow it" } },
+	{ XWA_VRC_RELEASE, 0, "Release", { "release cargo", "release", "drop cargo", "drop it", "let it go" } },
 };
 
+/* Heard words that mean the same to us, and words that change nothing
+ * ("please", "the", who is addressed). Applied to the phrases too. */
+static const char* const k_same[][2] = {
+	{ "closest", "nearest" },   { "near", "nearest" },      { "nearby", "nearest" },
+	{ "hostile", "enemy" },     { "hostiles", "enemy" },    { "bandit", "enemy" },
+	{ "bandits", "enemy" },     { "enemies", "enemy" },     { "foe", "enemy" },
+	{ "targets", "target" },    { "attacking", "attack" },  { "attacks", "attack" },
+	{ "engaging", "engage" },   { "laser", "lasers" },      { "cannons", "lasers" },
+	{ "guns", "lasers" },       { "shield", "shields" },    { "countermeasure", "countermeasures" },
+	{ "counter", "countermeasures" }, { "flare", "flares" }, { "decoys", "decoy" },
+	{ "foil", "foils" },        { "previous", "previous" }, { "prior", "previous" },
+	{ "latest", "newest" },     { "goal", "objective" },    { "objectives", "objective" },
+	{ "docking", "dock" },      { "subsystems", "subsystem" }, { "component", "subsystem" },
+	{ "components", "subsystem" }, { "part", "subsystem" }, { "reinforcement", "reinforcements" },
+	{ "backups", "backup" },    { "supply", "supplies" },   { "evasive", "evasive" },
+	{ "maneuver", "maneuvers" }, { "manoeuvres", "maneuvers" }, { "rtb", "return to base" },
+	{ "shooting", "shooting" }, { "whos", "who is" },       { "who's", "who is" },
+	{ "its", "it" },            { "speeds", "speed" },
+	/* How the recognizer tends to spell "s-foils". */
+	{ "sfoils", "foils" },      { "spoils", "foils" },      { "espoils", "foils" },
+	{ "aspoils", "foils" },     { "foyles", "foils" },      { "foyle", "foils" },
+	{ "foyls", "foils" },
+};
+
+static const char* const k_filler[] = {
+	"please", "now", "the", "a",      "an",     "uh",    "um",      "okay", "ok",  "hey", "computer", "all",
+	"guys",   "you", "everyone", "team", "squad", "flight", "wing", "wingmen", "wingman", "wingmates", "group",
+	"lead",   "and", "just",  "that",   "this",   "go",    "be",      "can",  "will", "would", "could", "for",
+	"to",     "into", "s",    "shoot",  "deploy", "put",
+};
 #define XV_COMMANDS ((int)(sizeof k_commands / sizeof k_commands[0]))
 #define XV_MAX_WORDS 12
 
@@ -210,17 +260,44 @@ const char* XwaVoice_CommandPhrase(int index) {
 	return index >= 0 && index < XV_COMMANDS ? k_commands[index].phrases[0] : NULL;
 }
 
-/* Words of `text`: lower case letters and digits; "s-foils" is "s foils". */
+/* Adds `word` (after the synonyms; fillers dropped) to `words`. */
+static int xv_add_word(char words[XV_MAX_WORDS][24], int n, const char* word) {
+	for (size_t i = 0; i < sizeof k_filler / sizeof k_filler[0]; ++i) {
+		if (strcmp(word, k_filler[i]) == 0) {
+			return n;
+		}
+	}
+	for (size_t i = 0; i < sizeof k_same / sizeof k_same[0]; ++i) {
+		if (strcmp(word, k_same[i][0]) == 0) {
+			/* The replacement may be several words ("rtb"). */
+			char copy[48];
+			snprintf(copy, sizeof copy, "%s", k_same[i][1]);
+			for (char* t = strtok(copy, " "); t && n < XV_MAX_WORDS; t = strtok(NULL, " ")) {
+				snprintf(words[n++], 24, "%s", t);
+			}
+			return n;
+		}
+	}
+	if (n < XV_MAX_WORDS) {
+		snprintf(words[n++], 24, "%s", word);
+	}
+	return n;
+}
+
+/* Words of `text`: lower case letters, digits and apostrophes ("who's");
+ * "s-foils" is "s foils". Synonyms are folded, fillers dropped. */
 static int xv_words(const char* text, char words[XV_MAX_WORDS][24]) {
 	int n = 0, len = 0;
+	char word[24];
 	for (const char* c = text;; ++c) {
-		const int letter = *c && isalnum((unsigned char)*c);
+		const int letter = *c && (isalnum((unsigned char)*c) || *c == '\'');
 		if (letter && len < 23) {
-			words[n][len++] = (char)tolower((unsigned char)*c);
+			word[len++] = (char)tolower((unsigned char)*c);
 		} else if (!letter && len > 0) {
-			words[n][len] = '\0';
+			word[len] = '\0';
 			len = 0;
-			if (++n == XV_MAX_WORDS) {
+			n = xv_add_word(words, n, word);
+			if (n == XV_MAX_WORDS) {
 				break;
 			}
 		}

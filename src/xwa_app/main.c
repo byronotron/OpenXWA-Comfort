@@ -404,6 +404,8 @@ static void android_load_settings(void) {
 				  "# Voice commands: double-tap a thumb rest, then speak (doubletap), or\n"
 				  "# speak while the thumb is on the rest (hold); 0 = off:\n"
 				  "#XWA_XR_VOICE=doubletap\n"
+				  "# Voice command list on your left at mission start (0 = off):\n"
+				  "#XWA_XR_VOICE_CARD=1\n"
 				  "# Helmet HUD distance in metres and size:\n"
 				  "#XWA_XR_HUD_DISTANCE=3.0\n"
 				  "#XWA_XR_HUD_SCALE=0.65\n"

@@ -4945,18 +4945,19 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 				fl_xr_hud_quad(&flight_view.camera, &hud, 0);
 				Aeron_XrStereoCommit(&hud);
 			}
-			if (xr_frame.console_target) {
-				AeronXrPanel console;
-				if (XwaVrConsole_Frame(cmd, xr_frame.console_target, xr_frame.console_width,
-									   xr_frame.console_height, xr_frame.views, &console)) {
-					Aeron_XrStereoCommitConsole(&console);
-				}
+			/* Panel layers: drawn only when they change, shown while in view. */
+			if (xr_frame.console_width > 0) {
+				AeronXrPanel console[2];
+				const int n = XwaVrConsole_Frame(cmd, xr_frame.console_width, xr_frame.console_height,
+												 xr_frame.views, console);
+				Aeron_XrStereoCommitPanelLayer(AERON_XR_PANEL_CONSOLE, console, n);
 			}
-			if (xr_frame.card_target) {
-				AeronXrPanel card;
-				if (XwaVrConsole_CardFrame(cmd, xr_frame.card_target, xr_frame.card_width, xr_frame.card_height,
-										   xr_frame.views, &card)) {
-					Aeron_XrStereoCommitCard(&card);
+			if (xr_frame.card_width > 0) {
+				for (int card = 0; card < 2; ++card) {
+					AeronXrPanel quads[2];
+					const int n = XwaVrConsole_CardFrame(cmd, card, xr_frame.card_width, xr_frame.card_height,
+														 xr_frame.views, quads);
+					Aeron_XrStereoCommitPanelLayer(card ? AERON_XR_PANEL_CARD2 : AERON_XR_PANEL_CARD, quads, n);
 				}
 			}
 			/* Faint beams from the hands to where they point on the console. */

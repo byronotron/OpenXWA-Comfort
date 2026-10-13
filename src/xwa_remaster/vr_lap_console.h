@@ -27,19 +27,22 @@ extern "C" {
 void XwaVrConsole_BeginFrame(float dt_seconds);
 void XwaVrConsole_SetState(const XwaVrConsoleState* state);
 
-/* Handles the hands and draws the console into `target` (the stereo
- * frame's console target). Fills `out` with its placement and returns 1
- * when it should be shown. `views` are the stereo frame's eye views. */
-int XwaVrConsole_Frame(AeronCommandBuffer* cmd, AeronRenderTarget* target, int width, int height,
-					   const AeronXrView views[2], AeronXrPanel* out);
+/* Handles the hands and, when the console changed, redraws its panel layer
+ * (AERON_XR_PANEL_CONSOLE; width x height = one panel). Fills `out` with
+ * its quads (one, or one per eye while a hand is over it) and returns their
+ * count for Aeron_XrStereoCommitPanelLayer: 0 when it is not shown or out
+ * of view. `views` are the stereo frame's eye views. */
+int XwaVrConsole_Frame(AeronCommandBuffer* cmd, int width, int height, const AeronXrView views[2],
+					   AeronXrPanel out[2]);
 
-/* The button card: a reference of the controller layout, drawn into the
- * stereo frame's card target (`out` filled as for the console). It
- * appears at every mission start to the player's right, just out of view,
- * and can be picked up by its ends like the console. XWA_XR_BUTTON_CARD=0
- * turns it off. Call after Frame. */
-int XwaVrConsole_CardFrame(AeronCommandBuffer* cmd, AeronRenderTarget* target, int width, int height,
-						   const AeronXrView views[2], AeronXrPanel* out);
+/* Reference cards (`card` 0: the controller layout, on the player's right;
+ * 1: the voice commands, on the left), each a panel layer of its own
+ * (AERON_XR_PANEL_CARD / _CARD2) handled like the console. They appear at
+ * every mission start just out of view and can be picked up by their ends.
+ * XWA_XR_BUTTON_CARD=0 / XWA_XR_VOICE_CARD=0 turn them off (the voice card
+ * also goes with XWA_XR_VOICE=0). Call after Frame. */
+int XwaVrConsole_CardFrame(AeronCommandBuffer* cmd, int card, int width, int height, const AeronXrView views[2],
+						   AeronXrPanel out[2]);
 
 /* Another VR panel owns hand 0/1's grip this frame (applied with the
  * console's own in EndFrame). */

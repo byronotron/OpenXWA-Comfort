@@ -10341,7 +10341,18 @@ static __inline int Flight_UpdateEntity_OpenOptions(unsigned int playerIdx) {
 	if (g_configExitMissionRequested) {
 		g_configExitMissionRequested = 0;
 		if (!exitToFrontend) {
-			FlightAction_RequestAbortOrDisconnect(g_flightOptionsModalPlayerIdx);
+			PlayerData* quitter = &g_players[g_flightOptionsModalPlayerIdx];
+			if (quitter->connectedFlag == 1) {
+				/* A local pilot (single player): Alt+Q only applies to network
+				 * games, and the keyboard's Q path still waits for Space. The
+				 * menu choice is the confirmation: end the mission now. */
+				quitter->pendingActionId = 2;
+				quitter->pendingActionParam = -1;
+				quitter->pendingActionTimer = 1888;
+				FlightAction_ConfirmPendingAction(g_flightOptionsModalPlayerIdx, NULL);
+			} else {
+				FlightAction_RequestAbortOrDisconnect(g_flightOptionsModalPlayerIdx);
+			}
 		}
 	}
 #endif
