@@ -331,6 +331,7 @@ set(XWA_APP_SOURCES
     src/xwa_app/setup.c
     src/xwa_app/setup_screen.c
     src/xwa_app/vr_keyboard.c
+    src/xwa_app/crash_report.c
 )
 
 if(ANDROID)
@@ -355,6 +356,9 @@ set(XWA_AERON_SCENE3D_DEFAULTS
 
 set(XWA_VERSION "0.0.0-dev" CACHE STRING "OpenXWA application version")
 target_compile_definitions(xwa_core PRIVATE
+    OPENXWA_VERSION="${XWA_VERSION}"
+)
+target_compile_definitions(xwa PRIVATE
     OPENXWA_VERSION="${XWA_VERSION}"
 )
 

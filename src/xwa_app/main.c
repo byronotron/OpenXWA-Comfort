@@ -1,5 +1,6 @@
 #include "aeron/main.h"
 #include "aeron/aeron.h"
+#include "crash_report.h"
 #include "host_config.h"
 #include "setup.h"
 #include "setup_screen.h"
@@ -328,6 +329,9 @@ static void android_load_settings(void) {
 		snprintf(path, sizeof path, "%s/openxwa.log", external);
 		SDL_setenv_unsafe("AERON_LOG_FILE", path, 1);
 	}
+	/* Native crashes: fault + backtrace, kept until the next crash. */
+	snprintf(path, sizeof path, "%s/openxwa-crash.txt", external);
+	XwaCrashReport_Install(path);
 	snprintf(path, sizeof path, "%s/openxwa-quest.cfg", external);
 	f = fopen(path, "r");
 	if (!f) {
