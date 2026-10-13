@@ -838,7 +838,7 @@ static void env_beam(AeronScene3D* scene, AeronSceneBillboardStage stage, const 
 
 /* The frame's opening (image pixels) that the 4:3 screen fills exactly;
  * the frame image is drawn behind the screen's quad layer, in its plane. */
-static const float k_frame_opening[4] = { 128.0f, 130.0f, 1206.0f, 938.5f }; /* x0, y0, x1, y1 */
+static const float k_frame_opening[4] = { 123.5f, 138.0f, 1139.5f, 900.0f }; /* x0, y0, x1, y1 */
 
 /* Height (metres) the frame rises above the top of a screen `sw` wide. */
 static float env_frame_top(float sw) {
