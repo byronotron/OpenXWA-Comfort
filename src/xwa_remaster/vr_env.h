@@ -43,7 +43,7 @@ void XwaVrEnv_View(float pos[3], float rows[9]);
 void XwaVrEnv_Submit(AeronScene3D* scene);
 
 /* The screen frame as a compositor layer right over the virtual screen
- * (the picture shows through its opening, 5 cm behind it). Call after the
+ * (the picture fills its opening, just behind it). Call after the
  * backdrop is committed; `brightness` (0..1) dims it with the scene.
  * Returns 0 when the frame has no layer (it is then drawn in the scene). */
 int XwaVrEnv_CommitFrameLayer(AeronCommandBuffer* cmd, float brightness);

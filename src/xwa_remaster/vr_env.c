@@ -844,7 +844,7 @@ static void env_beam(AeronScene3D* scene, AeronSceneBillboardStage stage, const 
 
 /* The frame's opening (image pixels) that the 4:3 screen fills exactly;
  * the frame image is drawn behind the screen's quad layer, in its plane. */
-static const float k_frame_opening[4] = { 123.5f, 138.0f, 1139.5f, 900.0f }; /* x0, y0, x1, y1 */
+static const float k_frame_opening[4] = { 156.0f, 148.0f, 1105.0f, 861.0f }; /* x0, y0, x1, y1 */
 
 /* Where the 4:3 picture sits on the virtual screen: the 2D layers are
  * fitted into the screen quad keeping their aspect, centred. Lengths in
@@ -854,9 +854,11 @@ static const float k_frame_opening[4] = { 123.5f, 138.0f, 1139.5f, 900.0f }; /* 
 typedef struct EnvScreen {
 	float dist, w, h, lift, k;
 	/* The picture as the frame's opening shows it: the screen's picture
-	 * divided by XWA_XR_FRAME_OVERSCAN (1.05), so the frame covers its
-	 * edges. The frame sits XWA_XR_FRAME_DEPTH (0.05 m) in front of the
-	 * picture, scaled so its opening lines up from the viewer. */
+	 * divided by XWA_XR_FRAME_OVERSCAN (1.0: the picture fills the opening
+	 * exactly, nothing of it hidden). The opening is the largest 4:3
+	 * rectangle clear of the frame's corner pieces (dark around it). The
+	 * frame sits XWA_XR_FRAME_DEPTH (1 cm) in front of the picture, scaled
+	 * so its opening lines up from the viewer. */
 	float pic_w, pic_h;
 	float frame_dist, frame_scale;
 } EnvScreen;
@@ -874,10 +876,10 @@ static void env_screen(EnvScreen* out) {
 	out->dist = dist;
 	out->lift = lift;
 	out->k = AERON_OPT_UNITS_PER_METER * env_float("XWA_XR_WORLD_SCALE", 1.0f);
-	const float overscan = fmaxf(env_float("XWA_XR_FRAME_OVERSCAN", 1.05f), 0.5f);
+	const float overscan = fmaxf(env_float("XWA_XR_FRAME_OVERSCAN", 1.0f), 0.5f);
 	out->pic_w = out->w / overscan;
 	out->pic_h = out->h / overscan;
-	out->frame_dist = fmaxf(dist - env_float("XWA_XR_FRAME_DEPTH", 0.05f), 0.2f);
+	out->frame_dist = fmaxf(dist - env_float("XWA_XR_FRAME_DEPTH", 0.01f), 0.2f);
 	out->frame_scale = dist > 0.01f ? out->frame_dist / dist : 1.0f;
 }
 
