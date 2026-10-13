@@ -136,7 +136,16 @@ static const EnvSalvo k_salvos[] = {
 
 /* Sprites from the game's resource DATs (group, sprite id) plus the logo
  * and a generated beam profile. */
-enum { ENV_TEX_DEATHSTAR, ENV_TEX_ENDOR, ENV_TEX_BLAST, ENV_TEX_FIRE, ENV_TEX_LOGO, ENV_TEX_BEAM, ENV_TEX_COUNT };
+enum {
+	ENV_TEX_FRAME, /* first: the screen frame shows in every scene */
+	ENV_TEX_DEATHSTAR,
+	ENV_TEX_ENDOR,
+	ENV_TEX_BLAST,
+	ENV_TEX_FIRE,
+	ENV_TEX_LOGO,
+	ENV_TEX_BEAM,
+	ENV_TEX_COUNT
+};
 
 typedef struct EnvTexSource {
 	const char* dat; /* under Resdata/ */
@@ -144,6 +153,7 @@ typedef struct EnvTexSource {
 } EnvTexSource;
 
 static const EnvTexSource k_tex_sources[ENV_TEX_COUNT] = {
+	{ NULL, 0, 0 },            /* vr/frame.rgba */
 	{ "DSFire", 6250, -1 },    /* the second Death Star (first frame) */
 	{ "Planet", 6026, -1 },    /* a green forest world for Endor */
 	{ "Explosions", 2005, 7 },
@@ -548,12 +558,21 @@ static int env_make_beam(AeronCommandBuffer* cmd) {
 	return 1;
 }
 
-/* The game logo: "XWAL", u32 width, u32 height, straight RGBA. Shipped in
- * the APK (assets/vr/logo.rgba) or next to the executable; never part of
- * the source tree. XWA_XR_LOGO overrides the path. */
-static int env_load_logo(AeronCommandBuffer* cmd) {
-	const char* override = getenv("XWA_XR_LOGO");
-	const char* paths[] = { override && override[0] ? override : NULL, "vr/logo.rgba", "assets/vr/logo.rgba" };
+/* Image assets: "XWAL", u32 width, u32 height, straight RGBA. Shipped in
+ * the APK (assets/vr/<name>.rgba) or next to the executable; never part of
+ * the source tree. `override_env` names a variable that overrides the path.
+ *   logo  — the game logo above the screen (XWA_XR_LOGO)
+ *   frame — the frame around the 4:3 screen (XWA_XR_FRAME, 0 = none); its
+ *           opening is the rectangle k_frame_opening in image pixels. */
+static int env_load_rgba(AeronCommandBuffer* cmd, int slot, const char* name, const char* override_env) {
+	const char* override = getenv(override_env);
+	if (override && strcmp(override, "0") == 0) {
+		return 0;
+	}
+	char asset[2][64];
+	snprintf(asset[0], sizeof asset[0], "vr/%s.rgba", name);
+	snprintf(asset[1], sizeof asset[1], "assets/vr/%s.rgba", name);
+	const char* paths[] = { override && override[0] ? override : NULL, asset[0], asset[1] };
 	for (size_t i = 0; i < sizeof paths / sizeof paths[0]; ++i) {
 		if (!paths[i]) {
 			continue;
@@ -569,7 +588,7 @@ static int env_load_logo(AeronCommandBuffer* cmd) {
 			memcpy(&w, data + 4, 4);
 			memcpy(&h, data + 8, 4);
 			if (w && h && w <= 4096 && h <= 4096 && size >= 12 + (size_t)w * h * 4u) {
-				ok = env_make_texture(cmd, ENV_TEX_LOGO, data + 12, (int)w, (int)h);
+				ok = env_make_texture(cmd, slot, data + 12, (int)w, (int)h);
 			}
 		}
 		SDL_free(data);
@@ -577,7 +596,7 @@ static int env_load_logo(AeronCommandBuffer* cmd) {
 			return 1;
 		}
 	}
-	Aeron_LogInfo("xwa.remaster", "VR environment: no logo (vr/logo.rgba)");
+	Aeron_LogInfo("xwa.remaster", "VR environment: no %s (vr/%s.rgba)", name, name);
 	return 0;
 }
 
@@ -627,9 +646,11 @@ static void env_load_dat_sprite(AeronCommandBuffer* cmd, int slot) {
 	Xwa2dFrameSet_Free(&set);
 }
 
-/* One sprite per call; returns 1 when something was loaded. */
+/* One sprite per call (only the frame outside the space scene); returns 1
+ * when something was loaded. */
 static int env_load_sprites(AeronCommandBuffer* cmd) {
-	for (int i = 0; i < ENV_TEX_COUNT; ++i) {
+	const int count = s_env.mode == ENV_ENDOR ? ENV_TEX_COUNT : ENV_TEX_FRAME + 1;
+	for (int i = 0; i < count; ++i) {
 		if (s_env.tex_tried[i]) {
 			continue;
 		}
@@ -637,7 +658,9 @@ static int env_load_sprites(AeronCommandBuffer* cmd) {
 		if (i == ENV_TEX_BEAM) {
 			env_make_beam(cmd);
 		} else if (i == ENV_TEX_LOGO) {
-			env_load_logo(cmd);
+			env_load_rgba(cmd, i, "logo", "XWA_XR_LOGO");
+		} else if (i == ENV_TEX_FRAME) {
+			env_load_rgba(cmd, i, "frame", "XWA_XR_FRAME");
 		} else {
 			env_load_dat_sprite(cmd, i);
 		}
@@ -669,11 +692,10 @@ int XwaVrEnv_Prepare(AeronCommandBuffer* cmd) {
 			break;
 		}
 	}
-	if (mode == ENV_ENDOR) {
-		if (!busy) {
-			(void)env_load_sprites(cmd);
-		}
-	} else if (!s_env.meshes[s_env.hangar].mesh) {
+	if (!busy) {
+		(void)env_load_sprites(cmd);
+	}
+	if (mode == ENV_HANGAR && !s_env.meshes[s_env.hangar].mesh) {
 		if (s_env.meshes[s_env.hangar].tried && !s_env.logged) {
 			Aeron_LogWarn("xwa.remaster", "VR environment: Hangar.opt unavailable, menus stay on the plain screen");
 			s_env.logged = 1;
@@ -814,6 +836,41 @@ static void env_beam(AeronScene3D* scene, AeronSceneBillboardStage stage, const 
 	env_quad(scene, ENV_TEX_BEAM, stage, AERON_SCENE_BILLBOARD_BLEND_ADDITIVE, c, tint);
 }
 
+/* The frame's opening (image pixels) that the 4:3 screen fills exactly;
+ * the frame image is drawn behind the screen's quad layer, in its plane. */
+static const float k_frame_opening[4] = { 128.0f, 130.0f, 1206.0f, 938.5f }; /* x0, y0, x1, y1 */
+
+/* Height (metres) the frame rises above the top of a screen `sw` wide. */
+static float env_frame_top(float sw) {
+	if (!s_env.tex[ENV_TEX_FRAME]) {
+		return 0.0f;
+	}
+	return k_frame_opening[1] * sw / (k_frame_opening[2] - k_frame_opening[0]);
+}
+
+static void env_submit_frame(AeronScene3D* scene) {
+	if (!s_env.tex[ENV_TEX_FRAME]) {
+		return;
+	}
+	const float k = AERON_OPT_UNITS_PER_METER;
+	const float dist = env_float("AERON_XR_SCREEN_DISTANCE", 1.6f);
+	const float sw = env_float("AERON_XR_SCREEN_WIDTH", 2.0f);
+	const float lift = env_float("AERON_XR_SCREEN_HEIGHT_OFFSET", 0.0f);
+	const float px = sw / (k_frame_opening[2] - k_frame_opening[0]); /* metres per image pixel */
+	const float fw = (float)s_env.tex_w[ENV_TEX_FRAME] * px, fh = (float)s_env.tex_h[ENV_TEX_FRAME] * px;
+	/* Frame centre relative to the screen centre (image y runs down). */
+	const float dx = (0.5f * (float)s_env.tex_w[ENV_TEX_FRAME] - 0.5f * (k_frame_opening[0] + k_frame_opening[2])) * px;
+	const float dz = -(0.5f * (float)s_env.tex_h[ENV_TEX_FRAME] - 0.5f * (k_frame_opening[1] + k_frame_opening[3])) * px;
+	const float center[3] = { s_env.view_pos[0] + dx * k, s_env.view_pos[1] + (dist + 0.002f) * k,
+							  s_env.view_pos[2] + (lift + dz) * k };
+	const float ax[3] = { 0.5f * fw * k, 0.0f, 0.0f };
+	const float ay[3] = { 0.0f, 0.0f, 0.5f * fh * k };
+	float c[4][3];
+	env_rect(center, ax, ay, c);
+	static const float tint[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+	env_quad(scene, ENV_TEX_FRAME, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, tint);
+}
+
 static void env_submit_endor_sprites(AeronScene3D* scene) {
 	const float k = AERON_OPT_UNITS_PER_METER;
 	float c[4][3];
@@ -931,7 +988,7 @@ static void env_submit_endor_sprites(AeronScene3D* scene) {
 			env_beam(scene, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, a0, a1, 0.6f * k, red);
 		}
 	}
-	/* The logo above the virtual screen (AERON_XR_SCREEN_* geometry, 4:3). */
+	/* The logo above the virtual screen and its frame. */
 	if (s_env.tex[ENV_TEX_LOGO]) {
 		const float dist = env_float("AERON_XR_SCREEN_DISTANCE", 1.6f);
 		const float sw = env_float("AERON_XR_SCREEN_WIDTH", 2.0f);
@@ -939,7 +996,7 @@ static void env_submit_endor_sprites(AeronScene3D* scene) {
 		const float lw = 0.6f * sw * env_float("XWA_XR_LOGO_SCALE", 1.0f);
 		const float lh = lw * (float)s_env.tex_h[ENV_TEX_LOGO] / (float)s_env.tex_w[ENV_TEX_LOGO];
 		const float center[3] = { s_env.view_pos[0], s_env.view_pos[1] + (dist + 0.03f) * k,
-								  s_env.view_pos[2] + (lift + 0.375f * sw + 0.05f + 0.5f * lh) * k };
+								  s_env.view_pos[2] + (lift + 0.375f * sw + env_frame_top(sw) + 0.04f + 0.5f * lh) * k };
 		const float ax[3] = { 0.5f * lw * k, 0.0f, 0.0f };
 		const float ay[3] = { 0.0f, 0.0f, 0.5f * lh * k };
 		env_rect(center, ax, ay, c);
@@ -968,6 +1025,7 @@ void XwaVrEnv_Submit(AeronScene3D* scene) {
 	if (s_env.mode == ENV_ENDOR) {
 		env_submit_endor_sprites(scene);
 	}
+	env_submit_frame(scene);
 }
 
 void XwaVrEnv_Release(void) {
