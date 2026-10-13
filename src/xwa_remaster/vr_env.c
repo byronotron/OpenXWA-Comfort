@@ -844,7 +844,7 @@ static void env_beam(AeronScene3D* scene, AeronSceneBillboardStage stage, const 
 
 /* The frame's opening (image pixels) that the 4:3 screen fills exactly;
  * the frame image is drawn behind the screen's quad layer, in its plane. */
-static const float k_frame_opening[4] = { 156.0f, 148.0f, 1105.0f, 861.0f }; /* x0, y0, x1, y1 */
+static const float k_frame_opening[4] = { 124.0f, 151.0f, 1123.0f, 901.0f }; /* x0, y0, x1, y1 */
 
 /* Where the 4:3 picture sits on the virtual screen: the 2D layers are
  * fitted into the screen quad keeping their aspect, centred. Lengths in
