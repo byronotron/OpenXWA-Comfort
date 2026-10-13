@@ -857,8 +857,9 @@ typedef struct EnvScreen {
 	 * divided by XWA_XR_FRAME_OVERSCAN (1.0: the picture fills the opening
 	 * exactly, nothing of it hidden). The opening is the largest 4:3
 	 * rectangle clear of the frame's corner pieces (dark around it). The
-	 * frame sits XWA_XR_FRAME_DEPTH (1 cm) in front of the picture, scaled
-	 * so its opening lines up from the viewer. */
+	 * frame sits XWA_XR_FRAME_DEPTH (4 cm) in front of the picture for a
+	 * little depth, scaled so its opening lines up from the viewer (leaning
+	 * 20 cm shifts the two by under 4 mm, about a game pixel). */
 	float pic_w, pic_h;
 	float frame_dist, frame_scale;
 } EnvScreen;
@@ -879,7 +880,7 @@ static void env_screen(EnvScreen* out) {
 	const float overscan = fmaxf(env_float("XWA_XR_FRAME_OVERSCAN", 1.0f), 0.5f);
 	out->pic_w = out->w / overscan;
 	out->pic_h = out->h / overscan;
-	out->frame_dist = fmaxf(dist - env_float("XWA_XR_FRAME_DEPTH", 0.01f), 0.2f);
+	out->frame_dist = fmaxf(dist - env_float("XWA_XR_FRAME_DEPTH", 0.04f), 0.2f);
 	out->frame_scale = dist > 0.01f ? out->frame_dist / dist : 1.0f;
 }
 
