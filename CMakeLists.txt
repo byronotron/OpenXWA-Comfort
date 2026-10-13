@@ -341,6 +341,13 @@ if(ANDROID)
     # SDL's Android activity loads the game as libmain.so and calls SDL_main.
     add_library(xwa SHARED ${XWA_APP_SOURCES})
     set_target_properties(xwa PROPERTIES OUTPUT_NAME "main")
+    # Vulkan shim between SDL and the system loader: fixed foveated rendering
+    # (packaging/quest/vkshim/vkshim.c). Packaged as libopenxwa_vkshim.so.
+    add_library(openxwa_vkshim SHARED packaging/quest/vkshim/vkshim.c)
+    target_include_directories(openxwa_vkshim PRIVATE third_party/vulkan-headers)
+    set_target_properties(openxwa_vkshim PROPERTIES C_STANDARD 99 C_VISIBILITY_PRESET hidden)
+    target_link_libraries(openxwa_vkshim PRIVATE dl m)
+    add_dependencies(xwa openxwa_vkshim)
 else()
     add_executable(xwa ${XWA_APP_SOURCES})
     set_target_properties(xwa PROPERTIES OUTPUT_NAME "OpenXWA")

@@ -20,6 +20,8 @@
 #include "xwa_runtime/runtime/presentation.h"
 #include "xwa_runtime/timing/modern_flight_timing.h"
 
+#include <SDL3/SDL_hints.h>
+#include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -348,6 +350,10 @@ static void android_load_settings(void) {
 				  "# Display refresh rate in Hz (0 = the headset's setting; 72 gives the\n"
 				  "# most time per frame):\n"
 				  "#AERON_XR_REFRESH_RATE=0\n"
+				  "# Fixed foveated rendering of the 3D view: 0 (off), low, medium, high.\n"
+				  "# The edges of the view are shaded in coarser blocks; HUD, panels and text\n"
+				  "# are not affected (restart to change):\n"
+				  "#XWA_XR_FOVEATION=low\n"
 				  "# GPU/CPU clock floor requested from the headset: 0, low, high, boost:\n"
 				  "#AERON_XR_PERF_LEVEL=high\n"
 				  "# 0 = turn off the GPU optimizations (A/B test; also in the VR options):\n"
@@ -461,6 +467,22 @@ static void android_xr_defaults(void) {
 	}
 	if (!SDL_getenv("AERON_XR_RESOLUTION_SCALE")) {
 		SDL_setenv_unsafe("AERON_XR_RESOLUTION_SCALE", "0.9", 1);
+	}
+	{
+		/* Fixed foveated rendering: SDL loads Vulkan through the OpenXWA shim
+		 * (packaging/quest/vkshim), which adds a fragment density map to the
+		 * 3D scene's pass. Only when the shim is there to load. */
+		const char* fov = SDL_getenv("XWA_XR_FOVEATION");
+		if (!(fov && (fov[0] == '0' || SDL_strcasecmp(fov, "off") == 0))) {
+			void* shim = dlopen("libopenxwa_vkshim.so", RTLD_NOW | RTLD_LOCAL);
+			if (shim && dlsym(shim, "vkGetInstanceProcAddr")) {
+				SDL_SetHint(SDL_HINT_VULKAN_LIBRARY, "libopenxwa_vkshim.so");
+				Aeron_LogInfo("xwa.config", "Vulkan through the foveation shim (XWA_XR_FOVEATION=%s)",
+							  fov && fov[0] ? fov : "low");
+			} else {
+				Aeron_LogWarn("xwa.config", "foveation shim not found: %s", dlerror());
+			}
+		}
 	}
 	{
 		/* GPU Optimizations off (VR options A/B switch): no clock floor either. */

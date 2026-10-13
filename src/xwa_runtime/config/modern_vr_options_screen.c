@@ -42,6 +42,7 @@ enum {
 	VR_RESOLUTION,
 	VR_REFRESH,
 	VR_GPU_OPT,
+	VR_FOVEATION,
 	VR_COUNT
 };
 
@@ -60,6 +61,8 @@ static const char* const k_voice_texts[] = { "Off", "Double-tap Thumb Rest", "Ho
 static const char* const k_voice_values[] = { "0", "doubletap", "hold" };
 static const char* const k_res_texts[] = { "70%", "80%", "90%", "100%", "110%", "120%" };
 static const char* const k_res_values[] = { "0.7", "0.8", "0.9", "1.0", "1.1", "1.2" };
+static const char* const k_fov_texts[] = { "Off", "Low", "Medium", "High" };
+static const char* const k_fov_values[] = { "0", "low", "medium", "high" };
 static const char* const k_refresh_texts[] = { "Headset Setting", "72 Hz", "80 Hz", "90 Hz", "120 Hz" };
 static const char* const k_refresh_values[] = { "0", "72", "80", "90", "120" };
 
@@ -81,6 +84,7 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "AERON_XR_RESOLUTION_SCALE", "Resolution (restart)", k_res_texts, k_res_values, 6, 2, 86 },
 	{ "AERON_XR_REFRESH_RATE", "Refresh Rate", k_refresh_texts, k_refresh_values, 5, 0, 99 },
 	{ "XWA_XR_GPU_OPT", "GPU Optimizations", k_toggle_texts, k_toggle_values, 2, 1, 79 },
+	{ "XWA_XR_FOVEATION", "Foveation (restart)", k_fov_texts, k_fov_values, 4, 1, 78 },
 };
 
 static struct {
@@ -96,7 +100,7 @@ static int vr_index_from_env(const VrSetting* setting) {
 	if (!env || !env[0]) {
 		return best;
 	}
-	if (setting->values == k_layout_values || setting->values == k_voice_values) {
+	if (setting->values == k_layout_values || setting->values == k_voice_values || setting->values == k_fov_values) {
 		for (int i = 0; i < setting->count; i++) {
 			if (SDL_strcasecmp(env, setting->values[i]) == 0) {
 				return i;
@@ -289,7 +293,7 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 		return 0;
 	}
 	vr_load();
-	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 52, cursor_row, VR_COUNT + 4);
+	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 44, cursor_row, VR_COUNT + 4);
 	XwaModernOptionsMenu_DrawTitle(&menu, "OpenXWA VR Options");
 
 	for (int i = 0; i < VR_COUNT; i++) {
