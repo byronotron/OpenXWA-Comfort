@@ -432,7 +432,7 @@ static void android_load_settings(void) {
 				  "#XWA_XR_HUD_DISTANCE=3.0\n"
 				  "#XWA_XR_HUD_SCALE=0.65\n"
 				  "#AERON_XR_SCREEN_DISTANCE=2.1\n"
-				  "#AERON_XR_SCREEN_WIDTH=2.625\n"
+				  "#AERON_XR_SCREEN_WIDTH=2.0\n"
 				  "#AERON_XR_THROTTLE_RATE=0.8\n"
 				  "# Skip the Quest render defaults (SSAO/MSAA/... follow the in-game options):\n"
 				  "#XWA_QUEST_PROFILE=0\n",

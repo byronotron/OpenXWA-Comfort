@@ -562,7 +562,7 @@ void XwaRemaster_Frame(int32_t delta_us) {
 		AeronCommandBuffer* env_cmd = Aeron_XrIsPresenting() ? Aeron_AcquireCommandBuffer() : NULL;
 		if (env_cmd) {
 			Aeron_GpuDebugPush(env_cmd, "OpenXWA VR environment");
-			(void)XwaRemasterFlight_RenderVrEnvironment(env_cmd);
+			(void)XwaRemasterFlight_RenderVrEnvironment(env_cmd, snap->scene_kind == XWA_SCENE_CUTSCENE);
 			g.vr_env_used = 1;
 			Aeron_GpuDebugPop(env_cmd);
 			if (!Aeron_SubmitCommandBuffer(env_cmd)) {

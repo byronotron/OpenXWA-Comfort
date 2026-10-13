@@ -137,8 +137,8 @@ static const char* const k_ids[CK_COUNT] = {
 	[CK_CMD] = "cmd",			[CK_MFD_LEFT] = "mfd_l",  [CK_MFD_RIGHT] = "mfd_r",
 };
 
-#define CK_GRAB_MARGIN_M 0.02f
-#define CK_GRAB_DEPTH_M 0.05f
+#define CK_GRAB_MARGIN_M (0.02f * 1.15f) /* 15 % more forgiving */
+#define CK_GRAB_DEPTH_M (0.05f * 1.15f)
 #define CK_GRIP_ON 0.6f
 #define CK_GRIP_OFF 0.35f
 
@@ -547,6 +547,65 @@ int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, int cmd
 		if (s_ck.latched_valid[CK_MFD_RIGHT] && s_ck.rect[CK_MFD_RIGHT][0] < cmd[2] &&
 			s_ck.rect[CK_MFD_RIGHT][2] > cmd[2]) {
 			s_ck.rect[CK_MFD_RIGHT][0] = cmd[2];
+		}
+	}
+
+	/* The radar pods' frames reach along the top bar towards the centre, so
+	 * their rectangles took in the speed/throttle, counters, clock and
+	 * message text too: a second copy of those readouts showed in the pods
+	 * (most visibly while throttling). Cut each pod away from every text
+	 * panel it overlaps, keeping the pod's own instruments (scope, power,
+	 * shields/beam) whole and as much of the frame as possible. */
+	for (int pod = CK_LEFT_POD; pod <= CK_RIGHT_POD; ++pod) {
+		if (!s_ck.latched_valid[pod]) {
+			continue;
+		}
+		float keep[4];
+		int keep_valid = 0;
+		for (int i = 1; i < 5 && k_widgets[pod][i] != XWA_HUD_WIDGET_COUNT; ++i) {
+			float b[4];
+			if (XwaRemasterHudFixed_WidgetBounds(k_widgets[pod][i], b)) {
+				ck_union(keep, &keep_valid, b);
+			}
+		}
+		static const int k_text[] = { CK_SPEED, CK_COUNTERS, CK_CLOCK, CK_MESSAGES, CK_MESSAGES_LOW, CK_CHARGE };
+		for (size_t t = 0; t < sizeof k_text / sizeof k_text[0]; ++t) {
+			const int q = k_text[t];
+			if (!s_ck.latched_valid[q]) {
+				continue;
+			}
+			float* r = s_ck.rect[pod];
+			const float m = 6.0f; /* both panels get 4 px of padding below */
+			const float o[4] = { s_ck.rect[q][0] - m, s_ck.rect[q][1] - m, s_ck.rect[q][2] + m, s_ck.rect[q][3] + m };
+			if (o[0] >= r[2] || o[2] <= r[0] || o[1] >= r[3] || o[3] <= r[1]) {
+				continue;
+			}
+			/* Candidate cuts: move one pod edge past the text panel. */
+			float best_area = -1.0f, cut[4];
+			for (int side = 0; side < 4; ++side) {
+				float c[4] = { r[0], r[1], r[2], r[3] };
+				switch (side) {
+				case 0: c[0] = o[2]; break; /* left edge right of it */
+				case 1: c[2] = o[0]; break; /* right edge left of it */
+				case 2: c[1] = o[3]; break; /* top edge below it */
+				default: c[3] = o[1]; break; /* bottom edge above it */
+				}
+				if (c[2] - c[0] < 8.0f || c[3] - c[1] < 8.0f) {
+					continue;
+				}
+				if (keep_valid && (keep[0] < c[0] - 0.5f || keep[1] < c[1] - 0.5f || keep[2] > c[2] + 0.5f ||
+								   keep[3] > c[3] + 0.5f)) {
+					continue;
+				}
+				const float area = (c[2] - c[0]) * (c[3] - c[1]);
+				if (area > best_area) {
+					best_area = area;
+					memcpy(cut, c, sizeof cut);
+				}
+			}
+			if (best_area > 0.0f) {
+				memcpy(r, cut, sizeof cut);
+			}
 		}
 	}
 

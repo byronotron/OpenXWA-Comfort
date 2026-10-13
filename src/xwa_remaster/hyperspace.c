@@ -592,6 +592,23 @@ int XwaRemasterHyperspace_Prepare(XwaRemasterHyperspace* h, AeronCommandBuffer* 
 	return h->draw_background || h->streak_vertex_count != 0;
 }
 
+void XwaRemasterHyperspace_SetEyeView(XwaRemasterHyperspace* h, const float view_proj[16],
+									  const XwaRemasterHyperspaceTunnelView* tunnel_view) {
+	if (!h || !view_proj) {
+		return;
+	}
+	memcpy(h->view_proj, view_proj, sizeof h->view_proj);
+	if (tunnel_view && h->draw_background && h->tunnel_uniform.projection[0] > 0.0f) {
+		h->tunnel_uniform.projection[0] = tunnel_view->tan_half_fov_x;
+		h->tunnel_uniform.projection[1] = tunnel_view->tan_half_fov_y;
+		h->tunnel_uniform.projection[2] = tunnel_view->proj_offset_x;
+		h->tunnel_uniform.projection[3] = tunnel_view->proj_offset_y;
+		memcpy(h->tunnel_uniform.tunnel_right, tunnel_view->right, 3 * sizeof(float));
+		memcpy(h->tunnel_uniform.tunnel_up, tunnel_view->up, 3 * sizeof(float));
+		memcpy(h->tunnel_uniform.tunnel_forward, tunnel_view->forward, 3 * sizeof(float));
+	}
+}
+
 void XwaRemasterHyperspace_Draw(AeronCommandBuffer* command_buffer, AeronRenderPass* pass, int rt_w, int rt_h,
 								void* user) {
 	XwaRemasterHyperspace* h = (XwaRemasterHyperspace*)user;

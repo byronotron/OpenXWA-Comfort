@@ -37,6 +37,11 @@ void XwaRemasterHyperspace_SetParams(XwaRemasterHyperspace* hyperspace,
 
 /* Builds the analytic background state and uploads state-derived streak geometry.
  * Must run before AeronScene_Render opens its render passes. */
+/* VR: re-aim an already prepared frame at another eye (its view-projection
+ * and the tunnel axes / projection in that eye's view space) without
+ * rebuilding or re-uploading anything. */
+void XwaRemasterHyperspace_SetEyeView(XwaRemasterHyperspace* hyperspace, const float view_proj[16],
+									  const XwaRemasterHyperspaceTunnelView* tunnel_view);
 int XwaRemasterHyperspace_Prepare(XwaRemasterHyperspace* hyperspace, AeronCommandBuffer* command_buffer,
 								  const XwaSnapshot* snapshot, const float view_proj[16],
 								  const float camera_rows[9], int rt_w, int rt_h,

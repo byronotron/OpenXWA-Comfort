@@ -237,7 +237,9 @@ int XwaRemasterFlight_StereoSize(const XwaSnapshot* snap, int* width, int* heigh
  * and commits it as the virtual screen's backdrop. Returns 0 (nothing
  * committed) when not presenting in stereo or the environment is off or
  * not loaded yet. `cmd` must have no open pass. */
-int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd);
+/* `dimmed`: a film (studio logos, cutscenes) is on the screen; the
+ * environment eases to half brightness (XWA_XR_ENV_FILM_DIM) and back. */
+int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed);
 /* Frees the environment's meshes (on entering flight). */
 void XwaRemasterFlight_ReleaseVrEnvironment(void);
 

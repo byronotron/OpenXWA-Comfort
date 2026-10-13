@@ -32,6 +32,7 @@
 #include "xwa_runtime/runtime/presentation.h"
 #include "xwa_runtime/timing/host_clock.h"
 
+#include <SDL3/SDL_timer.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -3494,6 +3495,12 @@ static void fl_add_ambient_cube(XwaShipAmbientCube* base, const XwaShipAmbientCu
 	}
 }
 
+static int fl_xr_stereo_eligible(const XwaFlightCamera* cam);
+static float fl_xr_env(const char* name, float fallback);
+static void fl_xr_eye_camera(const AeronSceneCamera* base, const AeronXrView* v, AeronSceneCamera* out);
+static int fl_xr_output_eye(AeronCommandBuffer* cmd, AeronRenderTarget* target, AeronTextureFormat format,
+							AeronTexture* bloom_tex);
+
 static AeronTexture* fl_render_hyperspace(AeronCommandBuffer* cmd, const XwaSnapshot* snap,
 										  XwaRemasterAssets* assets, const XwaRemasterFlightView* flight_view,
 										  uint64_t host_time_us, int direct_present, int preview) {
@@ -3504,6 +3511,27 @@ static AeronTexture* fl_render_hyperspace(AeronCommandBuffer* cmd, const XwaSnap
 						player_local, &player_found);
 	XwaRemasterHyperspaceTunnelView tunnel_view;
 	fl_hyper_build_tunnel_view(&flight_view->camera, player_bw, player_found, &tunnel_view);
+	/* VR: the jump in the cockpit, per eye (the caller sized the targets to
+	 * the eyes). The tunnel and streaks are re-aimed for each eye; the
+	 * cockpit is an ordinary scene submission. */
+	AeronXrStereoFrame xr_frame;
+	AeronSceneCamera xr_eyes[2];
+	float eye_vp[2][16];
+	XwaRemasterHyperspaceTunnelView eye_tunnel[2];
+	const int stereo = fl_xr_stereo_eligible(&snap->flight_camera) && Aeron_XrStereoBegin(&xr_frame) &&
+					   xr_frame.width == s.rt_w && xr_frame.height == s.rt_h;
+	if (stereo) {
+		float base_rows[9];
+		memcpy(base_rows, s.crows, sizeof base_rows);
+		for (int e = 0; e < 2; e++) {
+			fl_xr_eye_camera(&flight_view->camera, &xr_frame.views[e], &xr_eyes[e]);
+			AeronScene_ComputeViewProj(&xr_eyes[e], eye_vp[e]);
+			/* The tunnel axes are expressed in the eye's view space. */
+			fl_quat_to_mat3(xr_eyes[e].ori, s.crows);
+			fl_hyper_build_tunnel_view(&xr_eyes[e], player_bw, player_found, &eye_tunnel[e]);
+		}
+		memcpy(s.crows, base_rows, sizeof base_rows);
+	}
 
 	float preview_time = 0.0f;
 	if (preview && host_time_us >= s.hyperspace_preview_epoch_us) {
@@ -3511,8 +3539,9 @@ static AeronTexture* fl_render_hyperspace(AeronCommandBuffer* cmd, const XwaSnap
 		preview_time = (float)fmod(elapsed_seconds, 4096.0);
 	}
 	if (!s.hyperspace ||
-		!XwaRemasterHyperspace_Prepare(s.hyperspace, cmd, snap, flight_view->view_proj, s.crows,
-									   s.rt_w, s.rt_h, preview, preview_time, &tunnel_view)) {
+		!XwaRemasterHyperspace_Prepare(s.hyperspace, cmd, snap, stereo ? eye_vp[0] : flight_view->view_proj,
+									   s.crows, s.rt_w, s.rt_h, preview, preview_time,
+									   stereo ? &eye_tunnel[0] : &tunnel_view)) {
 		return NULL;
 	}
 	XwaRemasterHyperspaceLighting hyperspace_lighting;
@@ -3530,7 +3559,7 @@ static AeronTexture* fl_render_hyperspace(AeronCommandBuffer* cmd, const XwaSnap
 	 * temporal reconstruction for this special scene and reset history
 	 * before returning to ordinary flight. */
 	fl_set_temporal(host_time_us, 0);
-	if (!AeronScene_Begin(s.scene, &flight_view->camera)) {
+	if (!AeronScene_Begin(s.scene, stereo ? &xr_eyes[0] : &flight_view->camera)) {
 		Aeron_CommandBufferSetFailure(cmd, "Hyperspace scene initialization failed");
 		s.snap = NULL;
 		return NULL;
@@ -3594,8 +3623,25 @@ static AeronTexture* fl_render_hyperspace(AeronCommandBuffer* cmd, const XwaSnap
 							  phase == XWA_HYPERSPACE_TUNNEL && lighting_ready
 								  ? &hyperspace_lighting.environment : NULL);
 	fl_submit_hyperspace_cockpit(cmd, assets, snap, &snap->flight_camera, anchor_bw, anchor_found, player_f);
+	if (stereo) {
+		/* Your hands and the stick stay with you through the jump. */
+		const float vr_units = AERON_OPT_UNITS_PER_METER * fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f);
+		XwaVrStick_Update();
+		XwaVrGloves_Submit(s.scene, cmd, s.crows, flight_view->camera.pos, vr_units);
+		XwaVrStick_Submit(s.scene, cmd, s.crows, flight_view->camera.pos, vr_units);
+	}
 
-	if (!AeronScene_Render(s.scene, cmd)) {
+	int render_ok = AeronScene_Render(s.scene, cmd);
+	if (render_ok && stereo) {
+		/* Left eye out, then the same submissions for the right eye. */
+		render_ok = fl_xr_output_eye(cmd, xr_frame.eye_targets[0], xr_frame.format, NULL) &&
+					AeronScene_SetCamera(s.scene, &xr_eyes[1]);
+		if (render_ok) {
+			XwaRemasterHyperspace_SetEyeView(s.hyperspace, eye_vp[1], &eye_tunnel[1]);
+			render_ok = AeronScene_Render(s.scene, cmd);
+		}
+	}
+	if (!render_ok) {
 		AeronScene_SetPassHook(s.scene, AERON_SCENE_HOOK_BEFORE_OPAQUE, NULL, NULL);
 		s.before_opaque_mode = FL_BEFORE_OPAQUE_NONE;
 		s.snap = NULL;
@@ -3604,6 +3650,22 @@ static AeronTexture* fl_render_hyperspace(AeronCommandBuffer* cmd, const XwaSnap
 	AeronScene_SetPassHook(s.scene, AERON_SCENE_HOOK_BEFORE_OPAQUE, NULL, NULL);
 	s.before_opaque_mode = FL_BEFORE_OPAQUE_NONE;
 	s.snap = NULL;
+	if (stereo) {
+		AeronTexture* out;
+		if (Aeron_HasDesktopMirror()) {
+			out = fl_present(cmd, 0);
+		} else {
+			s.present_scene_tex = Aeron_RenderTargetGetTexture(AeronScene_SceneRt(s.scene));
+			s.present_bloom_tex = NULL;
+			s.direct_ready = 0;
+			out = s.present_scene_tex;
+		}
+		/* No HUD in the jump: just the eyes. */
+		if (out && fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format, s.present_bloom_tex)) {
+			Aeron_XrStereoCommitHuds(NULL, NULL);
+		}
+		return out;
+	}
 	return fl_present(cmd, direct_present);
 }
 
@@ -3802,7 +3864,12 @@ static int fl_xr_stereo_eligible(const XwaFlightCamera* cam) {
 	if (env && env[0] == '0') {
 		return 0;
 	}
-	return cam && !cam->map_mode && !cam->hyperspace_phase && !s.hyperspace_preview && !cam->film_overlay;
+	/* Hyperspace renders per eye too (fl_render_hyperspace); XWA_XR_HYPER_STEREO=0
+	 * keeps the old flat-screen jump. */
+	const char* hyper = getenv("XWA_XR_HYPER_STEREO");
+	const int hyper_ok = !(hyper && hyper[0] == '0');
+	return cam && !cam->map_mode && (hyper_ok || (!cam->hyperspace_phase && !s.hyperspace_preview)) &&
+		   !cam->film_overlay;
 }
 
 int XwaRemasterFlight_StereoSize(const XwaSnapshot* snap, int* width, int* height) {
@@ -5016,7 +5083,31 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 /* VR environment around the 2D screens: the carrier hangar in stereo as
  * the backdrop of the virtual screen (see vr_env.h). Reuses the flight
  * scene, which is idle outside flight. */
-int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd) {
+/* Film dimming of the VR environment: 0 = full, 1 = dimmed, eased over
+ * ~0.8 s each way. */
+static float s_vr_env_dim;
+static uint64_t s_vr_env_dim_ns;
+
+static float fl_vr_env_dim_step(int dimmed) {
+	const uint64_t now = SDL_GetTicksNS();
+	float dt = s_vr_env_dim_ns ? (float)(now - s_vr_env_dim_ns) * 1.0e-9f : 0.0f;
+	s_vr_env_dim_ns = now;
+	if (dt > 0.1f) {
+		dt = 0.1f; /* resuming after a pause: no jump */
+	}
+	const float target = dimmed ? 1.0f : 0.0f;
+	const float step = dt / 0.8f;
+	if (s_vr_env_dim < target) {
+		s_vr_env_dim = fminf(target, s_vr_env_dim + step);
+	} else {
+		s_vr_env_dim = fmaxf(target, s_vr_env_dim - step);
+	}
+	/* Smoothstep for a soft start and end. */
+	return s_vr_env_dim * s_vr_env_dim * (3.0f - 2.0f * s_vr_env_dim);
+}
+
+int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
+	const float film_dim = fl_vr_env_dim_step(dimmed);
 	AeronXrStereoFrame xr_frame;
 	if (!cmd || !XwaVrEnv_Enabled() || !Aeron_XrStereoBegin(&xr_frame)) {
 		XwaVrGloves_Idle();
@@ -5149,7 +5240,9 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd) {
 		fminf(fmaxf(space ? fl_xr_env("XWA_XR_ENDOR_BRIGHTNESS", 1.0f) : fl_xr_env("XWA_XR_ENV_BRIGHTNESS", 0.4f),
 					0.0f),
 			  1.0f);
-	s_xr_eye_gain = powf(brightness, 2.2f);
+	/* Films: the displayed brightness eases down to XWA_XR_ENV_FILM_DIM (half). */
+	const float film_level = fminf(fmaxf(fl_xr_env("XWA_XR_ENV_FILM_DIM", 0.5f), 0.0f), 1.0f);
+	s_xr_eye_gain = powf(brightness * (1.0f - film_dim * (1.0f - film_level)), 2.2f);
 	int ok = AeronScene_Render(s.scene, cmd) &&
 			 fl_xr_output_eye(cmd, xr_frame.eye_targets[0], xr_frame.format, NULL) &&
 			 AeronScene_SetCamera(s.scene, &eyes[1]) && AeronScene_Render(s.scene, cmd) &&

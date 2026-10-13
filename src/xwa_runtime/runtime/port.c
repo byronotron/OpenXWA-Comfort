@@ -1,5 +1,7 @@
 #include "xwa_runtime/runtime/port.h"
 
+#include <SDL3/SDL_timer.h>
+
 #include "aeron/aeron.h"
 #include "aeron/compat/ddraw.h"
 #include "aeron/compat/host.h"
@@ -245,20 +247,94 @@ static void XwaPort_VrButtonTick(void) {
 	}
 }
 
+static CraftData* XwaPort_VrConsoleCraft(void);
+static int XwaPort_VrChordEligible(int* hyper);
+
+/* Both triggers pulled together (within VR_CHORD_WINDOW_MS): lands in the
+ * hangar when the game offers it ("press Space" near a mothership's bay)
+ * and jumps to hyperspace at a buoy. While either is on offer the left
+ * trigger's own action (cycle warheads) waits for its release, so the
+ * chord does not also switch warheads. */
+#define VR_CHORD_PULL 0.75f
+#define VR_CHORD_RELEASE 0.3f
+#define VR_CHORD_WINDOW_MS 350u
+
+static struct {
+	int down[2];
+	uint64_t down_ms[2];
+	int fired;           /* chord fired; wait for both triggers released */
+	int warhead_pending; /* deferred left-trigger press */
+} g_vrChord;
+
+static void XwaPort_UpdateVrChord(int enabled) {
+	AeronXrHand hand[2];
+	int hyper = 0;
+	const int eligible = enabled && XwaPort_VrChordEligible(&hyper);
+	const uint64_t now = SDL_GetTicks();
+	for (int h = 0; h < 2; ++h) {
+		float t = 0.0f;
+		if (Aeron_XrGetHand(h, &hand[h])) {
+			t = hand[h].trigger;
+		}
+		if (!g_vrChord.down[h] && t >= VR_CHORD_PULL) {
+			g_vrChord.down[h] = 1;
+			g_vrChord.down_ms[h] = now;
+		} else if (g_vrChord.down[h] && t < VR_CHORD_RELEASE) {
+			g_vrChord.down[h] = 0;
+			if (h == 0 && g_vrChord.warhead_pending) {
+				/* A plain left-trigger pull after all. */
+				if (!g_vrChord.fired) {
+					XwaPort_QueueFlightActionKey(g_xwaVrButtonBindings[AERON_XR_BUTTON_LEFT_TRIGGER].plain);
+				}
+				g_vrChord.warhead_pending = 0;
+			}
+		}
+	}
+	if (!g_vrChord.down[0] && !g_vrChord.down[1]) {
+		g_vrChord.fired = 0;
+	}
+	if (!eligible || g_vrChord.fired || !g_vrChord.down[0] || !g_vrChord.down[1]) {
+		return;
+	}
+	const uint64_t a = g_vrChord.down_ms[0], b = g_vrChord.down_ms[1];
+	if ((a > b ? a - b : b - a) > VR_CHORD_WINDOW_MS) {
+		return;
+	}
+	g_vrChord.fired = 1;
+	g_vrChord.warhead_pending = 0;
+	if (hyper) {
+		XwaPort_VrConsoleAction(XWA_VRC_HYPERSPACE, 0);
+	} else {
+		XwaPort_QueueFlightActionKey(KEY_SPACE);
+	}
+	XwaPort_VrButtonTick();
+}
+
 static void XwaPort_UpdateVrFlightButtons(int enabled) {
 	AeronXrButton button;
 	int           shifted;
+	int           hyper = 0;
 	enabled = enabled && Aeron_XrIsPresenting();
 	if (enabled != g_xwaPortVrFlightButtons) {
 		g_xwaPortVrFlightButtons = enabled;
 		Aeron_XrSetFlightButtons(enabled);
 	}
+	XwaPort_UpdateVrChord(enabled);
 	if (!enabled) {
+		g_vrChord.warhead_pending = 0;
 		return;
 	}
+	const int chord_offered = XwaPort_VrChordEligible(&hyper);
 	while (Aeron_XrPollButton(&button, &shifted)) {
 		uint16_t key;
 		if ((int)button < 0 || (int)button >= AERON_XR_BUTTON_COUNT) {
+			continue;
+		}
+		if (button == AERON_XR_BUTTON_LEFT_TRIGGER && !shifted && chord_offered) {
+			/* Decided on release (or dropped by the chord). */
+			if (!g_vrChord.fired) {
+				g_vrChord.warhead_pending = 1;
+			}
 			continue;
 		}
 		key = shifted ? g_xwaVrButtonBindings[button].shifted : g_xwaVrButtonBindings[button].plain;
@@ -332,6 +408,27 @@ void XwaPort_GetVrConsoleState(XwaVrConsoleState* out) {
 }
 
 int XwaPort_VrInFlight(void) { return XwaPort_VrConsoleCraft() != NULL; }
+
+/* The two-trigger chord is on offer: landing in a hangar (the game's
+ * pending "Space" action 2 near a mothership's bay) or a hyperspace jump
+ * (`*hyper`, at a buoy with a working hyperdrive). */
+static int XwaPort_VrChordEligible(int* hyper) {
+	const CraftData* craft = XwaPort_VrConsoleCraft();
+	*hyper = 0;
+	if (!craft) {
+		return 0;
+	}
+	const PlayerData* player = &g_players[g_localPlayer];
+	if (player->hyperspacePhase != 0) {
+		return 0;
+	}
+	if ((craft->systemFlags & 0x80u) && (craft->workingSubsystems & 0x80u) &&
+		(player->pendingActionId == 10 || collide_PlayerHyperBuoyRegion(g_localPlayer) >= 0)) {
+		*hyper = 1;
+		return 1;
+	}
+	return player->pendingActionId == 2;
+}
 
 /* A line of our own in the in-flight message pane (where "entering area"
  * reports appear), e.g. the voice command confirmations. Text in [brackets]
@@ -457,12 +554,64 @@ void XwaPort_VrConsoleAction(XwaVrConsoleAction action, int arg) {
 	}
 }
 
+/* The game's own key hints (strings.txt) rewritten for the Touch
+ * controllers, applied once the headset presents. In flight Space is
+ * left grip + X, landing and hyperspace also take both triggers; the
+ * hangar menus run on the thumbstick, A (Enter), B (back) and X (Space). */
+static void XwaPort_ApplyVrStringHints(void) {
+	static int applied;
+	if (applied) {
+		return;
+	}
+	applied = 1;
+	static const struct {
+		int id;
+		const char* text;
+	} k_flight[] = {
+		{ MSG_ASK_ABOUT_HYPER, "\x03" "Pull [both triggers] to hyperspace to [*]" },
+		{ MSG_HANGAR_TRACTOR, "\x04" "Pull [both triggers] to activate tractor beam and land" },
+		{ MSG_END_MISSION, "\x04" "Press [grip + X] to end mission" },
+		{ MSG_END_MISSION_PENALTY, "\x04" "Leaving now is [2000] point penalty! [Grip + X] to quit anyway" },
+		{ MSG_END_MISSION_INCOMPLETE, "\x04" "Leaving early, score incomplete! [Grip + X] to quit anyway" },
+		{ MSG_END_MISSION_DISCONNECT, "\x04" "WARNING! [Grip + X] will disconnect from the host!" },
+		{ MSG_END_MISSION_ABORT, "\x04" "WARNING! You are the host! [Grip + X] will abort this game!" },
+		{ MSG_REINFORCE_CONFIRM, "\x04" "Press [grip + X] to confirm reinforcement request" },
+		{ MSG_USE_MY_TARGET, "\x04" "From [*].  Attack my target!  [Grip + X] to target" },
+		{ MSG_IGNORE_MY_TARGET, "\x04" "From [*].  Ignore my target!  [Grip + X] to ignore" },
+		{ MSG_HEAD_HOME, "\x04" "From [*].  Head home!  [Grip + X] to comply" },
+		{ MSG_WAIT_FOR_ORDERS, "\x04" "From [*].  Wait for orders!  [Grip + X] to wait" },
+		{ MSG_GO_AHEAD, "\x04" "From [*].  Go ahead!  [Grip + X] to proceed" },
+		{ MSG_EVADE, "\x04" "From [*].  Evade!  [Grip + X] to target attacker" },
+		{ MSG_COVER_ME_ATTACKER, "\x04" "From [*].  Cover me!  [Grip + X] to target attacker" },
+		{ MSG_COVER_ME, "\x04" "From [*].  Cover me!  [Grip + X] to target me" },
+		{ MSG_HANGAR_RESTART, "\x04" "Press [grip + X] to restart mission" },
+		{ MSG_MISSION_PAUSED, "\x03" "Mission paused.  Press the [menu button] to continue" },
+	};
+	for (size_t i = 0; i < sizeof k_flight / sizeof k_flight[0]; ++i) {
+		if (k_flight[i].id >= 0 && k_flight[i].id < 538) {
+			g_strInFlightMessages[k_flight[i].id] = (char*)k_flight[i].text;
+		}
+	}
+	g_strPressSpaceBar = (char*)"Press grip + X to continue";
+	g_strHangarMiscStrings[HANGAR_MISC_ARROWS_TO_MOVE] = (char*)"Use the THUMBSTICK and A to navigate the menu.";
+	g_strHangarMiscStrings[HANGAR_MISC_NUMBER_KEYS_FOR_CAMERA] = (char*)"Look around: you are in the hangar.";
+	g_strHangarMiscStrings[HANGAR_MISC_ZERO_FOR_COCKPIT] = (char*)"Press B to go back in the menus.";
+	g_strHangarMiscStrings[HANGAR_MISC_SPACE_TO_LAUNCH] = (char*)"When you are ready, press X to launch.";
+	/* Proving grounds level 7 / 8 text: "the O key" (nearest objective). */
+	g_strProvingGroundDescs[8 * 6 + 1] = (char*)"droid from the smelter room. Grip + A";
+	g_strProvingGroundDescs[8 * 7 + 6] = (char*)"finding the droid, use grip + A to ";
+	Aeron_LogInfo("xwa", "VR: game key hints rewritten for the Touch controllers");
+}
+
 /* Picks the VR controller mode for this frame: keyboard-only menus in the
  * hangar, bindable buttons in flight, neither elsewhere (the laser pointer
  * handles the frontend). */
 static void XwaPort_UpdateVrModes(void) {
 	const int flight = XwaFlightTask_IsActive();
 	const int modal  = flight && FlightDisplay_IsFrontendModalActive();
+	if (Aeron_XrIsPresenting()) {
+		XwaPort_ApplyVrStringHints();
+	}
 	if (!Aeron_XrIsPresenting()) {
 		Aeron_XrSetMenuKeys(0);
 		XwaPort_UpdateVrFlightButtons(0);

@@ -34,10 +34,11 @@
 
 /* Grab zones: the left and right ends of the console, GRAB_X metres to
  * either side of each edge, a little above/below and in front/behind. */
-#define VC_GRAB_X_M 0.06f
-#define VC_GRAB_Y_M 0.05f
-#define VC_GRAB_FRONT_M 0.09f
-#define VC_GRAB_BACK_M 0.07f
+#define VC_GRAB_FORGIVE 1.15f /* zones 15 % larger than the original tuning */
+#define VC_GRAB_X_M (0.06f * VC_GRAB_FORGIVE)
+#define VC_GRAB_Y_M (0.05f * VC_GRAB_FORGIVE)
+#define VC_GRAB_FRONT_M (0.09f * VC_GRAB_FORGIVE)
+#define VC_GRAB_BACK_M (0.07f * VC_GRAB_FORGIVE)
 /* Button card: a reference of the controller layout, 40 x 30 cm, that
  * appears at every mission start to the right, just out of view. */
 #define VC_CARD_W_M 0.40f
@@ -1865,7 +1866,7 @@ static const VcCardLabel k_card_right[] = {
 	{ CTL_LOWER, "A: nearest enemy (R)", "grip+: nearest objective (O)", 232.0f },
 	{ CTL_MENU, "Meta: system menu", NULL, 296.0f },
 	{ CTL_GRIP, "Target in sights", "on the flight stick: fly with it", 380.0f },
-	{ CTL_TRIGGER, "Fire", NULL, 452.0f },
+	{ CTL_TRIGGER, "Fire", "both triggers: land / hyperspace", 452.0f },
 };
 
 /* Smooth open/closed path through `pts` (Catmull-Rom), offset and

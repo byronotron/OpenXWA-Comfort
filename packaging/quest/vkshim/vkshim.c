@@ -38,6 +38,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static pthread_mutex_t g_log_lock = PTHREAD_MUTEX_INITIALIZER;
 static char g_log[4096];
@@ -110,6 +111,8 @@ static struct {
 	PFN_vkCreateRenderPass CreateRenderPass;
 	PFN_vkDestroyRenderPass DestroyRenderPass;
 	PFN_vkCreateFramebuffer CreateFramebuffer;
+	PFN_vkDestroyFramebuffer DestroyFramebuffer;
+	PFN_vkCmdBeginRenderPass CmdBeginRenderPass;
 	PFN_vkDestroyDevice DestroyDevice;
 	PFN_vkCreateImage CreateImage;
 	PFN_vkDestroyImage DestroyImage;
@@ -152,6 +155,14 @@ typedef struct ShimMap {
 	uint32_t w, h; /* texels */
 } ShimMap;
 static ShimMap g_full, g_eye;
+
+/* Framebuffers that carry the foveated map, and how often a pass begins on
+ * one (logged every few seconds: proof the GPU gets the map). */
+#define SHIM_MAX_EYE_FBS 64
+static VkFramebuffer g_eye_fbs[SHIM_MAX_EYE_FBS];
+static int g_eye_fb_count;
+static unsigned g_eye_begins, g_other_begins;
+static double g_count_since;
 static int g_eye_w, g_eye_h, g_eye_tried, g_logged_eye;
 
 /* ---- Helpers ------------------------------------------------------------ */
@@ -172,6 +183,9 @@ static int shim_level(void) {
 	}
 	if (strcmp(v, "medium") == 0 || v[0] == '2') {
 		return 2;
+	}
+	if (strcmp(v, "test") == 0 || v[0] == '4') {
+		return 4; /* deliberately extreme, to see that it works */
 	}
 	return 1;
 }
@@ -354,17 +368,19 @@ static int map_create(ShimMap* m, uint32_t w, uint32_t h, const uint8_t* texels)
 /* Density (255 = every pixel, 128 = every 2nd, 64 = every 4th) of each zone
  * by level: zone 0 is the centre. Values are R = horizontal, G = vertical. */
 static void level_zones(int level, float radius[3], uint8_t dens[4][2]) {
-	static const float k_r[4][3] = {
+	static const float k_r[5][3] = {
 		{ 9.0f, 9.0f, 9.0f },    /* off (unused) */
 		{ 0.62f, 0.85f, 9.0f },  /* low */
 		{ 0.52f, 0.72f, 0.92f }, /* medium */
 		{ 0.42f, 0.60f, 0.80f }, /* high */
+		{ 0.18f, 0.30f, 0.45f }, /* test: blocky beyond a small centre */
 	};
-	static const uint8_t k_d[4][4][2] = {
+	static const uint8_t k_d[5][4][2] = {
 		{ { 255, 255 }, { 255, 255 }, { 255, 255 }, { 255, 255 } },
 		{ { 255, 255 }, { 128, 255 }, { 128, 128 }, { 128, 128 } },
 		{ { 255, 255 }, { 128, 255 }, { 128, 128 }, { 64, 128 } },
 		{ { 255, 255 }, { 128, 128 }, { 64, 128 }, { 64, 64 } },
+		{ { 255, 255 }, { 64, 64 }, { 64, 64 }, { 64, 64 } },
 	};
 	memcpy(radius, k_r[level], sizeof k_r[level]);
 	memcpy(dens, k_d[level], sizeof k_d[level]);
@@ -612,6 +628,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateDevice(VkPhysicalDevice phys, c
 	DEV_LOAD(GetDeviceQueue);
 	DEV_LOAD(QueueSubmit);
 	DEV_LOAD(QueueWaitIdle);
+	DEV_LOAD(DestroyFramebuffer);
+	DEV_LOAD(CmdBeginRenderPass);
 	g_dev.active = g_dev.CreateRenderPass && g_dev.CreateFramebuffer && g_dev.CreateImage && g_dev.QueueSubmit &&
 				   g_dev.CmdCopyBufferToImage && g_dev.GetDeviceQueue;
 	LOGI("foveation %s (map texel %ux%u)", g_dev.active ? "ready" : "unavailable", g_dev.texel.width,
@@ -627,6 +645,7 @@ static VKAPI_ATTR void VKAPI_CALL shim_DestroyDevice(VkDevice device, const VkAl
 		map_destroy(&g_full);
 		g_pass_count = 0;
 		g_eye_tried = 0;
+		g_eye_fb_count = 0;
 		memset(&g_dev, 0, sizeof g_dev);
 		pthread_mutex_unlock(&g_lock);
 		real(device, a);
@@ -741,7 +760,65 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateFramebuffer(VkDevice device, co
 		LOGI("framebuffer %ux%u for a multisampled pass: %s density map", ci->width, ci->height,
 			 map == &g_eye ? "foveated" : "full");
 	}
-	return g_dev.CreateFramebuffer(device, &mine, a, out);
+	const VkResult r = g_dev.CreateFramebuffer(device, &mine, a, out);
+	if (r == VK_SUCCESS && map == &g_eye) {
+		pthread_mutex_lock(&g_lock);
+		if (g_eye_fb_count < SHIM_MAX_EYE_FBS) {
+			g_eye_fbs[g_eye_fb_count++] = *out;
+		}
+		pthread_mutex_unlock(&g_lock);
+	}
+	return r;
+}
+
+static VKAPI_ATTR void VKAPI_CALL shim_DestroyFramebuffer(VkDevice device, VkFramebuffer fb,
+														  const VkAllocationCallbacks* a) {
+	pthread_mutex_lock(&g_lock);
+	for (int i = 0; i < g_eye_fb_count; ++i) {
+		if (g_eye_fbs[i] == fb) {
+			g_eye_fbs[i] = g_eye_fbs[--g_eye_fb_count];
+			break;
+		}
+	}
+	pthread_mutex_unlock(&g_lock);
+	PFN_vkDestroyFramebuffer real = device == g_dev.device && g_dev.DestroyFramebuffer
+										? g_dev.DestroyFramebuffer
+										: (PFN_vkDestroyFramebuffer)g_real_gipa(g_instance, "vkDestroyFramebuffer");
+	real(device, fb, a);
+}
+
+static double shim_now(void) {
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (double)ts.tv_sec + 1.0e-9 * (double)ts.tv_nsec;
+}
+
+static VKAPI_ATTR void VKAPI_CALL shim_CmdBeginRenderPass(VkCommandBuffer cb, const VkRenderPassBeginInfo* info,
+														  VkSubpassContents contents) {
+	int eye = 0;
+	pthread_mutex_lock(&g_lock);
+	for (int i = 0; i < g_eye_fb_count; ++i) {
+		if (g_eye_fbs[i] == info->framebuffer) {
+			eye = 1;
+			break;
+		}
+	}
+	if (eye) {
+		g_eye_begins++;
+	} else {
+		g_other_begins++;
+	}
+	const double now = shim_now();
+	if (g_count_since == 0.0) {
+		g_count_since = now;
+	} else if (now - g_count_since >= 10.0) {
+		LOGI("last %.0f s: %u render passes on the foveated eye framebuffers, %u other passes", now - g_count_since,
+			 g_eye_begins, g_other_begins);
+		g_eye_begins = g_other_begins = 0;
+		g_count_since = now;
+	}
+	pthread_mutex_unlock(&g_lock);
+	g_dev.CmdBeginRenderPass(cb, info, contents);
 }
 
 /* ---- Dispatch ----------------------------------------------------------- */
@@ -755,6 +832,12 @@ static PFN_vkVoidFunction shim_device_hook(const char* name) {
 	}
 	if (strcmp(name, "vkCreateFramebuffer") == 0) {
 		return (PFN_vkVoidFunction)shim_CreateFramebuffer;
+	}
+	if (strcmp(name, "vkDestroyFramebuffer") == 0) {
+		return (PFN_vkVoidFunction)shim_DestroyFramebuffer;
+	}
+	if (strcmp(name, "vkCmdBeginRenderPass") == 0 && g_dev.CmdBeginRenderPass) {
+		return (PFN_vkVoidFunction)shim_CmdBeginRenderPass;
 	}
 	if (strcmp(name, "vkDestroyDevice") == 0) {
 		return (PFN_vkVoidFunction)shim_DestroyDevice;
