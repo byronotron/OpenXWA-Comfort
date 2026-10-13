@@ -398,6 +398,8 @@ static void android_load_settings(void) {
 				  "# Left thumbstick: degrees either side of straight forward/back that\n"
 				  "# move the throttle; everywhere else rolls:\n"
 				  "#AERON_XR_THROTTLE_ZONE=30\n"
+				  "# 1 = right thumbstick back pushes the nose down (inverted pitch):\n"
+				  "#AERON_XR_INVERT_PITCH=0\n"
 				  "# Helmet HUD distance in metres and size:\n"
 				  "#XWA_XR_HUD_DISTANCE=3.0\n"
 				  "#XWA_XR_HUD_SCALE=0.65\n"

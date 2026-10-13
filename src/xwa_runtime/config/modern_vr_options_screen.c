@@ -34,6 +34,8 @@ enum {
 	VR_CONSOLE,
 	VR_GLOVES,
 	VR_FLIGHT_STICK,
+	VR_STICK_TWIST,
+	VR_INVERT_PITCH,
 	VR_BUTTON_CARD,
 	VR_ENVIRONMENT,
 	VR_RESOLUTION,
@@ -64,6 +66,8 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "XWA_XR_CONSOLE", "Lap Console", k_toggle_texts, k_toggle_values, 2, 1, 88 },
 	{ "XWA_XR_GLOVES", "Pilot Gloves", k_toggle_texts, k_toggle_values, 2, 1, 89 },
 	{ "XWA_XR_FLIGHT_STICK", "Flight Stick", k_toggle_texts, k_toggle_values, 2, 1, 94 },
+	{ "XWA_XR_STICK_TWIST", "Stick Twist Rolls", k_toggle_texts, k_toggle_values, 2, 0, 96 },
+	{ "AERON_XR_INVERT_PITCH", "Invert Thumbstick Pitch", k_toggle_texts, k_toggle_values, 2, 0, 97 },
 	{ "XWA_XR_BUTTON_CARD", "Button Card", k_toggle_texts, k_toggle_values, 2, 1, 92 },
 	{ "XWA_XR_ENVIRONMENT", "Menu Hangar", k_toggle_texts, k_toggle_values, 2, 1, 90 },
 	{ "AERON_XR_RESOLUTION_SCALE", "Resolution (restart)", k_res_texts, k_res_values, 6, 2, 86 },
@@ -133,10 +137,10 @@ static void vr_write_cfg(const char* const* keys, const char* const* values, int
 	char* text = NULL;
 	size_t length = 0;
 	FILE* f;
-	int has_active[16] = { 0 };
-	int written[16] = { 0 };
+	int has_active[32] = { 0 };
+	int written[32] = { 0 };
 
-	if (count <= 0 || count > 16 || !external || !external[0]) {
+	if (count <= 0 || count > 32 || !external || !external[0]) {
 		return;
 	}
 	snprintf(path, sizeof path, "%s/openxwa-quest.cfg", external);
@@ -275,13 +279,14 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 		return 0;
 	}
 	vr_load();
-	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 110, cursor_row, VR_COUNT + 4);
+	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 70, cursor_row, VR_COUNT + 4);
 	XwaModernOptionsMenu_DrawTitle(&menu, "OpenXWA VR Options");
 
 	for (int i = 0; i < VR_COUNT; i++) {
 		const VrSetting* setting = &k_settings[i];
 		/* The helmet HUD size only applies to the helmet layout. */
-		const int disabled = i == VR_HUD_SIZE && g_vr.index[VR_HUD_LAYOUT] != 1;
+		const int disabled = (i == VR_HUD_SIZE && g_vr.index[VR_HUD_LAYOUT] != 1) ||
+							 (i == VR_STICK_TWIST && g_vr.index[VR_FLIGHT_STICK] == 0);
 		uint8_t value = g_vr.index[i];
 		if (XwaModernOptionsMenu_DrawCycleU8(&menu, &value, setting->label, setting->texts, setting->count,
 											 setting->button_id, disabled) &&
