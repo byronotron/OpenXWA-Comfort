@@ -479,8 +479,9 @@ static void shim_frame(void) {
 			}
 		}
 	}
-	/* Proven: foveating for a while, or running for a minute. */
-	if (g_shim_guard[0] && ((g_shim_foveating && g_shim_foveating() && ++frames > 300) || frames++ > 4000)) {
+	/* Proven: the device and the first frames came up (a broken shim fails
+	 * there; the menus need not use the foveated pass at all). */
+	if (g_shim_guard[0] && ++frames > 300) {
 		remove(g_shim_guard);
 		g_shim_guard[0] = '\0';
 	}

@@ -313,6 +313,9 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 				SDL_setenv_unsafe("AERON_XR_PERF_LEVEL", value ? "high" : "0", 1);
 			}
 			Aeron_LogInfo("xwa.config", "VR option %s=%s", setting->key, setting->values[value]);
+			/* Saved at once: the "(restart)" options are often changed right
+			 * before quitting, without backing out of this screen. */
+			XwaModernVrOptions_SaveValue(setting->key, setting->values[value]);
 		}
 		menu.y -= 2; /* 18 px rows: the list has outgrown 20 */
 	}
