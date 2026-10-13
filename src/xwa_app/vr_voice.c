@@ -73,9 +73,33 @@ static int vv_mode(void) {
 
 /* ---- setup (worker thread) ---------------------------------------------- */
 
+/* The model: a voice-en folder next to the game data (copied there like the
+ * game files), else the copy out of the APK in internal storage. */
+static const char* vv_external_model_dir(void) {
+	static char dir[1024];
+	dir[0] = '\0';
+#if defined(SDL_PLATFORM_ANDROID)
+	const char* external = SDL_GetAndroidExternalStoragePath();
+	if (external && external[0]) {
+		char probe[1100];
+		SDL_PathInfo info;
+		snprintf(dir, sizeof dir, "%s/voice-en", external);
+		snprintf(probe, sizeof probe, "%s/encoder.onnx", dir);
+		if (!SDL_GetPathInfo(probe, &info) || info.size == 0) {
+			dir[0] = '\0';
+		}
+	}
+#endif
+	return dir;
+}
+
 static const char* vv_model_dir(void) {
 	static char dir[1024];
 #if defined(SDL_PLATFORM_ANDROID)
+	const char* external = vv_external_model_dir();
+	if (external[0]) {
+		return external;
+	}
 	const char* internal = SDL_GetAndroidInternalStoragePath();
 	snprintf(dir, sizeof dir, "%s/voice-en", internal ? internal : ".");
 #else
@@ -96,7 +120,8 @@ static int vv_extract(const char* dir, char* error, int error_size) {
 		snprintf(dst, sizeof dst, "%s/%s", dir, k_model_files[i]);
 		SDL_IOStream* in = SDL_IOFromFile(src, "rb");
 		if (!in) {
-			snprintf(error, (size_t)error_size, "speech model missing from the APK (%s)", src);
+			snprintf(error, (size_t)error_size,
+					 "no speech model: put the voice-en folder next to the game data (or use an APK with %s)", src);
 			return 0;
 		}
 		const Sint64 size = SDL_GetIOSize(in);
@@ -152,7 +177,7 @@ static int SDLCALL vv_worker(void* unused) {
 			char error[256] = "";
 			const char* dir = vv_model_dir();
 			const uint64_t t0 = SDL_GetTicks();
-			int ok = vv_extract(dir, error, sizeof error);
+			int ok = vv_external_model_dir()[0] ? 1 : vv_extract(dir, error, sizeof error);
 			if (ok) {
 #if defined(SDL_PLATFORM_ANDROID)
 				const char* lib = "libsherpa-onnx-c-api.so";
@@ -162,7 +187,8 @@ static int SDLCALL vv_worker(void* unused) {
 				ok = XwaVoice_Load(lib, dir, 2, error, sizeof error);
 			}
 			if (ok) {
-				Aeron_LogInfo("xwa.voice", "voice commands ready (%llu ms)", (unsigned long long)(SDL_GetTicks() - t0));
+				Aeron_LogInfo("xwa.voice", "voice commands ready, model %s (%llu ms)", dir,
+							  (unsigned long long)(SDL_GetTicks() - t0));
 			}
 			SDL_LockMutex(s_vv.lock);
 			s_vv.load_result = ok ? 1 : -1;

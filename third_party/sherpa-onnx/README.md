@@ -20,5 +20,7 @@ from the sherpa-onnx `asr-models` release, Apache License 2.0.
 - The manifest needs `android.permission.RECORD_AUDIO`
   (`packaging/quest/tools/manifest_add_permission.py` for a repack).
 
-The game copies the model out of the APK to its internal storage on first
-use (about 28 MB).
+The game uses a `voice-en` folder with these four files next to the game
+data (`Android/data/<package>/files/voice-en`) when there is one; else it
+copies the model out of the APK to its internal storage on first use
+(about 28 MB). Leaving the model out of the APK keeps it small.
