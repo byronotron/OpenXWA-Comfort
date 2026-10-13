@@ -330,7 +330,13 @@ static void android_load_settings(void) {
 		return;
 	}
 	if (!SDL_getenv("AERON_LOG_FILE")) {
+		/* The previous run's log stays as openxwa-prev.log (what happened
+		 * before a restart is usually the interesting part). */
+		char prev[1024];
 		snprintf(path, sizeof path, "%s/openxwa.log", external);
+		snprintf(prev, sizeof prev, "%s/openxwa-prev.log", external);
+		remove(prev);
+		rename(path, prev);
 		SDL_setenv_unsafe("AERON_LOG_FILE", path, 1);
 	}
 	/* Native crashes: fault + backtrace, kept until the next crash. */

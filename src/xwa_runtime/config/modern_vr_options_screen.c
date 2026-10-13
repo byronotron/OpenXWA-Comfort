@@ -7,6 +7,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <errno.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -161,6 +162,8 @@ static void vr_write_cfg(const char* const* keys, const char* const* values, int
 		return;
 	}
 	snprintf(path, sizeof path, "%s/openxwa-quest.cfg", external);
+	char tmp_path[1100];
+	snprintf(tmp_path, sizeof tmp_path, "%s.new", path);
 	f = fopen(path, "rb");
 	if (f) {
 		long size;
@@ -181,9 +184,11 @@ static void vr_write_cfg(const char* const* keys, const char* const* values, int
 		FILE* out = NULL;
 		const char* p = text ? text : "";
 		if (pass == 1) {
-			out = fopen(path, "wb");
+			/* Into a new file, then over the old one: a cfg copied in over USB
+			 * may not be writable in place by the app, but the folder is. */
+			out = fopen(tmp_path, "wb");
 			if (!out) {
-				Aeron_LogError("xwa.config", "cannot write %s", path);
+				Aeron_LogError("xwa.config", "cannot write %s: %s", tmp_path, strerror(errno));
 				free(text);
 				return;
 			}
@@ -231,7 +236,23 @@ static void vr_write_cfg(const char* const* keys, const char* const* values, int
 					fprintf(out, "%s=%s\n", keys[i], values[i]);
 				}
 			}
-			fclose(out);
+			if (fclose(out) != 0) {
+				Aeron_LogError("xwa.config", "cannot finish %s: %s", tmp_path, strerror(errno));
+				remove(tmp_path);
+				free(text);
+				return;
+			}
+			if (rename(tmp_path, path) != 0) {
+				const int rename_errno = errno;
+				/* Some storage refuses to replace: remove the old file first. */
+				if (remove(path) != 0 || rename(tmp_path, path) != 0) {
+					Aeron_LogError("xwa.config", "cannot replace %s: %s / %s", path, strerror(rename_errno),
+								   strerror(errno));
+					remove(tmp_path);
+					free(text);
+					return;
+				}
+			}
 		}
 	}
 	free(text);
