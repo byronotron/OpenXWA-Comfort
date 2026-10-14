@@ -5,7 +5,7 @@
  * VR environment for the 2D screens (concourse, briefings, menus, films),
  * built from the installed game data and drawn in stereo around the flat
  * virtual screen. XWA_XR_ENVIRONMENT selects it:
- *   random (default) — endor, xwing or tiefighter, picked at each start;
+ *   random (default) — endor, xwing, tiefighter or xvt, picked at each start;
  *   endor           — a still of the Battle of Endor after the box art:
  *                     game craft, the Death Star II and Endor sprites, the
  *                     logo above the screen (vr/logo.rgba, shipped in the
@@ -18,6 +18,9 @@
  *                     bomber and the X-wing breaking up in the explosion,
  *                     at their cover attitudes around the screen, before
  *                     Vader's helmet (vr/vader.rgba, APK assets only);
+ *   xvt             — the X-Wing vs. TIE Fighter box art: its X-wings, TIE
+ *                     Interceptor and TIE fighters round the explosion and
+ *                     its pillar of light, at their cover attitudes;
  *   hangar          — the carrier hangar (Hangar.opt and its props, laid
  *                     out like the in-mission hangar);
  *   0               — off.

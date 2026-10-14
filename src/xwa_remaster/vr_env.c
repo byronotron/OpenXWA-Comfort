@@ -235,6 +235,54 @@ static const EnvSalvo k_tie_salvos[] = {
 	{ 3, 0, ENV_GUNS_TIE, { { 0.10f, 1.60f } }, 1 },
 };
 
+/* A laser streak frozen between two points given as yaw, pitch, metres. */
+typedef struct EnvStreak {
+	float from[3], to[3];
+	int green;
+} EnvStreak;
+
+/* ---- "X-Wing vs. TIE Fighter": its box art -----------------------------
+ * The cover of X-Wing vs. TIE Fighter, its craft only (no logo, labels or
+ * the pilots' faces behind): an explosion with a pillar of light through
+ * it in the middle, an X-wing banking up through the fire, a big X-wing
+ * diving past lower right with a green streak across it, a TIE Interceptor
+ * lower left facing us, two TIE fighters upper left of the middle, two
+ * X-wings coming at us from the explosion's top and the far right, two
+ * tiny TIEs far left, a green streak from the right. Cover attitudes
+ * (view-relative); the middle, behind the screen on the cover, moves below
+ * it, the rest out just far enough to clear the screen and logo. */
+static const EnvShip k_xvtart[] = {
+	/* 0: the big X-wing lower right: nose toward us, down to the right, its
+	 * top toward us, upper wings to the upper right. */
+	{ "Xwing", 40.0f, -29.0f, 16.0f, { 0.62f, -0.55f, -0.45f }, { 0.06f, -0.55f, 0.76f }, 0, 1 },
+	/* 1: the TIE Interceptor lower left: facing us, window a little to the
+	 * right, wing axis falling to the right. */
+	{ "TieInterceptor", -32.0f, -28.0f, 14.0f, { 0.20f, -0.95f, -0.10f }, { 0.50f, 0.02f, 0.85f }, 0, 1 },
+	/* 2: the X-wing in the explosion, banking up to the left, seen from above. */
+	{ "Xwing", -8.0f, -33.0f, 60.0f, { -0.65f, 0.35f, 0.60f }, { 0.30f, -0.60f, 0.60f }, 0, 1 },
+	/* 3: the small X-wing at the explosion's top, coming at us. */
+	{ "Xwing", 25.0f, -2.0f, 80.0f, { -0.30f, -0.90f, -0.30f }, { 0.0f, -0.30f, 0.95f }, 0, 1 },
+	/* 4: the far X-wing on the right, coming at us. */
+	{ "Xwing", 31.0f, 10.0f, 110.0f, { -0.40f, -0.85f, -0.35f }, { 0.20f, -0.40f, 0.90f }, 0, 1 },
+	/* 5: TIE fighter upper left of the middle: three-quarters from the
+	 * front left, wing axis rising to the right. */
+	{ "TieFighter", -26.0f, 12.0f, 50.0f, { -0.55f, -0.75f, 0.10f }, { -0.40f, 0.41f, 0.88f }, 0, 1 },
+	/* 6: the TIE fighter left of it, smaller. */
+	{ "TieFighter", -34.0f, 6.0f, 75.0f, { -0.55f, -0.75f, 0.10f }, { -0.40f, 0.41f, 0.88f }, 0, 1 },
+	/* 7, 8: the two tiny TIEs far left. */
+	{ "TieFighter", -46.0f, 18.0f, 160.0f, { 0.30f, -0.60f, 0.70f }, { 0.0f, 0.70f, 0.70f }, 0, 1 },
+	{ "TieFighter", -40.0f, 19.0f, 160.0f, { -0.60f, -0.70f, 0.30f }, { -0.20f, 0.20f, 0.95f }, 0, 1 },
+};
+
+/* The explosion: yaw, pitch, metres, diameter in metres. */
+static const float k_xvt_blast[4] = { 0.0f, -30.0f, 90.0f, 55.0f };
+
+/* The green streaks: across the big X-wing, and in from the right. */
+static const EnvStreak k_xvt_streaks[] = {
+	{ { 14.0f, -20.0f, 30.0f }, { 38.0f, -40.0f, 12.0f }, 1 },
+	{ { 62.0f, 2.0f, 60.0f }, { 33.0f, 9.0f, 105.0f }, 1 },
+};
+
 typedef struct EnvSpaceScene {
 	const EnvShip* ships;
 	int count;
@@ -246,6 +294,7 @@ static const EnvSpaceScene k_scene_endor = { k_endor, ENV_ENDOR_COUNT, k_salvos,
 											 (int)(sizeof k_salvos / sizeof k_salvos[0]) };
 static const EnvSpaceScene k_scene_tieart = { k_tieart, (int)(sizeof k_tieart / sizeof k_tieart[0]), k_tie_salvos,
 											  (int)(sizeof k_tie_salvos / sizeof k_tie_salvos[0]) };
+static const EnvSpaceScene k_scene_xvtart = { k_xvtart, (int)(sizeof k_xvtart / sizeof k_xvtart[0]), NULL, 0 };
 static const EnvSpaceScene k_scene_boxart = { k_boxart, (int)(sizeof k_boxart / sizeof k_boxart[0]), k_box_salvos,
 											  (int)(sizeof k_box_salvos / sizeof k_box_salvos[0]) };
 
@@ -281,7 +330,7 @@ static const EnvTexSource k_tex_sources[ENV_TEX_COUNT] = {
 	{ NULL, 0, 0 },            /* vr/vader.rgba */
 };
 
-typedef enum EnvMode { ENV_OFF = 0, ENV_ENDOR, ENV_HANGAR, ENV_BOXART, ENV_TIEART } EnvMode;
+typedef enum EnvMode { ENV_OFF = 0, ENV_ENDOR, ENV_HANGAR, ENV_BOXART, ENV_TIEART, ENV_XVTART } EnvMode;
 
 #define ENV_MAX_MESHES 24
 #define ENV_MAX_INSTANCES 40
@@ -341,6 +390,9 @@ static EnvMode env_mode(void) {
 	if (v && SDL_strcasecmp(v, "tiefighter") == 0) {
 		return ENV_TIEART;
 	}
+	if (v && SDL_strcasecmp(v, "xvt") == 0) {
+		return ENV_XVTART;
+	}
 	if (v && SDL_strcasecmp(v, "endor") == 0) {
 		return ENV_ENDOR;
 	}
@@ -348,11 +400,14 @@ static EnvMode env_mode(void) {
 	 * start. */
 	static EnvMode picked = ENV_OFF;
 	if (picked == ENV_OFF) {
-		static const EnvMode scenes[] = { ENV_ENDOR, ENV_BOXART, ENV_TIEART };
+		static const EnvMode scenes[] = { ENV_ENDOR, ENV_BOXART, ENV_TIEART, ENV_XVTART };
 		const uint64_t seed = SDL_GetPerformanceCounter() ^ ((uint64_t)time(NULL) * 2654435761u);
 		picked = scenes[(seed ^ (seed >> 17) ^ (seed >> 31)) % (sizeof scenes / sizeof scenes[0])];
 		Aeron_LogInfo("xwa.remaster", "VR environment: random pick %s",
-					  picked == ENV_ENDOR ? "endor" : picked == ENV_BOXART ? "xwing" : "tiefighter");
+					  picked == ENV_ENDOR	 ? "endor"
+					  : picked == ENV_BOXART ? "xwing"
+					  : picked == ENV_TIEART ? "tiefighter"
+											 : "xvt");
 	}
 	return picked;
 }
@@ -366,6 +421,8 @@ static const EnvSpaceScene* env_space(void) {
 			return &k_scene_boxart;
 		case ENV_TIEART:
 			return &k_scene_tieart;
+		case ENV_XVTART:
+			return &k_scene_xvtart;
 		default:
 			return NULL;
 	}
@@ -375,7 +432,7 @@ int XwaVrEnv_Enabled(void) { return env_mode() != ENV_OFF; }
 
 int XwaVrEnv_IsSpace(void) {
 	const EnvMode m = env_mode();
-	return m == ENV_ENDOR || m == ENV_BOXART || m == ENV_TIEART;
+	return m == ENV_ENDOR || m == ENV_BOXART || m == ENV_TIEART || m == ENV_XVTART;
 }
 
 static void env_set3(float out[3], float x, float y, float z) {
@@ -386,7 +443,7 @@ static void env_set3(float out[3], float x, float y, float z) {
 
 int XwaVrEnv_SpaceLighting(XwaVrEnvLighting* out) {
 	const EnvMode m = env_mode();
-	if (!out || (m != ENV_ENDOR && m != ENV_BOXART && m != ENV_TIEART)) {
+	if (!out || (m != ENV_ENDOR && m != ENV_BOXART && m != ENV_TIEART && m != ENV_XVTART)) {
 		return 0;
 	}
 	memset(out, 0, sizeof *out);
@@ -401,6 +458,16 @@ int XwaVrEnv_SpaceLighting(XwaVrEnvLighting* out) {
 		env_set3(out->ambient_sides, 0.05f, 0.05f, 0.05f);
 		env_set3(out->ambient_top, 0.06f, 0.06f, 0.06f);
 		env_set3(out->ambient_bottom, 0.04f, 0.08f, 0.05f);
+	} else if (m == ENV_XVTART) {
+		/* The XvT cover: the explosion's warm light from ahead below, a cool
+		 * blue fill from the upper right, a dark blue ambient. */
+		env_set3(out->key_dir, -0.10f, 0.85f, -0.35f);
+		env_set3(out->key_color, 1.0f * sun, 0.78f * sun, 0.55f * sun);
+		env_set3(out->fill_dir, 0.50f, 0.20f, 0.85f);
+		env_set3(out->fill_color, 0.45f * 0.6f, 0.55f * 0.6f, 0.90f * 0.6f);
+		env_set3(out->ambient_sides, 0.04f, 0.045f, 0.07f);
+		env_set3(out->ambient_top, 0.04f, 0.05f, 0.08f);
+		env_set3(out->ambient_bottom, 0.05f, 0.04f, 0.05f);
 	} else if (m == ENV_TIEART) {
 		/* The TIE Fighter cover: a cool blue-white light from the upper
 		 * right, the explosion's orange glow from behind and below the
@@ -966,6 +1033,9 @@ static int env_tex_needed(int slot) {
 			return slot != ENV_TEX_DEATHSTAR && slot != ENV_TEX_ENDOR && slot != ENV_TEX_VADER;
 		case ENV_TIEART:
 			return slot != ENV_TEX_DEATHSTAR && slot != ENV_TEX_ENDOR;
+		case ENV_XVTART:
+			return slot != ENV_TEX_DEATHSTAR && slot != ENV_TEX_ENDOR && slot != ENV_TEX_NEBULA &&
+				   slot != ENV_TEX_VADER;
 		default:
 			return slot == ENV_TEX_FRAME;
 	}
@@ -1578,6 +1648,46 @@ static void env_submit_boxart_sprites(AeronScene3D* scene) {
 	env_submit_logo(scene);
 }
 
+/* A great explosion centred on `at` (yaw, pitch, metres, diameter in
+ * metres): the blast with two fire clouds in it. */
+static void env_submit_fireball(AeronScene3D* scene, const float at[4]) {
+	const float k = AERON_OPT_UNITS_PER_METER;
+	float p[3], c[4][3];
+	static const float white[4] = { 1.5f, 1.4f, 1.3f, 1.0f };
+	static const struct {
+		float dyaw, dpitch, size, roll;
+		int tex;
+	} puffs[] = {
+		{ 0.0f, 0.0f, 1.0f, 0.0f, ENV_TEX_BLAST },
+		{ -6.0f, 4.0f, 0.62f, 40.0f, ENV_TEX_FIRE },
+		{ 7.0f, -3.0f, 0.55f, -60.0f, ENV_TEX_FIRE },
+	};
+	for (size_t i = 0; i < sizeof puffs / sizeof puffs[0]; ++i) {
+		env_dir(at[0] + puffs[i].dyaw, at[1] + puffs[i].dpitch, p);
+		for (int a = 0; a < 3; ++a) {
+			p[a] = s_env.view_pos[a] + p[a] * (at[2] - (float)i * 3.0f) * k;
+		}
+		env_facing(p, at[3] * puffs[i].size * k, puffs[i].roll, c);
+		env_quad(scene, puffs[i].tex, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
+	}
+}
+
+static void env_submit_streaks(AeronScene3D* scene, const EnvStreak* streaks, int count) {
+	const float k = AERON_OPT_UNITS_PER_METER;
+	static const float red[4] = { 2.4f, 0.35f, 0.25f, 1.0f };
+	static const float green[4] = { 0.4f, 2.4f, 0.45f, 1.0f };
+	for (int i = 0; i < count; ++i) {
+		float a[3], b[3];
+		env_dir(streaks[i].from[0], streaks[i].from[1], a);
+		env_dir(streaks[i].to[0], streaks[i].to[1], b);
+		for (int c = 0; c < 3; ++c) {
+			a[c] = s_env.view_pos[c] + a[c] * streaks[i].from[2] * k;
+			b[c] = s_env.view_pos[c] + b[c] * streaks[i].to[2] * k;
+		}
+		env_beam(scene, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, a, b, 0.45f * k, streaks[i].green ? green : red);
+	}
+}
+
 /* The TIE Fighter box art: the helmet and the clouds behind, the fire, the
  * great explosion with the X-wing breaking up in it. */
 static void env_submit_tieart_sprites(AeronScene3D* scene) {
@@ -1611,31 +1721,47 @@ static void env_submit_tieart_sprites(AeronScene3D* scene) {
 	/* The great explosion behind the big Interceptor, flames licking round
 	 * the breaking X-wing. */
 	{
-		float p[3], q[3], c[4][3];
+		float q[3], c[4][3];
 		static const float white[4] = { 1.5f, 1.4f, 1.3f, 1.0f };
-		/* Centred on the point: the blast with two fire clouds in it. */
-		static const struct {
-			float dyaw, dpitch, size, roll;
-			int tex;
-		} puffs[] = {
-			{ 0.0f, 0.0f, 1.0f, 0.0f, ENV_TEX_BLAST },
-			{ -6.0f, 4.0f, 0.62f, 40.0f, ENV_TEX_FIRE },
-			{ 7.0f, -3.0f, 0.55f, -60.0f, ENV_TEX_FIRE },
-		};
-		for (size_t i = 0; i < sizeof puffs / sizeof puffs[0]; ++i) {
-			env_dir(k_tie_blast[0] + puffs[i].dyaw, k_tie_blast[1] + puffs[i].dpitch, p);
-			for (int a = 0; a < 3; ++a) {
-				p[a] = s_env.view_pos[a] + p[a] * (k_tie_blast[2] - (float)i * 3.0f) * k;
-			}
-			env_facing(p, k_tie_blast[3] * puffs[i].size * k, puffs[i].roll, c);
-			env_quad(scene, puffs[i].tex, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
-		}
+		env_submit_fireball(scene, k_tie_blast);
 		env_ship_pos(5, q);
 		env_facing(q, 16.0f * k, 70.0f, c);
 		env_quad(scene, ENV_TEX_FIRE, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
 		env_facing(q, 10.0f * k, -20.0f, c);
 		env_quad(scene, ENV_TEX_BLAST, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
 	}
+	env_submit_logo(scene);
+}
+
+/* The X-Wing vs. TIE Fighter box art: the explosion and its pillar of
+ * light, the fire round the banking X-wing, the green streaks. */
+static void env_submit_xvtart_sprites(AeronScene3D* scene) {
+	const float k = AERON_OPT_UNITS_PER_METER;
+	/* The pillar of light, straight up and down through the explosion. */
+	{
+		float lo[3], hi[3];
+		env_sky_point(k_xvt_blast[0], -75.0f, lo);
+		env_sky_point(k_xvt_blast[0], 72.0f, hi);
+		const float wide = 2.0f * ENV_SKY_DIST * tanf(1.3f * 3.14159265358979f / 360.0f);
+		const float thin = 2.0f * ENV_SKY_DIST * tanf(0.22f * 3.14159265358979f / 360.0f);
+		static const float glow[4] = { 0.55f, 0.22f, 0.05f, 1.0f };
+		static const float core[4] = { 2.2f, 1.6f, 0.8f, 1.0f };
+		env_beam(scene, AERON_SCENE_BILLBOARD_STAGE_SKY, lo, hi, wide, glow);
+		env_beam(scene, AERON_SCENE_BILLBOARD_STAGE_SKY, lo, hi, thin, core);
+	}
+	env_submit_fireball(scene, k_xvt_blast);
+	/* Fire round the X-wing banking through it. */
+	{
+		float q[3], c[4][3];
+		static const float white[4] = { 1.5f, 1.4f, 1.3f, 1.0f };
+		env_ship_pos(2, q);
+		for (int a = 0; a < 3; ++a) {
+			q[a] += (q[a] - s_env.view_pos[a]) * 0.08f; /* just behind it */
+		}
+		env_facing(q, 30.0f * k, 15.0f, c);
+		env_quad(scene, ENV_TEX_FIRE, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
+	}
+	env_submit_streaks(scene, k_xvt_streaks, (int)(sizeof k_xvt_streaks / sizeof k_xvt_streaks[0]));
 	env_submit_logo(scene);
 }
 
@@ -1662,6 +1788,8 @@ void XwaVrEnv_Submit(AeronScene3D* scene) {
 		env_submit_boxart_sprites(scene);
 	} else if (s_env.mode == ENV_TIEART) {
 		env_submit_tieart_sprites(scene);
+	} else if (s_env.mode == ENV_XVTART) {
+		env_submit_xvtart_sprites(scene);
 	}
 	env_submit_frame(scene);
 }
