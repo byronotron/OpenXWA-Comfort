@@ -3511,7 +3511,7 @@ static void fl_add_ambient_cube(XwaShipAmbientCube* base, const XwaShipAmbientCu
 static int fl_xr_stereo_eligible(const XwaFlightCamera* cam);
 static float fl_xr_env(const char* name, float fallback);
 static void fl_xr_eye_camera(const AeronSceneCamera* base, const AeronXrView* v, AeronSceneCamera* out);
-static AeronTexture* fl_xr_right_bloom(void);
+static AeronTexture* fl_xr_right_bloom(AeronCommandBuffer* cmd, const AeronXrView views[2]);
 static int fl_xr_output_eye(AeronCommandBuffer* cmd, AeronRenderTarget* target, AeronTextureFormat format,
 							AeronTexture* bloom_tex);
 
@@ -3676,7 +3676,7 @@ static AeronTexture* fl_render_hyperspace(AeronCommandBuffer* cmd, const XwaSnap
 		}
 		/* No HUD in the jump: just the eyes. */
 		if (out && fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format,
-									s.present_bloom_tex ? s.present_bloom_tex : fl_xr_right_bloom())) {
+									s.present_bloom_tex ? s.present_bloom_tex : fl_xr_right_bloom(cmd, xr_frame.views))) {
 			Aeron_XrStereoCommitHuds(NULL, NULL);
 		}
 		return out;
@@ -3985,10 +3985,75 @@ static int fl_xr_bloom_mode(void) {
 
 /* The bloom for the right eye: the left eye's when shared, else NULL (the
  * eye output computes its own). */
-static AeronTexture* fl_xr_right_bloom(void) {
-	AeronTexture* tex = fl_xr_bloom_mode() == 1 ? s_xr_bloom_last : NULL;
+/* The left eye's bloom as the right eye sees it. The eyes' projections are
+ * not the same: each frustum reaches further to its own side, so one
+ * direction lands on different pixels in the two images (straight ahead
+ * is ~15 % of the width apart on a Quest 3). For distant things - what
+ * blooms in space - the two images differ only by that, an axis-aligned
+ * scale and offset, so a single resampling blit lines the glow up. */
+static AeronRenderTarget* s_xr_bloom_right;
+static AeronDrawList2D* s_xr_bloom_blit;
+
+static AeronTexture* fl_xr_right_bloom(AeronCommandBuffer* cmd, const AeronXrView views[2]) {
+	AeronTexture* left = fl_xr_bloom_mode() == 1 ? s_xr_bloom_last : NULL;
 	s_xr_bloom_last = NULL;
-	return tex;
+	if (!left || !cmd || !views) {
+		return NULL; /* the eye output computes its own */
+	}
+	const int w = Aeron_TextureGetWidth(left), h = Aeron_TextureGetHeight(left);
+	if (w <= 0 || h <= 0) {
+		return NULL;
+	}
+	if (s_xr_bloom_right) {
+		AeronTexture* t = Aeron_RenderTargetGetTexture(s_xr_bloom_right);
+		if (!t || Aeron_TextureGetWidth(t) != w || Aeron_TextureGetHeight(t) != h ||
+			Aeron_TextureGetFormat(t) != Aeron_TextureGetFormat(left)) {
+			Aeron_DestroyRenderTarget(s_xr_bloom_right);
+			s_xr_bloom_right = NULL;
+		}
+	}
+	if (!s_xr_bloom_right) {
+		s_xr_bloom_right = Aeron_CreateRenderTarget(&(AeronRenderTargetDesc) {
+			.width = w,
+			.height = h,
+			.format = Aeron_TextureGetFormat(left),
+			.sample_count = AERON_SAMPLE_COUNT_1,
+			.debug_name = "xwa.vr.bloom_right",
+		});
+	}
+	if (!s_xr_bloom_blit) {
+		s_xr_bloom_blit = AeronDrawList_Create(4);
+	}
+	if (!s_xr_bloom_right || !s_xr_bloom_blit) {
+		return NULL;
+	}
+	/* Right-eye image coordinate -> the left eye's, through the shared
+	 * direction (tangent): u_l = a * u_r + b. */
+	const float* fl = views[0].fov;
+	const float* fr = views[1].fov;
+	const float ll = tanf(fl[0]), rl = tanf(fl[1]), ul = tanf(fl[2]), dl = tanf(fl[3]);
+	const float lr = tanf(fr[0]), rr = tanf(fr[1]), ur = tanf(fr[2]), dr = tanf(fr[3]);
+	if (rl - ll <= 0.0f || ul - dl <= 0.0f) {
+		return NULL;
+	}
+	const float ax = (rr - lr) / (rl - ll), bx = (lr - ll) / (rl - ll);
+	const float ay = (ur - dr) / (ul - dl), by = (ul - ur) / (ul - dl);
+	AeronDrawList_Begin(s_xr_bloom_blit, s_xr_bloom_right, w, h, AERON_DRAWLIST2D_CLEAR, NULL);
+	AeronDrawList2DSprite sp;
+	memset(&sp, 0, sizeof sp);
+	sp.texture = left;
+	sp.src_u0 = bx;
+	sp.src_u1 = ax + bx;
+	sp.src_v0 = by;
+	sp.src_v1 = ay + by;
+	sp.dst_w = (float)w;
+	sp.dst_h = (float)h;
+	sp.tint[0] = sp.tint[1] = sp.tint[2] = sp.tint[3] = 1.0f;
+	sp.blend = AERON_BLIT2D_BLEND_NONE;
+	sp.filter = AERON_BLIT2D_FILTER_LINEAR;
+	AeronDrawList_AddSprite(s_xr_bloom_blit, &sp);
+	AeronDrawList_Render(s_xr_bloom_blit, cmd);
+	return Aeron_RenderTargetGetTexture(s_xr_bloom_right);
 }
 
 static int fl_xr_output_eye(AeronCommandBuffer* cmd, AeronRenderTarget* target, AeronTextureFormat format,
@@ -5094,7 +5159,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 									  g_xr_hud_h > 0 ? g_xr_hud_h : s.rt_h);
 		}
 		if (fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format,
-							 s.present_bloom_tex ? s.present_bloom_tex : fl_xr_right_bloom()) &&
+							 s.present_bloom_tex ? s.present_bloom_tex : fl_xr_right_bloom(cmd, xr_frame.views)) &&
 			fl_xr_output_hud(cmd, xr_frame.hud_target, head_parts, cockpit_active) &&
 			(!cmd_aux || fl_xr_output_hud(cmd, xr_frame.hud_aux_target, FL_HUD_CMD, 2)) &&
 			(!split || fl_xr_output_hud(cmd, xr_frame.hud_world_target, FL_HUD_WORLD, 0))) {
@@ -5320,7 +5385,7 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 			}
 		}
 		s_xr_eye_alpha = hands_over ? XwaVrHandOverlay_List(e) : NULL;
-		ok = fl_xr_output_eye(cmd, xr_frame.eye_targets[e], xr_frame.format, e ? fl_xr_right_bloom() : NULL);
+		ok = fl_xr_output_eye(cmd, xr_frame.eye_targets[e], xr_frame.format, e ? fl_xr_right_bloom(cmd, xr_frame.views) : NULL);
 		s_xr_eye_alpha = NULL;
 	}
 	s_xr_eye_gain_last = s_xr_eye_gain;
@@ -5355,6 +5420,14 @@ void XwaRemasterFlight_Shutdown(void) {
 	XwaVrCockpitHud_Shutdown();
 	XwaVrHudOcclusion_Shutdown();
 	XwaVrHandOverlay_Shutdown();
+	if (s_xr_bloom_blit) {
+		AeronDrawList_Destroy(s_xr_bloom_blit);
+		s_xr_bloom_blit = NULL;
+	}
+	if (s_xr_bloom_right) {
+		Aeron_DestroyRenderTarget(s_xr_bloom_right);
+		s_xr_bloom_right = NULL;
+	}
 	XwaVrConsole_Shutdown();
 	XwaVrGloves_Shutdown();
 	XwaVrStick_Shutdown();
