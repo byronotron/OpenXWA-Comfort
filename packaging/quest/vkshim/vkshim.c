@@ -237,10 +237,16 @@ static uint32_t shim_hash(uint64_t h, uint32_t size) {
 	return (uint32_t)(h & (size - 1));
 }
 
+static int g_rp_used, g_fb_used;
+
 static void rp_put(const ShimPassDesc* d) {
+	if (g_rp_used >= SHIM_RP_TABLE - 1) {
+		return; /* keep a free slot: lookups and deletes stop at one */
+	}
 	uint32_t i = shim_hash((uint64_t)(uintptr_t)d->pass, SHIM_RP_TABLE);
 	for (uint32_t n = 0; n < SHIM_RP_TABLE; ++n, i = (i + 1) & (SHIM_RP_TABLE - 1)) {
 		if (g_t.rp[i].pass == VK_NULL_HANDLE || g_t.rp[i].pass == d->pass) {
+			g_rp_used += g_t.rp[i].pass == VK_NULL_HANDLE;
 			g_t.rp[i] = *d;
 			return;
 		}
@@ -288,9 +294,13 @@ static const ShimPassDesc* rp_get(VkRenderPass p) {
 	} while (0)
 
 static void fb_put(const ShimFbDesc* d) {
+	if (g_fb_used >= SHIM_FB_TABLE - 1) {
+		return;
+	}
 	uint32_t i = shim_hash((uint64_t)(uintptr_t)d->fb, SHIM_FB_TABLE);
 	for (uint32_t n = 0; n < SHIM_FB_TABLE; ++n, i = (i + 1) & (SHIM_FB_TABLE - 1)) {
 		if (g_t.fb[i].fb == VK_NULL_HANDLE || g_t.fb[i].fb == d->fb) {
+			g_fb_used += g_t.fb[i].fb == VK_NULL_HANDLE;
 			g_t.fb[i] = *d;
 			return;
 		}
@@ -888,7 +898,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateInstance(const VkInstanceCreate
 #define DEV_LOAD(name) g_dev.name = (PFN_vk##name)g_dev.gdpa(g_dev.device, "vk" #name)
 
 static void dev_load(VkDevice device, VkPhysicalDevice phys, const VkDeviceCreateInfo* ci);
-static int shim_add_astc(VkPhysicalDevice phys, VkDeviceCreateInfo* mine, VkPhysicalDeviceFeatures* storage);
+typedef struct ShimAstcStorage {
+	VkPhysicalDeviceFeatures features;
+	VkPhysicalDeviceFeatures2 features2;
+} ShimAstcStorage;
+static int shim_add_astc(VkPhysicalDevice phys, VkDeviceCreateInfo* mine, const void** chain_head,
+						 ShimAstcStorage* storage);
 static void shim_astc_result(int enabled);
 static VkResult dev_plain(PFN_vkCreateDevice real, VkPhysicalDevice phys, const VkDeviceCreateInfo* ci,
 						  const VkAllocationCallbacks* a, VkDevice* out);
@@ -972,8 +987,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateDevice(VkPhysicalDevice phys, c
 		.fragmentDensityMapNonSubsampledImages = VK_TRUE,
 	};
 	mine.pNext = &enable;
-	VkPhysicalDeviceFeatures astc_features;
-	const int astc = shim_add_astc(phys, &mine, &astc_features);
+	ShimAstcStorage astc_storage;
+	const int astc = shim_add_astc(phys, &mine, (const void**)&enable.pNext, &astc_storage);
 	VkResult r = real(phys, &mine, a, out);
 	free(names);
 	if (r == VK_SUCCESS) {
@@ -1061,8 +1076,8 @@ static void dev_load(VkDevice device, VkPhysicalDevice phys, const VkDeviceCreat
 static VkResult dev_plain(PFN_vkCreateDevice real, VkPhysicalDevice phys, const VkDeviceCreateInfo* ci,
 						  const VkAllocationCallbacks* a, VkDevice* out) {
 	VkDeviceCreateInfo mine = *ci;
-	VkPhysicalDeviceFeatures astc_features;
-	const int astc = shim_add_astc(phys, &mine, &astc_features);
+	ShimAstcStorage astc_storage;
+	const int astc = shim_add_astc(phys, &mine, &mine.pNext, &astc_storage);
 	VkResult r = real(phys, &mine, a, out);
 	if (r != VK_SUCCESS && astc) {
 		r = real(phys, ci, a, out);
@@ -1079,7 +1094,8 @@ static VkResult dev_plain(PFN_vkCreateDevice real, VkPhysicalDevice phys, const 
 /* ASTC textures need the textureCompressionASTC_LDR feature, which SDL
  * does not request: added to the device's features when the GPU has it
  * (in pEnabledFeatures, or the VkPhysicalDeviceFeatures2 in the chain). */
-static int shim_add_astc(VkPhysicalDevice phys, VkDeviceCreateInfo* mine, VkPhysicalDeviceFeatures* storage) {
+static int shim_add_astc(VkPhysicalDevice phys, VkDeviceCreateInfo* mine, const void** chain_head,
+						 ShimAstcStorage* storage) {
 	PFN_vkGetPhysicalDeviceFeatures features =
 		(PFN_vkGetPhysicalDeviceFeatures)g_real_gipa(g_instance, "vkGetPhysicalDeviceFeatures");
 	VkPhysicalDeviceFeatures have;
@@ -1092,20 +1108,29 @@ static int shim_add_astc(VkPhysicalDevice phys, VkDeviceCreateInfo* mine, VkPhys
 		return 0;
 	}
 	if (mine->pEnabledFeatures) {
-		*storage = *mine->pEnabledFeatures;
-		storage->textureCompressionASTC_LDR = VK_TRUE;
-		mine->pEnabledFeatures = storage;
+		storage->features = *mine->pEnabledFeatures;
+		storage->features.textureCompressionASTC_LDR = VK_TRUE;
+		mine->pEnabledFeatures = &storage->features;
 		return 1;
 	}
-	for (VkBaseOutStructure* n = (VkBaseOutStructure*)mine->pNext; n; n = n->pNext) {
+	/* Features in a VkPhysicalDeviceFeatures2: a copy of it replaces the
+	 * original at the head of the chain we own (the caller's structures are
+	 * left as they are). Deeper in the chain: no ASTC. */
+	const VkBaseInStructure* head = (const VkBaseInStructure*)*chain_head;
+	if (head && head->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2) {
+		storage->features2 = *(const VkPhysicalDeviceFeatures2*)head;
+		storage->features2.features.textureCompressionASTC_LDR = VK_TRUE;
+		*chain_head = &storage->features2;
+		return 1;
+	}
+	for (const VkBaseInStructure* n = head; n; n = n->pNext) {
 		if (n->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2) {
-			((VkPhysicalDeviceFeatures2*)n)->features.textureCompressionASTC_LDR = VK_TRUE;
-			return 1;
+			return 0;
 		}
 	}
-	memset(storage, 0, sizeof *storage);
-	storage->textureCompressionASTC_LDR = VK_TRUE;
-	mine->pEnabledFeatures = storage;
+	memset(&storage->features, 0, sizeof storage->features);
+	storage->features.textureCompressionASTC_LDR = VK_TRUE;
+	mine->pEnabledFeatures = &storage->features;
 	return 1;
 }
 
@@ -1127,6 +1152,7 @@ static VKAPI_ATTR void VKAPI_CALL shim_DestroyDevice(VkDevice device, const VkAl
 			g_dev.DestroyQueryPool(device, g_t.pool, NULL);
 		}
 		memset(&g_t, 0, sizeof g_t);
+		g_rp_used = g_fb_used = 0;
 		g_pass_count = 0;
 		g_eye_tried = 0;
 		g_eye_fb_count = 0;
@@ -1235,8 +1261,9 @@ static VKAPI_ATTR void VKAPI_CALL shim_DestroyRenderPass(VkDevice device, VkRend
 			break;
 		}
 	}
-	if (pass != VK_NULL_HANDLE) {
+	if (pass != VK_NULL_HANDLE && rp_get(pass)) {
 		SHIM_TABLE_DEL(g_t.rp, SHIM_RP_TABLE, pass, pass);
+		g_rp_used--;
 	}
 	pthread_mutex_unlock(&g_lock);
 	PFN_vkDestroyRenderPass real = device == g_dev.device && g_dev.DestroyRenderPass
@@ -1316,8 +1343,9 @@ static VKAPI_ATTR void VKAPI_CALL shim_DestroyFramebuffer(VkDevice device, VkFra
 			break;
 		}
 	}
-	if (fb != VK_NULL_HANDLE) {
+	if (fb != VK_NULL_HANDLE && fb_get(fb)) {
 		SHIM_TABLE_DEL(g_t.fb, SHIM_FB_TABLE, fb, fb);
+		g_fb_used--;
 	}
 	pthread_mutex_unlock(&g_lock);
 	PFN_vkDestroyFramebuffer real = device == g_dev.device && g_dev.DestroyFramebuffer
