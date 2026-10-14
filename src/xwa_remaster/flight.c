@@ -5103,6 +5103,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	 * tonemap pass or bloom). */
 	const int direct = stereo && fl_xr_direct_output();
 	int direct_used[2] = { 0, 0 };
+	s_xr_bloom_last = NULL; /* this frame's left eye sets it */
 	if (direct) {
 		AeronScene_SetDirectOutput(s.scene, xr_frame.eye_targets[0], xr_frame.format, NULL);
 	}
@@ -5411,13 +5412,25 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 	/* Films: the displayed brightness eases down to XWA_XR_ENV_FILM_DIM (half). */
 	const float film_level = fminf(fmaxf(fl_xr_env("XWA_XR_ENV_FILM_DIM", 0.5f), 0.0f), 1.0f);
 	s_xr_eye_gain = powf(brightness * (1.0f - film_dim * (1.0f - film_level)), 2.2f);
-	int ok = AeronScene_Render(s.scene, cmd);
+	/* Direct output here too, unless the hands' overlay needs the eye
+	 * images' alpha (written by the tonemap pass). */
+	const int direct = fl_xr_direct_output() && !hands_over;
+	s_xr_bloom_last = NULL;
+	const float direct_tint[3] = { s_xr_eye_gain, s_xr_eye_gain, s_xr_eye_gain };
+	int ok = 1;
 	for (int e = 0; e < 2 && ok; ++e) {
 		if (e == 1) {
-			ok = AeronScene_SetCamera(s.scene, &eyes[1]) && AeronScene_Render(s.scene, cmd);
+			ok = AeronScene_SetCamera(s.scene, &eyes[1]);
 			if (!ok) {
 				break;
 			}
+		}
+		if (direct) {
+			AeronScene_SetDirectOutput(s.scene, xr_frame.eye_targets[e], xr_frame.format, direct_tint);
+		}
+		ok = AeronScene_Render(s.scene, cmd);
+		if (!ok || (direct && AeronScene_DirectOutputUsed(s.scene))) {
+			continue;
 		}
 		s_xr_eye_alpha = hands_over ? XwaVrHandOverlay_List(e) : NULL;
 		ok = fl_xr_output_eye(cmd, xr_frame.eye_targets[e], xr_frame.format, e ? fl_xr_right_bloom(cmd, xr_frame.views) : NULL);
