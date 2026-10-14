@@ -9,12 +9,16 @@
  *                     game craft, the Death Star II and Endor sprites, the
  *                     logo above the screen (vr/logo.rgba, shipped in the
  *                     APK assets);
+ *   xwing           — the X-Wing box art: X-wings and TIE fighters over
+ *                     a purple nebula, rearranged around the screen, with
+ *                     a YT-2000 and A-wings to the sides, an Assault
+ *                     Gunboat firing torpedoes at a Nebulon-B behind you;
  *   hangar          — the carrier hangar (Hangar.opt and its props, laid
  *                     out like the in-mission hangar);
  *   0               — off.
  *
  * Space: XWA world axes (x right, y forward, z up) in world units; the
- * hangar's origin is the classic launch reference, the Endor scene's the
+ * hangar's origin is the classic launch reference, a space scene's the
  * viewer.
  */
 
@@ -28,8 +32,20 @@ extern "C" {
 /* XWA_XR_ENVIRONMENT (default on). */
 int XwaVrEnv_Enabled(void);
 
-/* The space scene (lit by a sun, not the hangar lights) is selected. */
+/* A space scene (lit by a sun, not the hangar lights) is selected. */
 int XwaVrEnv_IsSpace(void);
+
+/* A space scene's lights: a key (sun) and a fill light (world directions
+ * toward the light, linear colour times intensity) and the ambient cube's
+ * sides, top and bottom colours. */
+typedef struct XwaVrEnvLighting {
+	float key_dir[3], key_color[3];
+	float fill_dir[3], fill_color[3];
+	float ambient_sides[3], ambient_top[3], ambient_bottom[3];
+} XwaVrEnvLighting;
+
+/* Fills `out` for the selected space scene; 0 when it is not one. */
+int XwaVrEnv_SpaceLighting(XwaVrEnvLighting* out);
 
 /* Loads the environment a piece per call (no open pass on `cmd`) so menus
  * never stall. Returns 1 once the hangar itself can be drawn. */

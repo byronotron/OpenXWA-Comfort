@@ -5367,34 +5367,27 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 	int light_count = 1;
 	lights[0] = key;
 	const int space = XwaVrEnv_IsSpace();
-	if (space) {
-		/* Endor: a warm sun from the upper left behind the viewer, a faint
-		 * green bounce off the moon below right, deep-space ambient. */
-		static const float sun[3] = { -0.55f, 0.35f, 0.75f };
-		static const float bounce[3] = { 0.55f, 0.35f, -0.75f };
+	XwaVrEnvLighting space_light;
+	if (space && XwaVrEnv_SpaceLighting(&space_light)) {
+		/* The space scene's own sun, fill and deep-space ambient. */
 		memset(lights, 0, sizeof lights);
-		const float ls = sqrtf(sun[0] * sun[0] + sun[1] * sun[1] + sun[2] * sun[2]);
-		const float lb = sqrtf(bounce[0] * bounce[0] + bounce[1] * bounce[1] + bounce[2] * bounce[2]);
-		for (int a = 0; a < 3; a++) {
-			lights[0].world_dir[a] = sun[a] / ls;
-			lights[1].world_dir[a] = bounce[a] / lb;
+		const float* dirs[2] = { space_light.key_dir, space_light.fill_dir };
+		const float* cols[2] = { space_light.key_color, space_light.fill_color };
+		for (int l = 0; l < 2; l++) {
+			const float len = sqrtf(dirs[l][0] * dirs[l][0] + dirs[l][1] * dirs[l][1] + dirs[l][2] * dirs[l][2]);
+			const float peak = fmaxf(cols[l][0], fmaxf(cols[l][1], cols[l][2]));
+			for (int a = 0; a < 3; a++) {
+				lights[l].world_dir[a] = dirs[l][a] / len;
+				lights[l].color[a] = peak > 0.0f ? cols[l][a] / peak : 0.0f;
+			}
+			lights[l].intensity = peak;
 		}
-		lights[0].intensity = fl_xr_env("XWA_XR_ENDOR_SUN", 1.6f);
-		lights[0].color[0] = 1.0f;
-		lights[0].color[1] = 0.95f;
-		lights[0].color[2] = 0.88f;
-		lights[1].intensity = 0.3f;
-		lights[1].color[0] = 0.55f;
-		lights[1].color[1] = 0.85f;
-		lights[1].color[2] = 0.6f;
 		light_count = 2;
 		for (int c = 0; c < 3; c++) {
-			ambient.pos_x[c] = ambient.neg_x[c] = ambient.pos_y[c] = ambient.neg_y[c] = 0.05f;
-			ambient.pos_z[c] = 0.06f;
+			ambient.pos_x[c] = ambient.neg_x[c] = ambient.pos_y[c] = ambient.neg_y[c] = space_light.ambient_sides[c];
+			ambient.pos_z[c] = space_light.ambient_top[c];
+			ambient.neg_z[c] = space_light.ambient_bottom[c];
 		}
-		ambient.neg_z[0] = 0.04f;
-		ambient.neg_z[1] = 0.08f;
-		ambient.neg_z[2] = 0.05f;
 	}
 	if (!fl_configure_clustered_lights(s.scene)) {
 		return 0;

@@ -76,10 +76,10 @@ static const EnvProp k_props[] = {
  * (+ up), distance in metres from the viewer; orientation as the craft's
  * nose and up directions (world: x right, y forward, z up). */
 typedef struct EnvShip {
-	const char* opt;
+	const char* opt; /* OPT name; alternatives separated by '|' */
 	float yaw, pitch, dist;
 	float nose[3], up[3];
-	int aim; /* 1-based k_endor index the nose points at (0 = use nose) */
+	int aim; /* 1-based index (same scene) the nose points at (0 = use nose) */
 } EnvShip;
 
 #define ENV_DS_YAW 36.0f
@@ -118,23 +118,97 @@ static const EnvShip k_endor[] = {
 #define ENV_BURST 14
 #define ENV_VICTIM 18
 
-/* Frozen laser salvos: shooter -> target (k_endor indices), X-wing (four
- * wingtip cannons, red) or TIE (two chin guns, green), as spans of the
- * shooter-target distance along the shooter's nose. */
+/* Frozen laser salvos: shooter -> target (indices in the scene's ship
+ * list) from the shooter's guns, as spans of the shooter-target distance
+ * along its nose. */
+typedef enum EnvGuns {
+	ENV_GUNS_XWING,      /* four wingtip cannons, red */
+	ENV_GUNS_XWING_GOLD, /* the same, the box art's gold */
+	ENV_GUNS_TIE,        /* two chin guns, green */
+	ENV_GUNS_AWING,      /* two wingtip cannons, red */
+} EnvGuns;
+
 typedef struct EnvSalvo {
-	int shooter, target, xwing;
+	int shooter, target;
+	EnvGuns guns;
 	float spans[2][2];
 	int span_count;
 } EnvSalvo;
 
 static const EnvSalvo k_salvos[] = {
-	{ 1, 4, 1, { { 0.20f, 0.32f } }, 1 },
-	{ 2, ENV_VICTIM, 1, { { 0.25f, 0.40f } }, 1 },
-	{ 3, 5, 1, { { 0.20f, 0.30f } }, 1 },
-	{ 4, 1, 0, { { 0.15f, 0.25f }, { 0.40f, 0.50f } }, 2 },
-	{ 5, 3, 0, { { 0.15f, 0.25f }, { 0.40f, 0.50f } }, 2 },
-	{ 7, 0, 0, { { 0.20f, 0.30f }, { 0.45f, 0.55f } }, 2 },
+	{ 1, 4, ENV_GUNS_XWING, { { 0.20f, 0.32f } }, 1 },
+	{ 2, ENV_VICTIM, ENV_GUNS_XWING, { { 0.25f, 0.40f } }, 1 },
+	{ 3, 5, ENV_GUNS_XWING, { { 0.20f, 0.30f } }, 1 },
+	{ 4, 1, ENV_GUNS_TIE, { { 0.15f, 0.25f }, { 0.40f, 0.50f } }, 2 },
+	{ 5, 3, ENV_GUNS_TIE, { { 0.15f, 0.25f }, { 0.40f, 0.50f } }, 2 },
+	{ 7, 0, ENV_GUNS_TIE, { { 0.20f, 0.30f }, { 0.45f, 0.55f } }, 2 },
 };
+
+/* ---- "X-Wing": the X-Wing box art -------------------------------------
+ * After the cover of the original X-Wing: X-wings diving into TIE
+ * fighters over a purple nebula, one TIE bursting upper left. Rearranged
+ * around the menu screen (straight ahead, about 20 degrees either side and
+ * 15 below to 30 above with the logo): the big X-wing seen from behind
+ * lower right, the TIEs it fights to the right, a second X-wing and its TIE
+ * on the left, the third X-wing upper left by the burst. Further out: a
+ * YT-2000 on the left, two A-wings on the right, an Assault Gunboat with
+ * the TIEs firing three torpedoes at a Nebulon-B frigate behind the viewer,
+ * about 200 m away and seen a little from the side. Same conventions as
+ * the Endor scene. */
+static const EnvShip k_boxart[] = {
+	/* 0: the big X-wing, lower right, seen from behind and above, flying
+	 * into the scene toward the TIEs. */
+	{ "Xwing", 36.0f, -21.0f, 22.0f, { 0.42f, 0.90f, 0.12f }, { 0.22f, -0.12f, 1.0f } },
+	/* 1: X-wing on the left, side on, at TIE 5. */
+	{ "Xwing", -42.0f, -6.0f, 32.0f, { 0.0f, 1.0f, 0.0f }, { -0.45f, 0.0f, 1.0f }, 6 },
+	/* 2: X-wing upper left, past the bursting TIE 6. */
+	{ "Xwing", -36.0f, 26.0f, 70.0f, { 0.0f, 1.0f, 0.0f }, { 0.3f, 0.0f, 1.0f }, 7 },
+	/* 3: TIE right of the screen, firing at X-wing 0. */
+	{ "TieFighter", 32.0f, 12.0f, 55.0f, { 0.0f, -1.0f, 0.0f }, { 0.15f, 0.0f, 1.0f }, 1 },
+	/* 4: TIE further up right. */
+	{ "TieFighter", 48.0f, 26.0f, 90.0f, { 0.0f, -1.0f, 0.0f }, { -0.2f, 0.0f, 1.0f }, 1 },
+	/* 5: TIE on the left, firing at X-wing 1. */
+	{ "TieFighter", -54.0f, 14.0f, 70.0f, { 0.0f, -1.0f, 0.0f }, { 0.25f, 0.0f, 1.0f }, 2 },
+	/* 6: the TIE bursting upper left (ENV_BOX_VICTIM). */
+	{ "TieFighter", -26.0f, 33.0f, 80.0f, { 0.5f, -0.6f, -0.3f }, { 0.4f, 0.2f, 1.0f } },
+	/* 7: the Assault Gunboat with the TIEs, torpedoes for the frigate. */
+	{ "AssaultGunboat|Gunboat", 58.0f, 6.0f, 50.0f, { 0.0f, -1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, 12 },
+	/* 8: a YT-2000 on the left, heading into the fight. */
+	{ "FamilyTransport", -85.0f, -4.0f, 30.0f, { 0.35f, 0.94f, 0.05f }, { 0.4f, 0.0f, 1.0f } },
+	/* 9, 10: two A-wings on the right, after the gunboat. */
+	{ "Awing", 82.0f, 8.0f, 22.0f, { 0.0f, 1.0f, 0.0f }, { -0.3f, 0.0f, 1.0f }, 8 },
+	{ "Awing", 100.0f, -6.0f, 28.0f, { 0.0f, 1.0f, 0.0f }, { -0.2f, 0.0f, 1.0f }, 8 },
+	/* 11: the Nebulon-B behind, almost broadside, a little from ahead of
+	 * its beam: the bow to the viewer's left (seen when turned round, to
+	 * the right), angled 20 degrees toward the viewer. */
+	{ "Frigate2", 185.0f, -6.0f, 220.0f, { -0.94f, 0.34f, 0.0f }, { -0.08f, 0.0f, 1.0f } },
+};
+#define ENV_BOX_GUNBOAT 7
+#define ENV_BOX_VICTIM 6
+#define ENV_BOX_FRIGATE 11
+
+static const EnvSalvo k_box_salvos[] = {
+	{ 0, 3, ENV_GUNS_XWING_GOLD, { { 0.18f, 0.30f }, { 0.48f, 0.60f } }, 2 },
+	{ 1, 5, ENV_GUNS_XWING_GOLD, { { 0.20f, 0.32f } }, 1 },
+	{ 2, ENV_BOX_VICTIM, ENV_GUNS_XWING_GOLD, { { 0.30f, 0.45f } }, 1 },
+	{ 3, 0, ENV_GUNS_TIE, { { 0.15f, 0.26f }, { 0.42f, 0.53f } }, 2 },
+	{ 4, 0, ENV_GUNS_TIE, { { 0.30f, 0.40f } }, 1 },
+	{ 5, 1, ENV_GUNS_TIE, { { 0.18f, 0.28f }, { 0.45f, 0.55f } }, 2 },
+	{ 9, ENV_BOX_GUNBOAT, ENV_GUNS_AWING, { { 0.20f, 0.32f } }, 1 },
+	{ 10, ENV_BOX_GUNBOAT, ENV_GUNS_AWING, { { 0.35f, 0.47f } }, 1 },
+};
+
+typedef struct EnvSpaceScene {
+	const EnvShip* ships;
+	int count;
+	const EnvSalvo* salvos;
+	int salvo_count;
+} EnvSpaceScene;
+
+static const EnvSpaceScene k_scene_endor = { k_endor, ENV_ENDOR_COUNT, k_salvos,
+											 (int)(sizeof k_salvos / sizeof k_salvos[0]) };
+static const EnvSpaceScene k_scene_boxart = { k_boxart, (int)(sizeof k_boxart / sizeof k_boxart[0]), k_box_salvos,
+											  (int)(sizeof k_box_salvos / sizeof k_box_salvos[0]) };
 
 /* Sprites from the game's resource DATs (group, sprite id) plus the logo
  * and a generated beam profile. */
@@ -146,6 +220,8 @@ enum {
 	ENV_TEX_FIRE,
 	ENV_TEX_LOGO,
 	ENV_TEX_BEAM,
+	ENV_TEX_NEBULA, /* generated: the box art's purple nebula */
+	ENV_TEX_GLOW,   /* generated: a round glow (torpedoes) */
 	ENV_TEX_COUNT
 };
 
@@ -162,9 +238,11 @@ static const EnvTexSource k_tex_sources[ENV_TEX_COUNT] = {
 	{ "Explosions", 2003, 7 },
 	{ NULL, 0, 0 },            /* vr/logo.rgba */
 	{ NULL, 0, 0 },            /* generated */
+	{ NULL, 0, 0 },            /* generated */
+	{ NULL, 0, 0 },            /* generated */
 };
 
-typedef enum EnvMode { ENV_OFF = 0, ENV_ENDOR, ENV_HANGAR } EnvMode;
+typedef enum EnvMode { ENV_OFF = 0, ENV_ENDOR, ENV_HANGAR, ENV_BOXART } EnvMode;
 
 #define ENV_MAX_MESHES 24
 #define ENV_MAX_INSTANCES 40
@@ -175,7 +253,7 @@ typedef enum EnvMode { ENV_OFF = 0, ENV_ENDOR, ENV_HANGAR } EnvMode;
 #define ENV_FLOOR_FALLBACK (-870.0f)
 
 typedef struct EnvMesh {
-	char opt[32];
+	char opt[64]; /* as the scene names it (alternatives with '|') */
 	AeronSceneMesh* mesh;
 	float size_z; /* world units */
 	int tried;
@@ -218,12 +296,61 @@ static EnvMode env_mode(void) {
 	if (v && SDL_strcasecmp(v, "hangar") == 0) {
 		return ENV_HANGAR;
 	}
+	if (v && (SDL_strcasecmp(v, "xwing") == 0 || SDL_strcasecmp(v, "boxart") == 0)) {
+		return ENV_BOXART;
+	}
 	return ENV_ENDOR;
+}
+
+/* The ship list of the selected space scene (NULL in the hangar). */
+static const EnvSpaceScene* env_space(void) {
+	return s_env.mode == ENV_ENDOR ? &k_scene_endor : s_env.mode == ENV_BOXART ? &k_scene_boxart : NULL;
 }
 
 int XwaVrEnv_Enabled(void) { return env_mode() != ENV_OFF; }
 
-int XwaVrEnv_IsSpace(void) { return env_mode() == ENV_ENDOR; }
+int XwaVrEnv_IsSpace(void) {
+	const EnvMode m = env_mode();
+	return m == ENV_ENDOR || m == ENV_BOXART;
+}
+
+static void env_set3(float out[3], float x, float y, float z) {
+	out[0] = x;
+	out[1] = y;
+	out[2] = z;
+}
+
+int XwaVrEnv_SpaceLighting(XwaVrEnvLighting* out) {
+	const EnvMode m = env_mode();
+	if (!out || (m != ENV_ENDOR && m != ENV_BOXART)) {
+		return 0;
+	}
+	memset(out, 0, sizeof *out);
+	const float sun = env_float("XWA_XR_ENDOR_SUN", 1.6f);
+	if (m == ENV_ENDOR) {
+		/* A warm sun from the upper left behind the viewer, a faint green
+		 * bounce off the moon below right, deep-space ambient. */
+		env_set3(out->key_dir, -0.55f, 0.35f, 0.75f);
+		env_set3(out->key_color, 1.0f * sun, 0.95f * sun, 0.88f * sun);
+		env_set3(out->fill_dir, 0.55f, 0.35f, -0.75f);
+		env_set3(out->fill_color, 0.55f * 0.3f, 0.85f * 0.3f, 0.6f * 0.3f);
+		env_set3(out->ambient_sides, 0.05f, 0.05f, 0.05f);
+		env_set3(out->ambient_top, 0.06f, 0.06f, 0.06f);
+		env_set3(out->ambient_bottom, 0.04f, 0.08f, 0.05f);
+	} else {
+		/* The box art: white light from the upper left ahead (it catches the
+		 * tops and left sides of the craft flying away), the nebula's
+		 * magenta glow from ahead, a violet ambient. */
+		env_set3(out->key_dir, -0.45f, 0.55f, 0.70f);
+		env_set3(out->key_color, 1.0f * sun, 0.96f * sun, 0.92f * sun);
+		env_set3(out->fill_dir, 0.2f, 0.9f, -0.2f);
+		env_set3(out->fill_color, 0.75f * 0.45f, 0.30f * 0.45f, 0.85f * 0.45f);
+		env_set3(out->ambient_sides, 0.06f, 0.035f, 0.07f);
+		env_set3(out->ambient_top, 0.07f, 0.04f, 0.08f);
+		env_set3(out->ambient_bottom, 0.04f, 0.025f, 0.05f);
+	}
+	return 1;
+}
 
 static const char* env_craft(void) {
 	const char* v = getenv("XWA_XR_ENV_CRAFT");
@@ -253,9 +380,10 @@ static void env_list(void) {
 	}
 	s_env.hangar = -1;
 	s_env.floor_z = ENV_FLOOR_FALLBACK;
-	if (s_env.mode == ENV_ENDOR) {
-		for (int i = 0; i < ENV_ENDOR_COUNT; ++i) {
-			env_list_add(k_endor[i].opt);
+	const EnvSpaceScene* space = env_space();
+	if (space) {
+		for (int i = 0; i < space->count; ++i) {
+			env_list_add(space->ships[i].opt);
 		}
 		return;
 	}
@@ -283,7 +411,17 @@ static void env_load(AeronCommandBuffer* cmd, int index) {
 	AeronFlightModel model;
 	m->tried = 1;
 	memset(&model, 0, sizeof model);
-	if (!XwaRemasterShip_BuildOptModel(m->opt, &model)) {
+	/* The first of the '|'-separated names the game data has. */
+	int built = 0;
+	for (const char* name = m->opt; *name && !built;) {
+		const size_t n = strcspn(name, "|");
+		char one[64];
+		snprintf(one, sizeof one, "%.*s", (int)n, name);
+		built = one[0] && XwaRemasterShip_BuildOptModel(one, &model);
+		name += n + (name[n] == '|');
+	}
+	if (!built) {
+		Aeron_LogWarn("xwa.remaster", "VR environment: no OPT for '%s'", m->opt);
 		return;
 	}
 	m->size_z = (model.bounds.max.z - model.bounds.min.z) * AERON_OPT_UNITS_PER_METER;
@@ -393,24 +531,25 @@ static void env_add(int mesh, int pitch, int yaw, float x, float y, float z) {
 	s_env.count++;
 }
 
-/* World position (units) of k_endor[i]. */
-static void env_endor_pos(int i, float out[3]) {
-	const EnvShip* e = &k_endor[i];
+/* World position (units) of the space scene's ship i. */
+static void env_ship_pos(int i, float out[3]) {
+	const EnvShip* e = &env_space()->ships[i];
 	env_dir(e->yaw, e->pitch, out);
 	for (int a = 0; a < 3; ++a) {
 		out[a] *= e->dist * AERON_OPT_UNITS_PER_METER;
 	}
 }
 
-/* Orthonormal nose / right / up of k_endor[i], the nose aimed at its
- * target when it has one. */
-static void env_endor_basis(int i, float n[3], float r[3], float u[3]) {
-	const EnvShip* e = &k_endor[i];
+/* Orthonormal nose / right / up of the space scene's ship i, the nose
+ * aimed at its target when it has one. */
+static void env_ship_basis(int i, float n[3], float r[3], float u[3]) {
+	const EnvSpaceScene* sc = env_space();
+	const EnvShip* e = &sc->ships[i];
 	memcpy(n, e->nose, 3 * sizeof(float));
-	if (e->aim > 0 && e->aim <= ENV_ENDOR_COUNT) {
+	if (e->aim > 0 && e->aim <= sc->count) {
 		float from[3], to[3];
-		env_endor_pos(i, from);
-		env_endor_pos(e->aim - 1, to);
+		env_ship_pos(i, from);
+		env_ship_pos(e->aim - 1, to);
 		for (int a = 0; a < 3; ++a) {
 			n[a] = to[a] - from[a];
 		}
@@ -423,18 +562,19 @@ static void env_endor_basis(int i, float n[3], float r[3], float u[3]) {
 
 static void env_layout(void) {
 	s_env.count = 0;
-	if (s_env.mode == ENV_ENDOR) {
-		for (int i = 0; i < ENV_ENDOR_COUNT && s_env.count < ENV_MAX_INSTANCES; ++i) {
-			const int c = env_find(k_endor[i].opt);
+	const EnvSpaceScene* space = env_space();
+	if (space) {
+		for (int i = 0; i < space->count && s_env.count < ENV_MAX_INSTANCES; ++i) {
+			const int c = env_find(space->ships[i].opt);
 			if (c < 0) {
 				continue;
 			}
 			float pos[3];
-			env_endor_pos(i, pos);
+			env_ship_pos(i, pos);
 			s_env.mesh_of[s_env.count] = c;
-			s_env.far[s_env.count] = k_endor[i].dist > 1000.0f;
+			s_env.far[s_env.count] = space->ships[i].dist > 150.0f;
 			float n[3], r[3], u[3];
-			env_endor_basis(i, n, r, u);
+			env_ship_basis(i, n, r, u);
 			env_pose_matrix(n, u, pos, s_env.transform[s_env.count]);
 			s_env.count++;
 		}
@@ -564,6 +704,96 @@ static int env_make_beam(AeronCommandBuffer* cmd) {
 	return 1;
 }
 
+/* Value noise on a wrapping lattice, for the nebula. */
+static float env_hash(int x, int y, int seed) {
+	uint32_t h = (uint32_t)x * 374761393u + (uint32_t)y * 668265263u + (uint32_t)seed * 2246822519u;
+	h = (h ^ (h >> 13)) * 1274126177u;
+	return (float)((h ^ (h >> 16)) & 0xffffu) / 65535.0f;
+}
+
+static float env_noise(float x, float y, int seed) {
+	const int xi = (int)floorf(x), yi = (int)floorf(y);
+	float fx = x - (float)xi, fy = y - (float)yi;
+	fx = fx * fx * (3.0f - 2.0f * fx);
+	fy = fy * fy * (3.0f - 2.0f * fy);
+	const float a = env_hash(xi, yi, seed), b = env_hash(xi + 1, yi, seed);
+	const float c = env_hash(xi, yi + 1, seed), d = env_hash(xi + 1, yi + 1, seed);
+	return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
+}
+
+static float env_fbm(float x, float y, int seed, int octaves) {
+	float sum = 0.0f, amp = 0.5f, norm = 0.0f;
+	for (int o = 0; o < octaves; ++o) {
+		sum += amp * env_noise(x, y, seed + o * 17);
+		norm += amp;
+		x *= 2.03f;
+		y *= 2.03f;
+		amp *= 0.5f;
+	}
+	return sum / norm;
+}
+
+/* The box art's nebula: a long magenta-violet cloud, brighter pink
+ * filaments in its core, ragged dark lanes, fading to nothing at the edges
+ * (straight sRGB RGBA; made once, ~10 ms). */
+static int env_make_nebula(AeronCommandBuffer* cmd) {
+	enum { NW = 512, NH = 256 };
+	uint8_t* px = (uint8_t*)malloc((size_t)NW * NH * 4u);
+	if (!px) {
+		return 0;
+	}
+	for (int y = 0; y < NH; ++y) {
+		for (int x = 0; x < NW; ++x) {
+			const float u = ((float)x + 0.5f) / (float)NW * 2.0f - 1.0f;
+			const float v = ((float)y + 0.5f) / (float)NH * 2.0f - 1.0f;
+			/* Domain warp for billowing shapes. */
+			const float wx = env_fbm(u * 3.0f, v * 1.5f, 7, 4) - 0.5f;
+			const float wy = env_fbm(u * 3.0f + 5.2f, v * 1.5f + 1.3f, 11, 4) - 0.5f;
+			const float n = env_fbm(u * 4.0f + wx * 2.0f, v * 2.0f + wy * 2.0f, 3, 6);
+			const float fil = env_fbm(u * 10.0f + wx * 4.0f, v * 5.0f + wy * 4.0f, 23, 5);
+			/* Elliptical falloff, bent a little along its length. */
+			const float bend = v - 0.25f * sinf(u * 2.2f);
+			const float r = sqrtf(u * u + bend * bend * 1.6f);
+			const float edge = fmaxf(0.0f, 1.0f - r);
+			float density = fmaxf(0.0f, n - 0.32f) * 2.2f * edge * edge;
+			const float lanes = fmaxf(0.0f, 0.55f - env_fbm(u * 6.0f + 3.1f, v * 3.0f - wx * 3.0f, 41, 5)) * 1.8f;
+			density = fmaxf(0.0f, density - lanes * 0.35f * edge);
+			const float core = powf(fmaxf(0.0f, fil - 0.45f) * 2.0f, 2.0f) * density;
+			/* Violet body, magenta-pink to white-hot filaments. */
+			float rr = 0.66f * density + 1.0f * core, gg = 0.18f * density + 0.62f * core,
+				  bb = 0.80f * density + 0.90f * core;
+			const float a = fminf(1.0f, density * 1.4f + core);
+			uint8_t* p = &px[((size_t)y * NW + x) * 4];
+			/* Straight alpha: the colour without coverage. */
+			const float inv = a > 1e-4f ? 1.0f / a : 0.0f;
+			p[0] = (uint8_t)(fminf(1.0f, rr * inv) * 255.0f + 0.5f);
+			p[1] = (uint8_t)(fminf(1.0f, gg * inv) * 255.0f + 0.5f);
+			p[2] = (uint8_t)(fminf(1.0f, bb * inv) * 255.0f + 0.5f);
+			p[3] = (uint8_t)(a * 255.0f + 0.5f);
+		}
+	}
+	const int ok = env_make_texture(cmd, ENV_TEX_NEBULA, px, NW, NH);
+	free(px);
+	return ok;
+}
+
+/* A soft round glow (white, straight alpha), for the torpedoes' heads. */
+static int env_make_glow(AeronCommandBuffer* cmd) {
+	enum { GS = 64 };
+	uint8_t px[GS * GS * 4];
+	for (int y = 0; y < GS; ++y) {
+		for (int x = 0; x < GS; ++x) {
+			const float dx = ((float)x + 0.5f) / (float)GS * 2.0f - 1.0f, dy = ((float)y + 0.5f) / (float)GS * 2.0f - 1.0f;
+			const float d2 = dx * dx + dy * dy;
+			const float a = fminf(1.0f, expf(-d2 * 18.0f) + 0.35f * expf(-d2 * 4.0f)) * fmaxf(0.0f, 1.0f - d2);
+			uint8_t* p = &px[(y * GS + x) * 4];
+			p[0] = p[1] = p[2] = 255;
+			p[3] = (uint8_t)(a * 255.0f + 0.5f);
+		}
+	}
+	return env_make_texture(cmd, ENV_TEX_GLOW, px, GS, GS);
+}
+
 /* Image assets: "XWAL", u32 width, u32 height, straight RGBA. Shipped in
  * the APK (assets/vr/<name>.rgba) or next to the executable; never part of
  * the source tree. `override_env` names a variable that overrides the path.
@@ -652,17 +882,31 @@ static void env_load_dat_sprite(AeronCommandBuffer* cmd, int slot) {
 	Xwa2dFrameSet_Free(&set);
 }
 
-/* One sprite per call (only the frame outside the space scene); returns 1
- * when something was loaded. */
+/* The sprites a scene uses. */
+static int env_tex_needed(int slot) {
+	switch (s_env.mode) {
+		case ENV_ENDOR:
+			return slot != ENV_TEX_NEBULA && slot != ENV_TEX_GLOW;
+		case ENV_BOXART:
+			return slot != ENV_TEX_DEATHSTAR && slot != ENV_TEX_ENDOR;
+		default:
+			return slot == ENV_TEX_FRAME;
+	}
+}
+
+/* One sprite per call; returns 1 when something was loaded. */
 static int env_load_sprites(AeronCommandBuffer* cmd) {
-	const int count = s_env.mode == ENV_ENDOR ? ENV_TEX_COUNT : ENV_TEX_FRAME + 1;
-	for (int i = 0; i < count; ++i) {
-		if (s_env.tex_tried[i]) {
+	for (int i = 0; i < ENV_TEX_COUNT; ++i) {
+		if (s_env.tex_tried[i] || !env_tex_needed(i)) {
 			continue;
 		}
 		s_env.tex_tried[i] = 1;
 		if (i == ENV_TEX_BEAM) {
 			env_make_beam(cmd);
+		} else if (i == ENV_TEX_NEBULA) {
+			env_make_nebula(cmd);
+		} else if (i == ENV_TEX_GLOW) {
+			env_make_glow(cmd);
 		} else if (i == ENV_TEX_LOGO) {
 			env_load_rgba(cmd, i, "logo", "XWA_XR_LOGO");
 		} else if (i == ENV_TEX_FRAME) {
@@ -721,7 +965,7 @@ void XwaVrEnv_View(float pos[3], float rows[9]) {
 	 * is laid out around the viewer at the origin. */
 	float x = -500.0f, y = -1150.0f, yaw = 0.0f, eye = 1.7f;
 	const char* v = getenv("XWA_XR_ENV_VIEW");
-	if (s_env.mode == ENV_ENDOR) {
+	if (env_space()) {
 		x = y = 0.0f;
 	} else if (v && v[0]) {
 		sscanf(v, "%f,%f,%f,%f", &x, &y, &yaw, &eye);
@@ -734,7 +978,7 @@ void XwaVrEnv_View(float pos[3], float rows[9]) {
 	const float back = env_float("XWA_XR_ENV_BACK", 0.8f) * AERON_OPT_UNITS_PER_METER;
 	pos[0] = x - f[0] * back;
 	pos[1] = y - f[1] * back;
-	pos[2] = s_env.mode == ENV_ENDOR ? 0.0f : s_env.floor_z + eye * AERON_OPT_UNITS_PER_METER;
+	pos[2] = env_space() ? 0.0f : s_env.floor_z + eye * AERON_OPT_UNITS_PER_METER;
 	memcpy(s_env.view_pos, pos, sizeof s_env.view_pos);
 	rows[0] = f[1];
 	rows[1] = -f[0];
@@ -1015,6 +1259,135 @@ int XwaVrEnv_CommitFrameLayer(AeronCommandBuffer* cmd, float brightness) {
 	return 1;
 }
 
+/* A sky sprite `w_deg` x `h_deg` toward yaw/pitch, rolled (for the
+ * nebula's long clouds). */
+static void env_sky_rect(AeronScene3D* scene, int slot, float yaw, float pitch, float w_deg, float h_deg, float roll,
+						 const float tint[4]) {
+	if (!s_env.tex[slot]) {
+		return;
+	}
+	float center[3], f[3], r[3], u[3];
+	static const float z[3] = { 0.0f, 0.0f, 1.0f };
+	env_sky_point(yaw, pitch, center);
+	for (int k = 0; k < 3; ++k) {
+		f[k] = center[k] - s_env.view_pos[k];
+	}
+	env_norm(f);
+	env_cross(f, z, r);
+	env_norm(r);
+	env_cross(r, f, u);
+	const float rr = roll * 3.14159265358979f / 180.0f, cr = cosf(rr), sr = sinf(rr);
+	const float hw = ENV_SKY_DIST * tanf(fminf(w_deg, 170.0f) * 3.14159265358979f / 360.0f);
+	const float hh = ENV_SKY_DIST * tanf(fminf(h_deg, 170.0f) * 3.14159265358979f / 360.0f);
+	float ax[3], ay[3], c[4][3];
+	for (int k = 0; k < 3; ++k) {
+		ax[k] = (r[k] * cr + u[k] * sr) * hw;
+		ay[k] = (u[k] * cr - r[k] * sr) * hh;
+	}
+	env_rect(center, ax, ay, c);
+	env_quad(scene, slot, AERON_SCENE_BILLBOARD_STAGE_SKY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, tint);
+}
+
+/* The dogfight: each salvo frozen along its shooter's nose. */
+static void env_submit_salvos(AeronScene3D* scene) {
+	const EnvSpaceScene* sc = env_space();
+	const float k = AERON_OPT_UNITS_PER_METER;
+	for (int si = 0; si < sc->salvo_count; ++si) {
+		const EnvSalvo* sv = &sc->salvos[si];
+		float from[3], to[3], n[3], r[3], u[3];
+		env_ship_pos(sv->shooter, from);
+		env_ship_pos(sv->target, to);
+		env_ship_basis(sv->shooter, n, r, u);
+		const float dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2];
+		const float dist = sqrtf(dx * dx + dy * dy + dz * dz);
+		static const float xw_guns[4][2] = { { 5.2f, 1.3f }, { -5.2f, 1.3f }, { 5.2f, -1.3f }, { -5.2f, -1.3f } };
+		static const float tie_guns[2][2] = { { 0.6f, -1.0f }, { -0.6f, -1.0f } };
+		static const float aw_guns[2][2] = { { 3.3f, 0.0f }, { -3.3f, 0.0f } };
+		static const float red[4] = { 2.4f, 0.35f, 0.25f, 1.0f };
+		static const float gold[4] = { 2.6f, 1.5f, 0.3f, 1.0f };
+		static const float green[4] = { 0.4f, 2.4f, 0.45f, 1.0f };
+		const float(*guns)[2] = xw_guns;
+		int gun_count = 4;
+		const float* tint = red;
+		switch (sv->guns) {
+			case ENV_GUNS_XWING_GOLD:
+				tint = gold;
+				break;
+			case ENV_GUNS_TIE:
+				guns = tie_guns;
+				gun_count = 2;
+				tint = green;
+				break;
+			case ENV_GUNS_AWING:
+				guns = aw_guns;
+				gun_count = 2;
+				break;
+			default:
+				break;
+		}
+		for (int sp = 0; sp < sv->span_count; ++sp) {
+			for (int g = 0; g < gun_count; ++g) {
+				float a0[3], a1[3];
+				for (int a = 0; a < 3; ++a) {
+					const float gun = from[a] + (r[a] * guns[g][0] + u[a] * guns[g][1]) * k;
+					a0[a] = gun + n[a] * dist * sv->spans[sp][0];
+					a1[a] = gun + n[a] * dist * sv->spans[sp][1];
+				}
+				env_beam(scene, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, a0, a1, 0.4f * k, tint);
+			}
+		}
+	}
+}
+
+/* A ship bursting: an explosion over its right half, a little in front of
+ * it so the depth test keeps the near half visible. `scale` 1 = a TIE. */
+static void env_submit_burst(AeronScene3D* scene, int ship, float scale) {
+	const float k = AERON_OPT_UNITS_PER_METER;
+	float p[3], f[3], r[3], c[4][3];
+	static const float z[3] = { 0.0f, 0.0f, 1.0f };
+	env_ship_pos(ship, p);
+	for (int a = 0; a < 3; ++a) {
+		f[a] = p[a] - s_env.view_pos[a];
+	}
+	env_norm(f);
+	env_cross(f, z, r);
+	env_norm(r);
+	static const float white[4] = { 1.5f, 1.4f, 1.3f, 1.0f };
+	float q[3];
+	for (int a = 0; a < 3; ++a) {
+		q[a] = p[a] + (r[a] * 4.5f - f[a] * 5.0f) * k * scale;
+	}
+	env_facing(q, 13.0f * k * scale, 0.0f, c);
+	env_quad(scene, ENV_TEX_BLAST, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
+	for (int a = 0; a < 3; ++a) {
+		q[a] = p[a] + (r[a] * 5.5f + z[a] * 1.2f - f[a] * 5.5f) * k * scale;
+	}
+	env_facing(q, 7.0f * k * scale, 30.0f, c);
+	env_quad(scene, ENV_TEX_FIRE, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
+}
+
+/* The logo above the virtual screen and its frame. */
+static void env_submit_logo(AeronScene3D* scene) {
+	if (!s_env.tex[ENV_TEX_LOGO]) {
+		return;
+	}
+	EnvScreen sc;
+	env_screen(&sc);
+	float c[4][3];
+	/* In the frame's plane, above it. */
+	const float f = sc.frame_scale;
+	const float lw = 0.6f * sc.pic_w * f * env_float("XWA_XR_LOGO_SCALE", 1.0f);
+	const float lh = lw * (float)s_env.tex_h[ENV_TEX_LOGO] / (float)s_env.tex_w[ENV_TEX_LOGO];
+	const float center[3] = { s_env.view_pos[0], s_env.view_pos[1] + (sc.frame_dist + 0.02f) * sc.k,
+							  s_env.view_pos[2] +
+								  ((sc.lift + 0.5f * sc.pic_h + env_frame_top(&sc)) * f + 0.05f + 0.5f * lh) * sc.k };
+	const float ax[3] = { 0.5f * lw * sc.k, 0.0f, 0.0f };
+	const float ay[3] = { 0.0f, 0.0f, 0.5f * lh * sc.k };
+	env_rect(center, ax, ay, c);
+	static const float tint[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+	env_quad(scene, ENV_TEX_LOGO, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, tint);
+}
+
 static void env_submit_endor_sprites(AeronScene3D* scene) {
 	const float k = AERON_OPT_UNITS_PER_METER;
 	float c[4][3];
@@ -1058,64 +1431,15 @@ static void env_submit_endor_sprites(AeronScene3D* scene) {
 		env_facing(q, 1300.0f * k, 40.0f, c);
 		env_quad(scene, ENV_TEX_FIRE, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
 	}
-	/* The dogfight: frozen salvos along each shooter's nose. */
-	for (size_t si = 0; si < sizeof k_salvos / sizeof k_salvos[0]; ++si) {
-		const EnvSalvo* sv = &k_salvos[si];
-		float from[3], to[3], n[3], r[3], u[3];
-		env_endor_pos(sv->shooter, from);
-		env_endor_pos(sv->target, to);
-		env_endor_basis(sv->shooter, n, r, u);
-		const float dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2];
-		const float dist = sqrtf(dx * dx + dy * dy + dz * dz);
-		static const float xw_guns[4][2] = { { 5.2f, 1.3f }, { -5.2f, 1.3f }, { 5.2f, -1.3f }, { -5.2f, -1.3f } };
-		static const float tie_guns[2][2] = { { 0.6f, -1.0f }, { -0.6f, -1.0f } };
-		const float(*guns)[2] = sv->xwing ? xw_guns : tie_guns;
-		const int gun_count = sv->xwing ? 4 : 2;
-		static const float red[4] = { 2.4f, 0.35f, 0.25f, 1.0f };
-		static const float green[4] = { 0.4f, 2.4f, 0.45f, 1.0f };
-		for (int sp = 0; sp < sv->span_count; ++sp) {
-			for (int g = 0; g < gun_count; ++g) {
-				float a0[3], a1[3];
-				for (int a = 0; a < 3; ++a) {
-					const float gun = from[a] + (r[a] * guns[g][0] + u[a] * guns[g][1]) * k;
-					a0[a] = gun + n[a] * dist * sv->spans[sp][0];
-					a1[a] = gun + n[a] * dist * sv->spans[sp][1];
-				}
-				env_beam(scene, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, a0, a1, 0.4f * k, sv->xwing ? red : green);
-			}
-		}
-	}
-	/* The stricken TIE: an explosion over its right half, a little in front
-	 * of it so the depth test keeps the near half visible. */
-	{
-		float p[3], f[3], r[3];
-		static const float z[3] = { 0.0f, 0.0f, 1.0f };
-		env_endor_pos(ENV_VICTIM, p);
-		for (int a = 0; a < 3; ++a) {
-			f[a] = p[a] - s_env.view_pos[a];
-		}
-		env_norm(f);
-		env_cross(f, z, r);
-		env_norm(r);
-		static const float white[4] = { 1.5f, 1.4f, 1.3f, 1.0f };
-		float q[3];
-		for (int a = 0; a < 3; ++a) {
-			q[a] = p[a] + (r[a] * 4.5f - f[a] * 5.0f) * k;
-		}
-		env_facing(q, 13.0f * k, 0.0f, c);
-		env_quad(scene, ENV_TEX_BLAST, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
-		for (int a = 0; a < 3; ++a) {
-			q[a] = p[a] + (r[a] * 5.5f + z[a] * 1.2f - f[a] * 5.5f) * k;
-		}
-		env_facing(q, 7.0f * k, 30.0f, c);
-		env_quad(scene, ENV_TEX_FIRE, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
-	}
+	env_submit_salvos(scene);
+	/* The stricken TIE. */
+	env_submit_burst(scene, ENV_VICTIM, 1.0f);
 	/* Two bolts from the Falcon's top turret toward the TIE below the
 	 * screen, frozen in flight. */
 	{
 		float from[3], to[3];
-		env_endor_pos(ENV_FALCON, from);
-		env_endor_pos(ENV_FALCON_TARGET, to);
+		env_ship_pos(ENV_FALCON, from);
+		env_ship_pos(ENV_FALCON_TARGET, to);
 		float up[3] = { k_endor[ENV_FALCON].up[0], k_endor[ENV_FALCON].up[1], k_endor[ENV_FALCON].up[2] };
 		env_norm(up);
 		for (int a = 0; a < 3; ++a) {
@@ -1132,23 +1456,69 @@ static void env_submit_endor_sprites(AeronScene3D* scene) {
 			env_beam(scene, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, a0, a1, 0.6f * k, red);
 		}
 	}
-	/* The logo above the virtual screen and its frame. */
-	if (s_env.tex[ENV_TEX_LOGO]) {
-		EnvScreen sc;
-		env_screen(&sc);
-		/* In the frame's plane, above it. */
-		const float f = sc.frame_scale;
-		const float lw = 0.6f * sc.pic_w * f * env_float("XWA_XR_LOGO_SCALE", 1.0f);
-		const float lh = lw * (float)s_env.tex_h[ENV_TEX_LOGO] / (float)s_env.tex_w[ENV_TEX_LOGO];
-		const float center[3] = { s_env.view_pos[0], s_env.view_pos[1] + (sc.frame_dist + 0.02f) * sc.k,
-								  s_env.view_pos[2] +
-									  ((sc.lift + 0.5f * sc.pic_h + env_frame_top(&sc)) * f + 0.05f + 0.5f * lh) * sc.k };
-		const float ax[3] = { 0.5f * lw * sc.k, 0.0f, 0.0f };
-		const float ay[3] = { 0.0f, 0.0f, 0.5f * lh * sc.k };
-		env_rect(center, ax, ay, c);
-		static const float tint[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
-		env_quad(scene, ENV_TEX_LOGO, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, tint);
+	env_submit_logo(scene);
+}
+
+/* The X-Wing box art: the nebula, the dogfight, the bursting TIE and the
+ * gunboat's three torpedoes on their way to the frigate. */
+static void env_submit_boxart_sprites(AeronScene3D* scene) {
+	const float k = AERON_OPT_UNITS_PER_METER;
+	/* The nebula: a long magenta cloud from the upper left down through
+	 * the view to the lower right (as on the cover), fainter wisps around
+	 * it and behind. XWA_XR_NEBULA_BRIGHTNESS scales it. */
+	{
+		const float b = env_float("XWA_XR_NEBULA_BRIGHTNESS", 1.0f);
+		static const struct {
+			float yaw, pitch, w, h, roll, gain;
+		} clouds[] = {
+			{ -10.0f, 12.0f, 120.0f, 62.0f, -32.0f, 1.15f }, /* the main band, behind the screen */
+			{ -62.0f, 38.0f, 80.0f, 40.0f, -28.0f, 1.0f },   /* its upper left end */
+			{ 42.0f, -30.0f, 90.0f, 44.0f, -38.0f, 0.9f },   /* lower right, behind the big X-wing */
+			{ 30.0f, 40.0f, 60.0f, 26.0f, 15.0f, 0.4f },     /* a wisp over the TIEs */
+			{ -110.0f, -10.0f, 70.0f, 34.0f, 20.0f, 0.35f }, /* left, behind the YT-2000 */
+			{ 175.0f, 8.0f, 110.0f, 50.0f, -12.0f, 0.55f },  /* behind the frigate */
+		};
+		for (size_t i = 0; i < sizeof clouds / sizeof clouds[0]; ++i) {
+			const float g = clouds[i].gain * b;
+			const float tint[4] = { g, g, g, 1.0f };
+			env_sky_rect(scene, ENV_TEX_NEBULA, clouds[i].yaw, clouds[i].pitch, clouds[i].w, clouds[i].h, clouds[i].roll,
+						 tint);
+		}
 	}
+	env_submit_salvos(scene);
+	env_submit_burst(scene, ENV_BOX_VICTIM, 1.0f);
+	/* Three proton torpedoes from the gunboat's nose launchers toward the
+	 * frigate, spread a little: a hot glowing head with a short trail. */
+	{
+		float from[3], to[3], n[3], r[3], u[3], c[4][3];
+		env_ship_pos(ENV_BOX_GUNBOAT, from);
+		env_ship_pos(ENV_BOX_FRIGATE, to);
+		env_ship_basis(ENV_BOX_GUNBOAT, n, r, u);
+		static const struct {
+			float along, side, up;
+		} torps[3] = { { 0.09f, -1.5f, 0.5f }, { 0.16f, 1.8f, -0.4f }, { 0.24f, -0.3f, 1.2f } };
+		static const float trail[4] = { 2.2f, 0.7f, 0.35f, 1.0f };
+		static const float head[4] = { 3.0f, 1.3f, 0.8f, 1.0f };
+		static const float core[4] = { 3.0f, 2.6f, 2.2f, 1.0f };
+		for (int t = 0; t < 3; ++t) {
+			float p[3], tail[3];
+			for (int a = 0; a < 3; ++a) {
+				/* Fanning out with distance: launched together. */
+				const float spread = torps[t].along * 8.0f;
+				p[a] = from[a] + (to[a] - from[a]) * torps[t].along +
+					   (r[a] * torps[t].side + u[a] * torps[t].up) * spread * k;
+				tail[a] = p[a] - n[a] * 9.0f * k;
+			}
+			env_beam(scene, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, tail, p, 1.1f * k, trail);
+			env_facing(p, 3.2f * k, 0.0f, c);
+			env_quad(scene, ENV_TEX_GLOW, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_ADDITIVE, c,
+					 head);
+			env_facing(p, 1.2f * k, 0.0f, c);
+			env_quad(scene, ENV_TEX_GLOW, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_ADDITIVE, c,
+					 core);
+		}
+	}
+	env_submit_logo(scene);
 }
 
 void XwaVrEnv_Submit(AeronScene3D* scene) {
@@ -1170,6 +1540,8 @@ void XwaVrEnv_Submit(AeronScene3D* scene) {
 	}
 	if (s_env.mode == ENV_ENDOR) {
 		env_submit_endor_sprites(scene);
+	} else if (s_env.mode == ENV_BOXART) {
+		env_submit_boxart_sprites(scene);
 	}
 	env_submit_frame(scene);
 }
