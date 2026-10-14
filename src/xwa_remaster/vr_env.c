@@ -281,10 +281,15 @@ static const EnvShip k_xvtart[] = {
 /* The explosion: yaw, pitch, metres, diameter in metres. */
 static const float k_xvt_blast[4] = { 0.0f, -30.0f, 90.0f, 55.0f };
 
-/* The green streaks: across the big X-wing, and in from the right. */
+/* The laser streaks: green across the big X-wing and in from the right,
+ * red from the X-wing in the explosion. */
 static const EnvStreak k_xvt_streaks[] = {
 	{ { 14.0f, -20.0f, 30.0f }, { 38.0f, -40.0f, 12.0f }, 1 },
-	{ { 62.0f, 2.0f, 60.0f }, { 33.0f, 9.0f, 105.0f }, 1 },
+	{ { 62.0f, 2.0f, 60.0f }, { 38.0f, 5.0f, 98.0f }, 1 },
+	/* The X-wing coming out of the explosion fires: red bolts from two of
+	 * its cannons along its nose, down past the Interceptor's wing. */
+	{ { -13.7f, -30.0f, 54.8f }, { -25.1f, -34.8f, 35.5f }, 0 },
+	{ { -4.5f, -38.3f, 55.2f }, { -11.0f, -48.5f, 36.1f }, 0 },
 };
 
 typedef struct EnvSpaceScene {
@@ -952,7 +957,7 @@ static int env_make_nebula(AeronCommandBuffer* cmd) {
  *           (tinted here), faded out at the bottom.
  *   xvt_tie_pilot, xvt_rebel_pilot — the two pilots behind the X-Wing vs.
  *           TIE Fighter scene (XWA_XR_TIE_PILOT, XWA_XR_REBEL_PILOT), the
- *           rebel facing left, vignetted to transparent at the edges. */
+ *           rebel looking left, vignetted to transparent at the edges. */
 static int env_load_rgba(AeronCommandBuffer* cmd, int slot, const char* name, const char* override_env) {
 	const char* override = getenv(override_env);
 	if (override && strcmp(override, "0") == 0) {
@@ -1763,12 +1768,12 @@ static void env_submit_xvtart_sprites(AeronScene3D* scene) {
 		const float tint[4] = { 0.40f * b, 0.42f * b, 0.55f * b, 1.0f };
 		static const struct {
 			int slot;
-			float yaw;
-		} pilots[] = { { ENV_TEX_TIE_PILOT, -31.0f }, { ENV_TEX_REBEL_PILOT, 31.0f } };
+			float yaw, h;
+		} pilots[] = { { ENV_TEX_TIE_PILOT, -31.0f, 46.0f }, { ENV_TEX_REBEL_PILOT, 35.0f, 42.0f } };
 		for (size_t i = 0; i < sizeof pilots / sizeof pilots[0]; ++i) {
 			const int slot = pilots[i].slot;
 			if (s_env.tex[slot] && s_env.tex_h[slot] > 0) {
-				const float h = 46.0f;
+				const float h = pilots[i].h;
 				const float w = h * (float)s_env.tex_w[slot] / (float)s_env.tex_h[slot];
 				env_sky_rect(scene, slot, pilots[i].yaw, 24.0f, w, h, 0.0f, tint);
 			}
