@@ -166,13 +166,16 @@ static const EnvShip k_boxart[] = {
 	/* 2: upper left, by the burst: flying right, from its rear left quarter,
 	 * banked right wing up. */
 	{ "Xwing", -34.0f, 34.0f, 70.0f, { 0.75f, 0.60f, 0.15f }, { -0.35f, -0.25f, 0.90f }, 0, 1 },
-	/* 3: upper middle (left of the logo): nose to the upper left, firing at
-	 * X-wing 2, its wings tilted. */
-	{ "TieFighter", -19.0f, 24.0f, 60.0f, { -0.70f, 0.20f, 0.65f }, { 0.55f, 0.0f, 0.83f }, 0, 1 },
-	/* 4: right of the middle: nose to the left, firing at X-wing 1. */
-	{ "TieFighter", 30.0f, 7.0f, 52.0f, { -0.88f, -0.30f, -0.15f }, { 0.45f, 0.0f, 0.90f }, 0, 1 },
-	/* 5: at the cover's right edge, mostly cut off there. */
-	{ "TieFighter", 52.0f, 4.0f, 80.0f, { -0.90f, 0.0f, 0.10f }, { 0.0f, 0.0f, 1.0f }, 0, 1 },
+	/* 3: upper middle (left of the logo): coming at us three-quarters
+	 * from the front left, cockpit toward us, the wings seen obliquely
+	 * with their axis rising to the right; firing to the upper left. */
+	{ "TieFighter", -19.0f, 24.0f, 60.0f, { -0.65f, -0.65f, 0.40f }, { -0.09f, 0.59f, 0.80f }, 0, 1 },
+	/* 4: right of the middle: three-quarters from the front left, window
+	 * toward us, the wing axis falling steeply to the right; firing to the
+	 * lower left. */
+	{ "TieFighter", 30.0f, 7.0f, 52.0f, { -0.60f, -0.75f, -0.25f }, { 0.53f, -0.62f, 0.57f }, 0, 1 },
+	/* 5: at the cover's right edge, mostly cut off there: as TIE 4. */
+	{ "TieFighter", 52.0f, 4.0f, 80.0f, { -0.60f, -0.75f, -0.25f }, { 0.53f, -0.62f, 0.57f }, 0, 1 },
 };
 
 /* Where the fighter bursts, upper left by X-wing 2: yaw, pitch, metres. */
