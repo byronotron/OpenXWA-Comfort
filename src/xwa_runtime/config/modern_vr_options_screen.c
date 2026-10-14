@@ -66,8 +66,8 @@ static const char* const k_res_texts[] = { "70%", "80%", "90%", "100%", "110%", 
 static const char* const k_res_values[] = { "0.7", "0.8", "0.9", "1.0", "1.1", "1.2" };
 static const char* const k_fov_texts[] = { "Off", "Low", "Medium", "High" };
 static const char* const k_fov_values[] = { "0", "low", "medium", "high" };
-static const char* const k_env_texts[] = { "Off", "Battle of Endor", "Hangar", "X-Wing Box Art" };
-static const char* const k_env_values[] = { "0", "endor", "hangar", "xwing" };
+static const char* const k_env_texts[] = { "Off", "Battle of Endor", "Hangar", "X-Wing Box Art", "TIE Fighter Box Art" };
+static const char* const k_env_values[] = { "0", "endor", "hangar", "xwing", "tiefighter" };
 static const char* const k_refresh_texts[] = { "Headset Setting", "72 Hz", "80 Hz", "90 Hz", "120 Hz" };
 static const char* const k_refresh_values[] = { "0", "72", "80", "90", "120" };
 static const char* const k_shading_texts[] = { "Full", "Lite (faster)" };
@@ -87,7 +87,7 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "AERON_XR_INVERT_PITCH", "Invert Thumbstick Pitch", k_toggle_texts, k_toggle_values, 2, 0, 97 },
 	{ "XWA_XR_VOICE", "Voice Commands", k_voice_texts, k_voice_values, 3, 1, 98 },
 	{ "XWA_XR_BUTTON_CARD", "Button Card", k_toggle_texts, k_toggle_values, 2, 1, 92 },
-	{ "XWA_XR_ENVIRONMENT", "Menu Scene", k_env_texts, k_env_values, 4, 1, 90 },
+	{ "XWA_XR_ENVIRONMENT", "Menu Scene", k_env_texts, k_env_values, 5, 1, 90 },
 	{ "AERON_XR_RESOLUTION_SCALE", "Resolution (restart)", k_res_texts, k_res_values, 6, 4, 86 },
 	{ "AERON_XR_REFRESH_RATE", "Refresh Rate", k_refresh_texts, k_refresh_values, 5, 0, 99 },
 	{ "XWA_XR_GPU_OPT", "GPU Optimizations", k_toggle_texts, k_toggle_values, 2, 1, 79 },

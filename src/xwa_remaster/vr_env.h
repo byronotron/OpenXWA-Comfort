@@ -13,6 +13,10 @@
  *                     fighters at their attitudes on the cover, a burst,
  *                     their fire and the purple nebula, spread around the
  *                     screen so none hides behind it;
+ *   tiefighter      — the TIE Fighter box art: its Interceptors, TIE fighters,
+ *                     bomber and the X-wing breaking up in the explosion,
+ *                     at their cover attitudes around the screen, before
+ *                     Vader's helmet (vr/vader.rgba, APK assets only);
  *   hangar          — the carrier hangar (Hangar.opt and its props, laid
  *                     out like the in-mission hangar);
  *   0               — off.
