@@ -80,6 +80,10 @@ typedef struct EnvShip {
 	float yaw, pitch, dist;
 	float nose[3], up[3];
 	int aim; /* 1-based index (same scene) the nose points at (0 = use nose) */
+	/* 1: nose and up are as the viewer sees the craft (x right, y away
+	 * along the line of sight to it, z up), so it keeps the look it has
+	 * on a picture wherever around the viewer it is placed. */
+	int view;
 } EnvShip;
 
 #define ENV_DS_YAW 36.0f
@@ -151,39 +155,42 @@ static const EnvSalvo k_salvos[] = {
  * 15 below to 30 above with the logo): the big X-wing seen from behind
  * lower right, the TIEs it fights to the right, a second X-wing and its TIE
  * on the left, the third X-wing upper left by the burst. Further out: a
- * YT-2000 on the left, two A-wings on the right, an Assault Gunboat with
- * the TIEs firing three torpedoes at a Nebulon-B frigate behind the viewer,
- * about 200 m away and seen a little from the side. Same conventions as
+ * YT-2000 on the left, two A-wings on the right, a TIE Bomber with the
+ * TIEs firing three blue torpedoes at a Nebulon-B frigate behind the
+ * viewer, 320 m away and seen a little from the side. Same conventions as
  * the Endor scene. */
 static const EnvShip k_boxart[] = {
-	/* 0: the big X-wing, lower right, seen from behind and above, flying
-	 * into the scene toward the TIEs. */
-	{ "Xwing", 36.0f, -21.0f, 22.0f, { 0.42f, 0.90f, 0.12f }, { 0.22f, -0.12f, 1.0f } },
-	/* 1: X-wing on the left, side on, at TIE 5. */
-	{ "Xwing", -42.0f, -6.0f, 32.0f, { 0.0f, 1.0f, 0.0f }, { -0.45f, 0.0f, 1.0f }, 6 },
-	/* 2: X-wing upper left, past the bursting TIE 6. */
-	{ "Xwing", -36.0f, 26.0f, 70.0f, { 0.0f, 1.0f, 0.0f }, { 0.3f, 0.0f, 1.0f }, 7 },
-	/* 3: TIE right of the screen, firing at X-wing 0. */
-	{ "TieFighter", 32.0f, 12.0f, 55.0f, { 0.0f, -1.0f, 0.0f }, { 0.15f, 0.0f, 1.0f }, 1 },
-	/* 4: TIE further up right. */
-	{ "TieFighter", 48.0f, 26.0f, 90.0f, { 0.0f, -1.0f, 0.0f }, { -0.2f, 0.0f, 1.0f }, 1 },
+	/* The fighters keep their attitude from the cover, as the viewer sees
+	 * them (view-relative nose / up). */
+	/* 0: the big X-wing, cover lower right: from behind, banked left wing
+	 * down, climbing away to the upper left; its engines toward us. */
+	{ "Xwing", 36.0f, -21.0f, 22.0f, { -0.30f, 0.88f, 0.37f }, { -0.55f, -0.30f, 0.78f }, 0, 1 },
+	/* 1: cover middle left: away to the upper right, rolled near knife
+	 * edge, its top and engines toward us. */
+	{ "Xwing", -42.0f, -6.0f, 32.0f, { 0.72f, 0.55f, 0.42f }, { 0.47f, -0.82f, 0.28f }, 0, 1 },
+	/* 2: cover upper left, by the burst: flying right, rear quarter, banked. */
+	{ "Xwing", -36.0f, 26.0f, 70.0f, { 0.80f, 0.50f, -0.10f }, { -0.30f, -0.30f, 0.90f }, 0, 1 },
+	/* 3: cover right TIE: nose to the left, firing across. */
+	{ "TieFighter", 32.0f, 12.0f, 55.0f, { -0.85f, -0.30f, -0.25f }, { 0.40f, 0.0f, 0.90f }, 0, 1 },
+	/* 4: cover upper TIE: nose to the upper left. */
+	{ "TieFighter", 48.0f, 26.0f, 90.0f, { -0.75f, -0.10f, 0.60f }, { 0.50f, -0.20f, 0.85f }, 0, 1 },
 	/* 5: TIE on the left, firing at X-wing 1. */
 	{ "TieFighter", -54.0f, 14.0f, 70.0f, { 0.0f, -1.0f, 0.0f }, { 0.25f, 0.0f, 1.0f }, 2 },
 	/* 6: the TIE bursting upper left (ENV_BOX_VICTIM). */
 	{ "TieFighter", -26.0f, 33.0f, 80.0f, { 0.5f, -0.6f, -0.3f }, { 0.4f, 0.2f, 1.0f } },
-	/* 7: the Assault Gunboat with the TIEs, torpedoes for the frigate. */
-	{ "AssaultGunboat|Gunboat", 58.0f, 6.0f, 50.0f, { 0.0f, -1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, 12 },
+	/* 7: a TIE Bomber with the TIEs, torpedoes for the frigate. */
+	{ "TieBomber", 58.0f, 6.0f, 50.0f, { 0.0f, -1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, 12 },
 	/* 8: a YT-2000 on the left, heading into the fight. */
 	{ "FamilyTransport", -85.0f, -4.0f, 30.0f, { 0.35f, 0.94f, 0.05f }, { 0.4f, 0.0f, 1.0f } },
-	/* 9, 10: two A-wings on the right, after the gunboat. */
+	/* 9, 10: two A-wings on the right, after the bomber. */
 	{ "Awing", 82.0f, 8.0f, 22.0f, { 0.0f, 1.0f, 0.0f }, { -0.3f, 0.0f, 1.0f }, 8 },
 	{ "Awing", 100.0f, -6.0f, 28.0f, { 0.0f, 1.0f, 0.0f }, { -0.2f, 0.0f, 1.0f }, 8 },
-	/* 11: the Nebulon-B behind, almost broadside, a little from ahead of
-	 * its beam: the bow to the viewer's left (seen when turned round, to
-	 * the right), angled 20 degrees toward the viewer. */
-	{ "Frigate2", 185.0f, -6.0f, 220.0f, { -0.94f, 0.34f, 0.0f }, { -0.08f, 0.0f, 1.0f } },
+	/* 11: the Nebulon-B behind, 320 m out, almost broadside, a little from
+	 * ahead of its beam: the bow to the viewer's left (seen when turned
+	 * round, to the right), angled 20 degrees toward the viewer. */
+	{ "Frigate2", 185.0f, -6.0f, 320.0f, { -0.94f, 0.34f, 0.0f }, { -0.08f, 0.0f, 1.0f } },
 };
-#define ENV_BOX_GUNBOAT 7
+#define ENV_BOX_BOMBER 7
 #define ENV_BOX_VICTIM 6
 #define ENV_BOX_FRIGATE 11
 
@@ -194,8 +201,8 @@ static const EnvSalvo k_box_salvos[] = {
 	{ 3, 0, ENV_GUNS_TIE, { { 0.15f, 0.26f }, { 0.42f, 0.53f } }, 2 },
 	{ 4, 0, ENV_GUNS_TIE, { { 0.30f, 0.40f } }, 1 },
 	{ 5, 1, ENV_GUNS_TIE, { { 0.18f, 0.28f }, { 0.45f, 0.55f } }, 2 },
-	{ 9, ENV_BOX_GUNBOAT, ENV_GUNS_AWING, { { 0.20f, 0.32f } }, 1 },
-	{ 10, ENV_BOX_GUNBOAT, ENV_GUNS_AWING, { { 0.35f, 0.47f } }, 1 },
+	{ 9, ENV_BOX_BOMBER, ENV_GUNS_AWING, { { 0.20f, 0.32f } }, 1 },
+	{ 10, ENV_BOX_BOMBER, ENV_GUNS_AWING, { { 0.35f, 0.47f } }, 1 },
 };
 
 typedef struct EnvSpaceScene {
@@ -545,7 +552,22 @@ static void env_ship_pos(int i, float out[3]) {
 static void env_ship_basis(int i, float n[3], float r[3], float u[3]) {
 	const EnvSpaceScene* sc = env_space();
 	const EnvShip* e = &sc->ships[i];
+	float up[3];
 	memcpy(n, e->nose, 3 * sizeof(float));
+	memcpy(up, e->up, sizeof up);
+	if (e->view) {
+		/* From the frame of the line of sight to the craft. */
+		static const float z[3] = { 0.0f, 0.0f, 1.0f };
+		float f[3], vr[3], vu[3];
+		env_dir(e->yaw, e->pitch, f);
+		env_cross(f, z, vr);
+		env_norm(vr);
+		env_cross(vr, f, vu);
+		for (int a = 0; a < 3; ++a) {
+			n[a] = vr[a] * e->nose[0] + f[a] * e->nose[1] + vu[a] * e->nose[2];
+			up[a] = vr[a] * e->up[0] + f[a] * e->up[1] + vu[a] * e->up[2];
+		}
+	}
 	if (e->aim > 0 && e->aim <= sc->count) {
 		float from[3], to[3];
 		env_ship_pos(i, from);
@@ -555,7 +577,7 @@ static void env_ship_basis(int i, float n[3], float r[3], float u[3]) {
 		}
 	}
 	env_norm(n);
-	env_cross(n, e->up, r);
+	env_cross(n, up, r);
 	env_norm(r);
 	env_cross(r, n, u);
 }
@@ -1456,7 +1478,7 @@ static void env_submit_endor_sprites(AeronScene3D* scene) {
 }
 
 /* The X-Wing box art: the nebula, the dogfight, the bursting TIE and the
- * gunboat's three torpedoes on their way to the frigate. */
+ * bomber's three torpedoes on their way to the frigate. */
 static void env_submit_boxart_sprites(AeronScene3D* scene) {
 	const float k = AERON_OPT_UNITS_PER_METER;
 	/* The nebula: a long magenta cloud from the upper left down through
@@ -1483,19 +1505,19 @@ static void env_submit_boxart_sprites(AeronScene3D* scene) {
 	}
 	env_submit_salvos(scene);
 	env_submit_burst(scene, ENV_BOX_VICTIM, 1.0f);
-	/* Three proton torpedoes from the gunboat's nose launchers toward the
-	 * frigate, spread a little: a hot glowing head with a short trail. */
+	/* Three torpedoes from the bomber's launchers toward the frigate,
+	 * spread a little: a blue-white glowing head with a short blue trail. */
 	{
 		float from[3], to[3], n[3], r[3], u[3], c[4][3];
-		env_ship_pos(ENV_BOX_GUNBOAT, from);
+		env_ship_pos(ENV_BOX_BOMBER, from);
 		env_ship_pos(ENV_BOX_FRIGATE, to);
-		env_ship_basis(ENV_BOX_GUNBOAT, n, r, u);
+		env_ship_basis(ENV_BOX_BOMBER, n, r, u);
 		static const struct {
 			float along, side, up;
-		} torps[3] = { { 0.09f, -1.5f, 0.5f }, { 0.16f, 1.8f, -0.4f }, { 0.24f, -0.3f, 1.2f } };
-		static const float trail[4] = { 2.2f, 0.7f, 0.35f, 1.0f };
-		static const float head[4] = { 3.0f, 1.3f, 0.8f, 1.0f };
-		static const float core[4] = { 3.0f, 2.6f, 2.2f, 1.0f };
+		} torps[3] = { { 0.07f, -1.5f, 0.5f }, { 0.12f, 1.8f, -0.4f }, { 0.18f, -0.3f, 1.2f } };
+		static const float trail[4] = { 0.35f, 0.8f, 2.4f, 1.0f };
+		static const float head[4] = { 0.7f, 1.4f, 3.0f, 1.0f };
+		static const float core[4] = { 2.2f, 2.6f, 3.0f, 1.0f };
 		for (int t = 0; t < 3; ++t) {
 			float p[3], tail[3];
 			for (int a = 0; a < 3; ++a) {

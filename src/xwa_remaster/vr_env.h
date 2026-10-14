@@ -11,8 +11,8 @@
  *                     APK assets);
  *   xwing           — the X-Wing box art: X-wings and TIE fighters over
  *                     a purple nebula, rearranged around the screen, with
- *                     a YT-2000 and A-wings to the sides, an Assault
- *                     Gunboat firing torpedoes at a Nebulon-B behind you;
+ *                     a YT-2000 and A-wings to the sides, a TIE Bomber
+ *                     firing torpedoes at a Nebulon-B behind you;
  *   hangar          — the carrier hangar (Hangar.opt and its props, laid
  *                     out like the in-mission hangar);
  *   0               — off.
