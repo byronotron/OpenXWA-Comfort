@@ -9,10 +9,10 @@
  *                     game craft, the Death Star II and Endor sprites, the
  *                     logo above the screen (vr/logo.rgba, shipped in the
  *                     APK assets);
- *   xwing           — the X-Wing box art: X-wings and TIE fighters over
- *                     a purple nebula, rearranged around the screen, with
- *                     a YT-2000 and A-wings to the sides, a TIE Bomber
- *                     firing torpedoes at a Nebulon-B behind you;
+ *   xwing           — the X-Wing box art: its three X-wings and three TIE
+ *                     fighters at their attitudes on the cover, a burst,
+ *                     their fire and the purple nebula, spread around the
+ *                     screen so none hides behind it;
  *   hangar          — the carrier hangar (Hangar.opt and its props, laid
  *                     out like the in-mission hangar);
  *   0               — off.

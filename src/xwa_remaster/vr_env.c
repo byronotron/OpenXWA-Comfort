@@ -148,61 +148,45 @@ static const EnvSalvo k_salvos[] = {
 };
 
 /* ---- "X-Wing": the X-Wing box art -------------------------------------
- * After the cover of the original X-Wing: X-wings diving into TIE
- * fighters over a purple nebula, one TIE bursting upper left. Rebel
- * craft (X-wings, A-wings) fire red, Imperial TIEs green. Rearranged
- * around the menu screen (straight ahead, about 20 degrees either side and
- * 15 below to 30 above with the logo): the big X-wing seen from behind
- * lower right, the TIEs it fights to the right, a second X-wing and its TIE
- * on the left, the third X-wing upper left by the burst. Further out: a
- * YT-2000 on the left, two A-wings on the right, a TIE Bomber with the
- * TIEs firing three blue torpedoes at a Nebulon-B frigate behind the
- * viewer, 320 m away and seen a little from the side. Same conventions as
- * the Endor scene. */
+ * The cover of the original X-Wing and only what is on it: three X-wings
+ * and three TIE fighters over a purple nebula, a fourth fighter bursting
+ * upper left, red X-wing and green TIE fire. Each craft keeps the attitude
+ * it has on the cover as the viewer sees it (view-relative nose / up: x
+ * right, y away along the line of sight, z up), and keeps its place on the
+ * cover, pushed out from the middle just far enough to clear the menu
+ * screen (about 21 degrees either side, 19 below to 17 above, the logo
+ * to 28 above within 12 either side). */
 static const EnvShip k_boxart[] = {
-	/* The fighters keep their attitude from the cover, as the viewer sees
-	 * them (view-relative nose / up). */
-	/* 0: the big X-wing, cover lower right: from behind, banked left wing
-	 * down, climbing away to the upper left; its engines toward us. */
-	{ "Xwing", 36.0f, -21.0f, 22.0f, { -0.30f, 0.88f, 0.37f }, { -0.55f, -0.30f, 0.78f }, 0, 1 },
-	/* 1: cover middle left: away to the upper right, rolled near knife
-	 * edge, its top and engines toward us. */
-	{ "Xwing", -42.0f, -6.0f, 32.0f, { 0.72f, 0.55f, 0.42f }, { 0.47f, -0.82f, 0.28f }, 0, 1 },
-	/* 2: cover upper left, by the burst: flying right, rear quarter, banked. */
-	{ "Xwing", -36.0f, 26.0f, 70.0f, { 0.80f, 0.50f, -0.10f }, { -0.30f, -0.30f, 0.90f }, 0, 1 },
-	/* 3: cover right TIE: nose to the left, firing across. */
-	{ "TieFighter", 32.0f, 12.0f, 55.0f, { -0.85f, -0.30f, -0.25f }, { 0.40f, 0.0f, 0.90f }, 0, 1 },
-	/* 4: cover upper TIE: nose to the upper left. */
-	{ "TieFighter", 48.0f, 26.0f, 90.0f, { -0.75f, -0.10f, 0.60f }, { 0.50f, -0.20f, 0.85f }, 0, 1 },
-	/* 5: TIE on the left, firing at X-wing 1. */
-	{ "TieFighter", -54.0f, 14.0f, 70.0f, { 0.0f, -1.0f, 0.0f }, { 0.25f, 0.0f, 1.0f }, 2 },
-	/* 6: the TIE bursting upper left (ENV_BOX_VICTIM). */
-	{ "TieFighter", -26.0f, 33.0f, 80.0f, { 0.5f, -0.6f, -0.3f }, { 0.4f, 0.2f, 1.0f } },
-	/* 7: a TIE Bomber with the TIEs, torpedoes for the frigate. */
-	{ "TieBomber", 58.0f, 6.0f, 50.0f, { 0.0f, -1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, 12 },
-	/* 8: a YT-2000 on the left, heading into the fight. */
-	{ "FamilyTransport", -85.0f, -4.0f, 30.0f, { 0.35f, 0.94f, 0.05f }, { 0.4f, 0.0f, 1.0f } },
-	/* 9, 10: two A-wings on the right, after the bomber. */
-	{ "Awing", 82.0f, 8.0f, 22.0f, { 0.0f, 1.0f, 0.0f }, { -0.3f, 0.0f, 1.0f }, 8 },
-	{ "Awing", 100.0f, -6.0f, 28.0f, { 0.0f, 1.0f, 0.0f }, { -0.2f, 0.0f, 1.0f }, 8 },
-	/* 11: the Nebulon-B behind, 320 m out, almost broadside, a little from
-	 * ahead of its beam: the bow to the viewer's left (seen when turned
-	 * round, to the right), angled 20 degrees toward the viewer. */
-	{ "Frigate2", 185.0f, -6.0f, 320.0f, { -0.94f, 0.34f, 0.0f }, { -0.08f, 0.0f, 1.0f } },
+	/* 0: lower right, the big one: from behind, engines toward us, banked
+	 * with its wings rising to the right, climbing away to the upper left. */
+	{ "Xwing", 36.0f, -24.0f, 24.0f, { -0.25f, 0.93f, 0.27f }, { -0.55f, -0.20f, 0.80f }, 0, 1 },
+	/* 1: middle left: flying right and away, rolled near knife edge (upper
+	 * wings to the upper left), its top and engines toward us. */
+	{ "Xwing", -36.0f, -3.0f, 30.0f, { 0.55f, 0.80f, 0.0f }, { 0.68f, -0.47f, 0.40f }, 0, 1 },
+	/* 2: upper left, by the burst: flying right, from its rear left quarter,
+	 * banked right wing up. */
+	{ "Xwing", -34.0f, 34.0f, 70.0f, { 0.75f, 0.60f, 0.15f }, { -0.35f, -0.25f, 0.90f }, 0, 1 },
+	/* 3: upper middle (left of the logo): nose to the upper left, firing at
+	 * X-wing 2, its wings tilted. */
+	{ "TieFighter", -19.0f, 24.0f, 60.0f, { -0.70f, 0.20f, 0.65f }, { 0.55f, 0.0f, 0.83f }, 0, 1 },
+	/* 4: right of the middle: nose to the left, firing at X-wing 1. */
+	{ "TieFighter", 30.0f, 7.0f, 52.0f, { -0.88f, -0.30f, -0.15f }, { 0.45f, 0.0f, 0.90f }, 0, 1 },
+	/* 5: at the cover's right edge, mostly cut off there. */
+	{ "TieFighter", 52.0f, 4.0f, 80.0f, { -0.90f, 0.0f, 0.10f }, { 0.0f, 0.0f, 1.0f }, 0, 1 },
 };
-#define ENV_BOX_BOMBER 7
-#define ENV_BOX_VICTIM 6
-#define ENV_BOX_FRIGATE 11
+
+/* Where the fighter bursts, upper left by X-wing 2: yaw, pitch, metres. */
+static const float k_box_burst[3] = { -21.0f, 36.0f, 72.0f };
 
 static const EnvSalvo k_box_salvos[] = {
-	{ 0, 3, ENV_GUNS_XWING, { { 0.18f, 0.30f }, { 0.48f, 0.60f } }, 2 },
-	{ 1, 5, ENV_GUNS_XWING, { { 0.20f, 0.32f } }, 1 },
-	{ 2, ENV_BOX_VICTIM, ENV_GUNS_XWING, { { 0.30f, 0.45f } }, 1 },
-	{ 3, 0, ENV_GUNS_TIE, { { 0.15f, 0.26f }, { 0.42f, 0.53f } }, 2 },
-	{ 4, 0, ENV_GUNS_TIE, { { 0.30f, 0.40f } }, 1 },
-	{ 5, 1, ENV_GUNS_TIE, { { 0.18f, 0.28f }, { 0.45f, 0.55f } }, 2 },
-	{ 9, ENV_BOX_BOMBER, ENV_GUNS_AWING, { { 0.20f, 0.32f } }, 1 },
-	{ 10, ENV_BOX_BOMBER, ENV_GUNS_AWING, { { 0.35f, 0.47f } }, 1 },
+	/* The big X-wing's fire, away into the scene. */
+	{ 0, 5, ENV_GUNS_XWING, { { 0.15f, 0.27f }, { 0.45f, 0.57f } }, 2 },
+	/* X-wing 1's fire to the right. */
+	{ 1, 4, ENV_GUNS_XWING, { { 0.15f, 0.28f } }, 1 },
+	/* The two long green streaks to the upper left. */
+	{ 3, 2, ENV_GUNS_TIE, { { 0.08f, 0.40f } }, 1 },
+	/* TIE 4's fire to the left. */
+	{ 4, 1, ENV_GUNS_TIE, { { 0.10f, 0.32f }, { 0.48f, 0.66f } }, 2 },
 };
 
 typedef struct EnvSpaceScene {
@@ -228,7 +212,6 @@ enum {
 	ENV_TEX_LOGO,
 	ENV_TEX_BEAM,
 	ENV_TEX_NEBULA, /* generated: the box art's purple nebula */
-	ENV_TEX_GLOW,   /* generated: a round glow (torpedoes) */
 	ENV_TEX_COUNT
 };
 
@@ -244,7 +227,6 @@ static const EnvTexSource k_tex_sources[ENV_TEX_COUNT] = {
 	{ "Explosions", 2005, 7 },
 	{ "Explosions", 2003, 7 },
 	{ NULL, 0, 0 },            /* vr/logo.rgba */
-	{ NULL, 0, 0 },            /* generated */
 	{ NULL, 0, 0 },            /* generated */
 	{ NULL, 0, 0 },            /* generated */
 };
@@ -799,23 +781,6 @@ static int env_make_nebula(AeronCommandBuffer* cmd) {
 	return ok;
 }
 
-/* A soft round glow (white, straight alpha), for the torpedoes' heads. */
-static int env_make_glow(AeronCommandBuffer* cmd) {
-	enum { GS = 64 };
-	uint8_t px[GS * GS * 4];
-	for (int y = 0; y < GS; ++y) {
-		for (int x = 0; x < GS; ++x) {
-			const float dx = ((float)x + 0.5f) / (float)GS * 2.0f - 1.0f, dy = ((float)y + 0.5f) / (float)GS * 2.0f - 1.0f;
-			const float d2 = dx * dx + dy * dy;
-			const float a = fminf(1.0f, expf(-d2 * 18.0f) + 0.35f * expf(-d2 * 4.0f)) * fmaxf(0.0f, 1.0f - d2);
-			uint8_t* p = &px[(y * GS + x) * 4];
-			p[0] = p[1] = p[2] = 255;
-			p[3] = (uint8_t)(a * 255.0f + 0.5f);
-		}
-	}
-	return env_make_texture(cmd, ENV_TEX_GLOW, px, GS, GS);
-}
-
 /* Image assets: "XWAL", u32 width, u32 height, straight RGBA. Shipped in
  * the APK (assets/vr/<name>.rgba) or next to the executable; never part of
  * the source tree. `override_env` names a variable that overrides the path.
@@ -908,7 +873,7 @@ static void env_load_dat_sprite(AeronCommandBuffer* cmd, int slot) {
 static int env_tex_needed(int slot) {
 	switch (s_env.mode) {
 		case ENV_ENDOR:
-			return slot != ENV_TEX_NEBULA && slot != ENV_TEX_GLOW;
+			return slot != ENV_TEX_NEBULA;
 		case ENV_BOXART:
 			return slot != ENV_TEX_DEATHSTAR && slot != ENV_TEX_ENDOR;
 		default:
@@ -927,8 +892,6 @@ static int env_load_sprites(AeronCommandBuffer* cmd) {
 			env_make_beam(cmd);
 		} else if (i == ENV_TEX_NEBULA) {
 			env_make_nebula(cmd);
-		} else if (i == ENV_TEX_GLOW) {
-			env_make_glow(cmd);
 		} else if (i == ENV_TEX_LOGO) {
 			env_load_rgba(cmd, i, "logo", "XWA_XR_LOGO");
 		} else if (i == ENV_TEX_FRAME) {
@@ -1357,13 +1320,13 @@ static void env_submit_salvos(AeronScene3D* scene) {
 	}
 }
 
-/* A ship bursting: an explosion over its right half, a little in front of
- * it so the depth test keeps the near half visible. `scale` 1 = a TIE. */
-static void env_submit_burst(AeronScene3D* scene, int ship, float scale) {
+/* An explosion at `p` (world units), a little toward the viewer so the
+ * depth test keeps the near half of a craft inside it visible. `scale` 1 =
+ * a TIE's. */
+static void env_submit_burst_at(AeronScene3D* scene, const float p[3], float scale) {
 	const float k = AERON_OPT_UNITS_PER_METER;
-	float p[3], f[3], r[3], c[4][3];
+	float f[3], r[3], c[4][3];
 	static const float z[3] = { 0.0f, 0.0f, 1.0f };
-	env_ship_pos(ship, p);
 	for (int a = 0; a < 3; ++a) {
 		f[a] = p[a] - s_env.view_pos[a];
 	}
@@ -1382,6 +1345,13 @@ static void env_submit_burst(AeronScene3D* scene, int ship, float scale) {
 	}
 	env_facing(q, 7.0f * k * scale, 30.0f, c);
 	env_quad(scene, ENV_TEX_FIRE, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
+}
+
+/* A ship bursting: the explosion over its right half. */
+static void env_submit_burst(AeronScene3D* scene, int ship, float scale) {
+	float p[3];
+	env_ship_pos(ship, p);
+	env_submit_burst_at(scene, p, scale);
 }
 
 /* The logo above the virtual screen and its frame. */
@@ -1477,13 +1447,11 @@ static void env_submit_endor_sprites(AeronScene3D* scene) {
 	env_submit_logo(scene);
 }
 
-/* The X-Wing box art: the nebula, the dogfight, the bursting TIE and the
- * bomber's three torpedoes on their way to the frigate. */
+/* The X-Wing box art: the nebula, the fire and the burst. */
 static void env_submit_boxart_sprites(AeronScene3D* scene) {
-	const float k = AERON_OPT_UNITS_PER_METER;
 	/* The nebula: a long magenta cloud from the upper left down through
-	 * the view to the lower right (as on the cover), fainter wisps around
-	 * it and behind. XWA_XR_NEBULA_BRIGHTNESS scales it. */
+	 * the view to the lower right, as on the cover. XWA_XR_NEBULA_BRIGHTNESS
+	 * scales it. */
 	{
 		const float b = env_float("XWA_XR_NEBULA_BRIGHTNESS", 1.0f);
 		static const struct {
@@ -1492,9 +1460,6 @@ static void env_submit_boxart_sprites(AeronScene3D* scene) {
 			{ -10.0f, 12.0f, 120.0f, 62.0f, -32.0f, 1.15f }, /* the main band, behind the screen */
 			{ -62.0f, 38.0f, 80.0f, 40.0f, -28.0f, 1.0f },   /* its upper left end */
 			{ 42.0f, -30.0f, 90.0f, 44.0f, -38.0f, 0.9f },   /* lower right, behind the big X-wing */
-			{ 30.0f, 40.0f, 60.0f, 26.0f, 15.0f, 0.4f },     /* a wisp over the TIEs */
-			{ -110.0f, -10.0f, 70.0f, 34.0f, 20.0f, 0.35f }, /* left, behind the YT-2000 */
-			{ 175.0f, 8.0f, 110.0f, 50.0f, -12.0f, 0.55f },  /* behind the frigate */
 		};
 		for (size_t i = 0; i < sizeof clouds / sizeof clouds[0]; ++i) {
 			const float g = clouds[i].gain * b;
@@ -1504,37 +1469,13 @@ static void env_submit_boxart_sprites(AeronScene3D* scene) {
 		}
 	}
 	env_submit_salvos(scene);
-	env_submit_burst(scene, ENV_BOX_VICTIM, 1.0f);
-	/* Three torpedoes from the bomber's launchers toward the frigate,
-	 * spread a little: a blue-white glowing head with a short blue trail. */
 	{
-		float from[3], to[3], n[3], r[3], u[3], c[4][3];
-		env_ship_pos(ENV_BOX_BOMBER, from);
-		env_ship_pos(ENV_BOX_FRIGATE, to);
-		env_ship_basis(ENV_BOX_BOMBER, n, r, u);
-		static const struct {
-			float along, side, up;
-		} torps[3] = { { 0.07f, -1.5f, 0.5f }, { 0.12f, 1.8f, -0.4f }, { 0.18f, -0.3f, 1.2f } };
-		static const float trail[4] = { 0.35f, 0.8f, 2.4f, 1.0f };
-		static const float head[4] = { 0.7f, 1.4f, 3.0f, 1.0f };
-		static const float core[4] = { 2.2f, 2.6f, 3.0f, 1.0f };
-		for (int t = 0; t < 3; ++t) {
-			float p[3], tail[3];
-			for (int a = 0; a < 3; ++a) {
-				/* Fanning out with distance: launched together. */
-				const float spread = torps[t].along * 8.0f;
-				p[a] = from[a] + (to[a] - from[a]) * torps[t].along +
-					   (r[a] * torps[t].side + u[a] * torps[t].up) * spread * k;
-				tail[a] = p[a] - n[a] * 9.0f * k;
-			}
-			env_beam(scene, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, tail, p, 1.1f * k, trail);
-			env_facing(p, 3.2f * k, 0.0f, c);
-			env_quad(scene, ENV_TEX_GLOW, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_ADDITIVE, c,
-					 head);
-			env_facing(p, 1.2f * k, 0.0f, c);
-			env_quad(scene, ENV_TEX_GLOW, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_ADDITIVE, c,
-					 core);
+		float p[3];
+		env_dir(k_box_burst[0], k_box_burst[1], p);
+		for (int a = 0; a < 3; ++a) {
+			p[a] = s_env.view_pos[a] + p[a] * k_box_burst[2] * AERON_OPT_UNITS_PER_METER;
 		}
+		env_submit_burst_at(scene, p, 1.6f);
 	}
 	env_submit_logo(scene);
 }
