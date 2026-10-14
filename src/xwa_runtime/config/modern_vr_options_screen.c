@@ -88,7 +88,7 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "XWA_XR_VOICE", "Voice Commands", k_voice_texts, k_voice_values, 3, 1, 98 },
 	{ "XWA_XR_BUTTON_CARD", "Button Card", k_toggle_texts, k_toggle_values, 2, 1, 92 },
 	{ "XWA_XR_ENVIRONMENT", "Menu Scene", k_env_texts, k_env_values, 3, 1, 90 },
-	{ "AERON_XR_RESOLUTION_SCALE", "Resolution (restart)", k_res_texts, k_res_values, 6, 2, 86 },
+	{ "AERON_XR_RESOLUTION_SCALE", "Resolution (restart)", k_res_texts, k_res_values, 6, 4, 86 },
 	{ "AERON_XR_REFRESH_RATE", "Refresh Rate", k_refresh_texts, k_refresh_values, 5, 0, 99 },
 	{ "XWA_XR_GPU_OPT", "GPU Optimizations", k_toggle_texts, k_toggle_values, 2, 1, 79 },
 	{ "XWA_XR_FOVEATION", "Foveation (restart)", k_fov_texts, k_fov_values, 4, 1, 78 },

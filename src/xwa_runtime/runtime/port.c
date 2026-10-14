@@ -1,6 +1,9 @@
 #include "xwa_runtime/runtime/port.h"
 
 #include <SDL3/SDL_timer.h>
+#include <ctype.h>
+#include <stdio.h>
+#include <string.h>
 
 #include "aeron/aeron.h"
 #include "aeron/compat/ddraw.h"
@@ -40,6 +43,7 @@
 #include "xwa_runtime/runtime/frontend_task.h"
 #include "xwa_runtime/runtime/movie_task.h"
 #include "xwa_runtime/runtime/presentation.h"
+#include "xwa_runtime/runtime/vr_buttons.h"
 #include "xwa_runtime/snapshot/snapshot.h"
 #include "xwa_runtime/timing/host_clock.h"
 
@@ -187,29 +191,7 @@ int XwaPort_QueueMouseLookToggle(void) {
 	return 1;
 }
 
-/* VR controller buttons in flight. Each Touch button has a plain and a
- * shifted (left grip held) action; the right stick flicks only exist
- * shifted. Fire, target-in-sights (right grip), steering, roll and the
- * throttle lever stay on the virtual gamepad. */
-typedef struct XwaVrButtonBinding {
-	uint16_t plain;
-	uint16_t shifted;
-} XwaVrButtonBinding;
-
-static const XwaVrButtonBinding g_xwaVrButtonBindings[AERON_XR_BUTTON_COUNT] = {
-	[AERON_XR_BUTTON_A]            = { KEY_R, KEY_O },
-	[AERON_XR_BUTTON_B]            = { KEY_T, KEY_Y },
-	[AERON_XR_BUTTON_X]            = { KEY_C, KEY_SPACE },
-	[AERON_XR_BUTTON_Y]            = { KEY_ENTER, KEY_SHIFT_P },
-	[AERON_XR_BUTTON_LEFT_TRIGGER] = { KEY_W, KEY_SHIFT_D },
-	[AERON_XR_BUTTON_LEFT_STICK]   = { KEY_X, KEY_SHIFT_R },
-	[AERON_XR_BUTTON_RIGHT_STICK]  = { KEY_E, KEY_A },
-	[AERON_XR_BUTTON_RIGHT_GRIP]   = { KEY_NONE, KEY_I },
-	[AERON_XR_BUTTON_FLICK_UP]     = { KEY_NONE, KEY_APOSTROPHE },
-	[AERON_XR_BUTTON_FLICK_DOWN]   = { KEY_NONE, KEY_SEMICOLON },
-	[AERON_XR_BUTTON_FLICK_LEFT]   = { KEY_NONE, KEY_S },
-	[AERON_XR_BUTTON_FLICK_RIGHT]  = { KEY_NONE, KEY_N },
-};
+/* VR controller buttons in flight: xwa_runtime/runtime/vr_buttons.c. */
 
 static int g_xwaPortVrFlightButtons;
 
@@ -293,7 +275,7 @@ static void XwaPort_UpdateVrChord(int enabled) {
 			if (h == 0 && g_vrChord.warhead_pending) {
 				/* A plain left-trigger pull after all. */
 				if (!g_vrChord.fired) {
-					XwaPort_QueueFlightActionKey(g_xwaVrButtonBindings[AERON_XR_BUTTON_LEFT_TRIGGER].plain);
+					XwaPort_QueueFlightActionKey(XwaVrButtons_Binding(AERON_XR_BUTTON_LEFT_TRIGGER)->plain);
 				}
 				g_vrChord.warhead_pending = 0;
 			}
@@ -346,8 +328,8 @@ static void XwaPort_UpdateVrFlightButtons(int enabled) {
 			}
 			continue;
 		}
-		key = shifted ? g_xwaVrButtonBindings[button].shifted : g_xwaVrButtonBindings[button].plain;
-		if (button == AERON_XR_BUTTON_B && !shifted && XwaPort_VrMapOpen()) {
+		key = shifted ? XwaVrButtons_Binding(button)->shifted : XwaVrButtons_Binding(button)->plain;
+		if (button == XWA_VR_MAP_EXIT_BUTTON && !shifted && XwaPort_VrMapOpen()) {
 			key = KEY_M; /* B leaves the map (the map view says so) */
 		}
 		if (XwaPort_QueueFlightActionKey(key)) {
@@ -465,45 +447,6 @@ static void XwaPort_QueueKeyTimes(uint16_t key, int times) {
 }
 
 void XwaPort_VrConsoleAction(XwaVrConsoleAction action, int arg) {
-	static const uint16_t simple[XWA_VRC_COUNT] = {
-		[XWA_VRC_LASERS_TO_SHIELDS] = KEY_APOSTROPHE,
-		[XWA_VRC_SHIELDS_TO_LASERS] = KEY_SEMICOLON,
-		[XWA_VRC_TARGET_NEAREST_ENEMY] = KEY_R,
-		[XWA_VRC_TARGET_ATTACKER] = KEY_E,
-		[XWA_VRC_MATCH_SPEED] = KEY_ENTER,
-		[XWA_VRC_TARGET_FRIENDLY] = KEY_F1,
-		[XWA_VRC_TARGET_NEUTRAL] = KEY_F2,
-		[XWA_VRC_TARGET_ENEMY] = KEY_F3,
-		[XWA_VRC_SUBSYSTEM_PREV] = KEY_LESS_THAN,
-		[XWA_VRC_SUBSYSTEM_NEXT] = KEY_COMMA,
-		[XWA_VRC_TARGET_NEWEST] = KEY_U,
-		[XWA_VRC_TARGET_OBJECTIVE] = KEY_O,
-		[XWA_VRC_TARGET_CLEAR] = KEY_ALT_C,
-		[XWA_VRC_FIRE_LINK] = KEY_X,
-		[XWA_VRC_CONVERGENCE] = KEY_Z,
-		[XWA_VRC_SFOILS] = KEY_V,
-		[XWA_VRC_MAP] = KEY_M,
-		[XWA_VRC_DOCK] = KEY_SHIFT_D,
-		[XWA_VRC_PICKUP] = KEY_SHIFT_P,
-		[XWA_VRC_RELEASE] = KEY_SHIFT_R,
-		[XWA_VRC_GUNNER] = KEY_G,
-		[XWA_VRC_AUTO_GUNNER] = KEY_F,
-		[XWA_VRC_COUNTERMEASURE] = KEY_C,
-		[XWA_VRC_EJECT] = KEY_ALT_E,
-		[XWA_VRC_WING_ATTACK] = KEY_SHIFT_A,
-		[XWA_VRC_WING_COVER] = KEY_SHIFT_C,
-		[XWA_VRC_WING_IGNORE] = KEY_SHIFT_I,
-		[XWA_VRC_WING_EVADE] = KEY_SHIFT_E,
-		[XWA_VRC_WING_WAIT] = KEY_SHIFT_W,
-		[XWA_VRC_WING_GO_AHEAD] = KEY_SHIFT_G,
-		[XWA_VRC_WING_HOME] = KEY_SHIFT_H,
-		[XWA_VRC_WING_REPORT] = KEY_SHIFT_U,
-		[XWA_VRC_WING_RESUPPLY] = KEY_SHIFT_B,
-		[XWA_VRC_WING_REINFORCE] = KEY_SHIFT_S,
-		[XWA_VRC_TARGET_NEXT] = KEY_T,
-		[XWA_VRC_TARGET_PREV] = KEY_Y,
-		[XWA_VRC_TARGET_NAV] = KEY_N,
-	};
 	if (action == XWA_VRC_MAP && XwaPort_VrMapOpen()) {
 		/* The console is hidden in the map, but "close map" is still heard. */
 		XwaPort_QueueFlightActionKey(KEY_M);
@@ -569,58 +512,123 @@ void XwaPort_VrConsoleAction(XwaVrConsoleAction action, int arg) {
 			return;
 		}
 		default:
-			XwaPort_QueueFlightActionKey(simple[action]);
+			XwaPort_QueueFlightActionKey(XwaVrButtons_ConsoleKey(action));
 			return;
 	}
 }
 
 /* The game's own key hints (strings.txt) rewritten for the Touch
- * controllers, applied once the headset presents. In flight Space is
- * left grip + X, landing and hyperspace also take both triggers; the
- * hangar menus run on the thumbstick, A (Enter), B (back) and X (Space). */
+ * controllers, applied once the headset presents. Every control named comes
+ * from the bindings in vr_buttons.c, so a changed binding changes these
+ * texts too. In flight Space is left grip + X, landing and hyperspace also
+ * take both triggers; the hangar menus run on the thumbstick, A (Enter),
+ * B (back) and X (Space). */
+static char g_vrHintText[40][96];
+static int g_vrHintCount;
+
+static char* XwaPort_VrHint(const char* fmt, const char* label) {
+	if (g_vrHintCount >= (int)(sizeof g_vrHintText / sizeof g_vrHintText[0])) {
+		return (char*)"";
+	}
+	char* out = g_vrHintText[g_vrHintCount++];
+	snprintf(out, sizeof g_vrHintText[0], fmt, label);
+	return out;
+}
+
 static void XwaPort_ApplyVrStringHints(void) {
 	static int applied;
 	if (applied) {
 		return;
 	}
 	applied = 1;
+	char space[48], space_cap[48], attacker[48], objective[48], exit_map[16], centre[48];
+	snprintf(space, sizeof space, "%s", XwaVrButtons_KeyLabel(KEY_SPACE, 0));
+	snprintf(space_cap, sizeof space_cap, "%s", space);
+	space_cap[0] = (char)toupper((unsigned char)space_cap[0]);
+	snprintf(attacker, sizeof attacker, "%s", XwaVrButtons_KeyLabel(KEY_E, 0));
+	attacker[0] = (char)toupper((unsigned char)attacker[0]);
+	snprintf(objective, sizeof objective, "%s", XwaVrButtons_KeyLabel(KEY_O, 0));
+	snprintf(exit_map, sizeof exit_map, "%s", XwaVrButtons_ButtonName(XWA_VR_MAP_EXIT_BUTTON, 0));
+	snprintf(centre, sizeof centre, "%s", XwaVrButtons_KeyLabel(KEY_C, 0));
 	static const struct {
 		int id;
-		const char* text;
+		const char* fmt; /* %s: the control */
+		int capital;     /* the control starts a sentence */
 	} k_flight[] = {
-		{ MSG_ASK_ABOUT_HYPER, "\x03" "Pull [both triggers] to hyperspace to [*]" },
-		{ MSG_HANGAR_TRACTOR, "\x04" "Pull [both triggers] to activate tractor beam and land" },
-		{ MSG_END_MISSION, "\x04" "Press [grip + X] to end mission" },
-		{ MSG_END_MISSION_PENALTY, "\x04" "Leaving now is [2000] point penalty! [Grip + X] to quit anyway" },
-		{ MSG_END_MISSION_INCOMPLETE, "\x04" "Leaving early, score incomplete! [Grip + X] to quit anyway" },
-		{ MSG_END_MISSION_DISCONNECT, "\x04" "WARNING! [Grip + X] will disconnect from the host!" },
-		{ MSG_END_MISSION_ABORT, "\x04" "WARNING! You are the host! [Grip + X] will abort this game!" },
-		{ MSG_REINFORCE_CONFIRM, "\x04" "Press [grip + X] to confirm reinforcement request" },
-		{ MSG_USE_MY_TARGET, "\x04" "From [*].  Attack my target!  [Grip + X] to target" },
-		{ MSG_IGNORE_MY_TARGET, "\x04" "From [*].  Ignore my target!  [Grip + X] to ignore" },
-		{ MSG_HEAD_HOME, "\x04" "From [*].  Head home!  [Grip + X] to comply" },
-		{ MSG_WAIT_FOR_ORDERS, "\x04" "From [*].  Wait for orders!  [Grip + X] to wait" },
-		{ MSG_GO_AHEAD, "\x04" "From [*].  Go ahead!  [Grip + X] to proceed" },
-		{ MSG_EVADE, "\x04" "From [*].  Evade!  [Grip + X] to target attacker" },
-		{ MSG_COVER_ME_ATTACKER, "\x04" "From [*].  Cover me!  [Grip + X] to target attacker" },
-		{ MSG_COVER_ME, "\x04" "From [*].  Cover me!  [Grip + X] to target me" },
-		{ MSG_HANGAR_RESTART, "\x04" "Press [grip + X] to restart mission" },
-		{ MSG_MISSION_PAUSED, "\x03" "Mission paused.  Press the [menu button] to continue" },
+		{ MSG_ASK_ABOUT_HYPER, "\x03" "Pull [%s] to hyperspace to [*]", -1 },
+		{ MSG_HANGAR_TRACTOR, "\x04" "Pull [%s] to activate tractor beam and land", -1 },
+		{ MSG_END_MISSION, "\x04" "Press [%s] to end mission", 0 },
+		{ MSG_END_MISSION_PENALTY, "\x04" "Leaving now is [2000] point penalty! [%s] to quit anyway", 1 },
+		{ MSG_END_MISSION_INCOMPLETE, "\x04" "Leaving early, score incomplete! [%s] to quit anyway", 1 },
+		{ MSG_END_MISSION_DISCONNECT, "\x04" "WARNING! [%s] will disconnect from the host!", 1 },
+		{ MSG_END_MISSION_ABORT, "\x04" "WARNING! You are the host! [%s] will abort this game!", 1 },
+		{ MSG_REINFORCE_CONFIRM, "\x04" "Press [%s] to confirm reinforcement request", 0 },
+		{ MSG_USE_MY_TARGET, "\x04" "From [*].  Attack my target!  [%s] to target", 1 },
+		{ MSG_IGNORE_MY_TARGET, "\x04" "From [*].  Ignore my target!  [%s] to ignore", 1 },
+		{ MSG_HEAD_HOME, "\x04" "From [*].  Head home!  [%s] to comply", 1 },
+		{ MSG_WAIT_FOR_ORDERS, "\x04" "From [*].  Wait for orders!  [%s] to wait", 1 },
+		{ MSG_GO_AHEAD, "\x04" "From [*].  Go ahead!  [%s] to proceed", 1 },
+		{ MSG_EVADE, "\x04" "From [*].  Evade!  [%s] to target attacker", 1 },
+		{ MSG_COVER_ME_ATTACKER, "\x04" "From [*].  Cover me!  [%s] to target attacker", 1 },
+		{ MSG_COVER_ME, "\x04" "From [*].  Cover me!  [%s] to target me", 1 },
+		{ MSG_HANGAR_RESTART, "\x04" "Press [%s] to restart mission", 0 },
+		{ MSG_MISSION_PAUSED, "\x03" "Mission paused.  Press the [%s] to continue", -2 },
+		{ MSG_MISSILE_WARNING, "\x04" "Missile Warning! [%s] targets attacker", -3 },
 	};
 	for (size_t i = 0; i < sizeof k_flight / sizeof k_flight[0]; ++i) {
+		const char* label = k_flight[i].capital == -1   ? XWA_VR_CHORD_LABEL
+							: k_flight[i].capital == -2 ? XWA_VR_PAUSE_LABEL
+							: k_flight[i].capital == -3 ? attacker
+							: k_flight[i].capital == 1  ? space_cap
+														: space;
 		if (k_flight[i].id >= 0 && k_flight[i].id < 538) {
-			g_strInFlightMessages[k_flight[i].id] = (char*)k_flight[i].text;
+			g_strInFlightMessages[k_flight[i].id] = XwaPort_VrHint(k_flight[i].fmt, label);
 		}
 	}
-	g_strPressSpaceBar = (char*)"Press grip + X to continue";
-	g_strHangarMiscStrings[HANGAR_MISC_ARROWS_TO_MOVE] = (char*)"Use the THUMBSTICK and A to navigate the menu.";
+	g_strPressSpaceBar = XwaPort_VrHint("Press %s to continue", space);
+	g_strHangarMiscStrings[HANGAR_MISC_ARROWS_TO_MOVE] =
+		XwaPort_VrHint("Use the " XWA_VR_MENU_MOVE " and %s to navigate the menu.", XWA_VR_MENU_SELECT);
 	g_strHangarMiscStrings[HANGAR_MISC_NUMBER_KEYS_FOR_CAMERA] = (char*)"Look around: you are in the hangar.";
-	g_strHangarMiscStrings[HANGAR_MISC_ZERO_FOR_COCKPIT] = (char*)"Press B to go back in the menus.";
-	g_strHangarMiscStrings[HANGAR_MISC_SPACE_TO_LAUNCH] = (char*)"When you are ready, press X to launch.";
+	g_strHangarMiscStrings[HANGAR_MISC_ZERO_FOR_COCKPIT] = XwaPort_VrHint("Press %s to go back in the menus.", XWA_VR_MENU_BACK);
+	g_strHangarMiscStrings[HANGAR_MISC_SPACE_TO_LAUNCH] =
+		XwaPort_VrHint("When you are ready, press %s to launch.", XWA_VR_MENU_SPACE);
 	/* Proving grounds level 7 / 8 text: "the O key" (nearest objective). */
-	g_strProvingGroundDescs[8 * 6 + 1] = (char*)"droid from the smelter room. Grip + A";
-	g_strProvingGroundDescs[8 * 7 + 6] = (char*)"finding the droid, use grip + A to ";
+	g_strProvingGroundDescs[8 * 6 + 1] = XwaPort_VrHint("droid from the smelter room. %s", objective);
+	g_strProvingGroundDescs[8 * 7 + 6] = XwaPort_VrHint("finding the droid, use %s to ", objective);
+	/* The map legend (MFD): h, *, -, z, m, c, Space; then their texts. Only
+	 * what a control reaches in the map stays; the key column is as wide as
+	 * row 6's key. */
+	for (int row = 0; row < 4; ++row) {
+		g_strMapStrings[row] = (char*)"";
+		g_strMapStrings[row + 7] = (char*)"";
+	}
+	g_strMapStrings[4] = XwaPort_VrHint("%s", exit_map);
+	g_strMapStrings[5] = XwaPort_VrHint("%s", centre);
+	g_strMapStrings[6] = XwaPort_VrHint("%s  ", space);
 	Aeron_LogInfo("xwa", "VR: game key hints rewritten for the Touch controllers");
+}
+
+/* Mission radio messages ("Press 'T' to target ...") rewritten for the
+ * Touch controllers once per loaded mission (a message that still differs
+ * from what this last wrote there is new). */
+static void XwaPort_ApplyVrMissionMessages(void) {
+	static char done[64][sizeof g_missionMessages[0].message];
+	char out[160];
+	int changed = 0;
+	for (int i = 0; i < 64; ++i) {
+		char* text = g_missionMessages[i].message;
+		if (strcmp(text, done[i]) == 0) {
+			continue;
+		}
+		if (XwaVrButtons_RewriteText(text, out, sizeof out)) {
+			snprintf(text, sizeof g_missionMessages[0].message, "%s", out);
+			++changed;
+		}
+		snprintf(done[i], sizeof done[i], "%s", text);
+	}
+	if (changed) {
+		Aeron_LogInfo("xwa", "VR: %d mission messages rewritten for the Touch controllers", changed);
+	}
 }
 
 /* Picks the VR controller mode for this frame: keyboard-only menus in the
@@ -631,6 +639,9 @@ static void XwaPort_UpdateVrModes(void) {
 	const int modal  = flight && FlightDisplay_IsFrontendModalActive();
 	if (Aeron_XrIsPresenting()) {
 		XwaPort_ApplyVrStringHints();
+		if (flight) {
+			XwaPort_ApplyVrMissionMessages();
+		}
 	}
 	if (!Aeron_XrIsPresenting()) {
 		Aeron_XrSetMenuKeys(0);

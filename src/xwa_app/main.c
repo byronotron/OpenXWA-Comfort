@@ -349,7 +349,7 @@ static void android_load_settings(void) {
 		if (f) {
 			fputs("# OpenXWA Quest settings. Remove the leading '#' to change a value.\n"
 				  "# Per-eye render resolution (lower = faster):\n"
-				  "#AERON_XR_RESOLUTION_SCALE=0.9\n"
+				  "#AERON_XR_RESOLUTION_SCALE=1.1\n"
 				  "# Size cap of the three HUD images, as a fraction of the recommended eye\n"
 				  "# size (a higher eye resolution then costs no extra HUD work):\n"
 				  "#AERON_XR_HUD_RESOLUTION=0.9\n"
@@ -531,7 +531,7 @@ static void android_xr_defaults(void) {
 		return;
 	}
 	if (!SDL_getenv("AERON_XR_RESOLUTION_SCALE")) {
-		SDL_setenv_unsafe("AERON_XR_RESOLUTION_SCALE", "0.9", 1);
+		SDL_setenv_unsafe("AERON_XR_RESOLUTION_SCALE", "1.1", 1);
 	}
 	if (!SDL_getenv("AERON_XR_SCREEN_DISTANCE")) {
 		/* 0.8 m further than the 2.1 m it was (the menu scene's viewer
@@ -636,8 +636,37 @@ static void apply_quest_render_profile(XwaHostConfig* host) {
 		host->video_options.motion_blur_quality = XWA_MODERN_MOTION_BLUR_OFF;
 		*mask |= XWA_MODERN_VIDEO_OVERRIDE_MOTION_BLUR;
 	}
+#if defined(SDL_PLATFORM_ANDROID)
+	{
+		/* Once per install: a saved MSAA from before the 2x default (off, or
+		 * the old 4x default, which any Video Options save wrote out) becomes
+		 * 2x (foveation and direct output work best with MSAA). A chosen FSR
+		 * stays, and later choices in the Video Options stay. */
+		const char* done = SDL_getenv("XWA_QUEST_MSAA_DEFAULT");
+		if (!(done && done[0] == '2')) {
+			int settled = 1;
+			if ((*mask & XWA_MODERN_VIDEO_OVERRIDE_MSAA) && host->video_options.fsr_upscaling == XWA_MODERN_FSR_OFF &&
+				(host->video_options.msaa == XWA_MODERN_MSAA_OFF || host->video_options.msaa == XWA_MODERN_MSAA_4X)) {
+				char error[256];
+				const char* was = host->video_options.msaa == XWA_MODERN_MSAA_OFF ? "off" : "4x";
+				host->video_options.msaa = XWA_MODERN_MSAA_2X;
+				if (XwaHostConfig_SaveVideoMsaa(Aeron_GetVfs(), XWA_MODERN_MSAA_2X, error, sizeof error)) {
+					Aeron_LogInfo("xwa.config", "saved MSAA %s changed to the new 2x default", was);
+				} else {
+					settled = 0; /* 2x for this run; tried again next start */
+					Aeron_LogWarn("xwa.config", "MSAA 2x default not saved: %s", error);
+				}
+			}
+			if (settled) {
+				XwaModernVrOptions_SaveValue("XWA_QUEST_MSAA_DEFAULT", "2");
+			}
+		}
+	}
+#endif
 	if (!(*mask & XWA_MODERN_VIDEO_OVERRIDE_MSAA)) {
-		host->video_options.msaa = XWA_MODERN_MSAA_4X; /* cheap on tile-based mobile GPUs */
+		/* 2x: on the tiled mobile GPU MSAA resolves on chip, and it is what
+		 * the foveation density map and direct output attach to. */
+		host->video_options.msaa = XWA_MODERN_MSAA_2X;
 		*mask |= XWA_MODERN_VIDEO_OVERRIDE_MSAA;
 	}
 	if (!(*mask & XWA_MODERN_VIDEO_OVERRIDE_HDR)) {
@@ -681,7 +710,8 @@ static void apply_quest_render_profile(XwaHostConfig* host) {
 	}
 	Aeron_LogInfo("xwa.config", "Quest render profile: SSAO off, FSR off, motion blur off, MSAA %s, HDR off, "
 							   "stereo shadows %s, point lights %s",
-				  host->video_options.msaa == XWA_MODERN_MSAA_4X ? "4x" : "user", SDL_getenv("XWA_XR_SHADOWS"),
+				  (const char* const[]) { "off", "2x", "4x", "8x" }[host->video_options.msaa & 3],
+				  SDL_getenv("XWA_XR_SHADOWS"),
 				  SDL_getenv("XWA_POINT_LIGHTS"));
 }
 

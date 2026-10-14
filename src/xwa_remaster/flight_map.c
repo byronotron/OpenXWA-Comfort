@@ -5,6 +5,7 @@
 #include "xwa_remaster/text.h"
 #include "aeron/aeron.h"
 #include "aeron/scene/world.h"
+#include "xwa_runtime/runtime/vr_buttons.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -433,11 +434,14 @@ int XwaRemasterFlightMap_Prepare(AeronCommandBuffer* cmd, AeronScene3D* scene, c
 	}
 	map_build_grid(snapshot, view);
 	if (font && Aeron_XrIsPresenting()) {
-		/* VR: the controllers have no M key; B (or the voice command) closes
-		 * the map. */
+		/* VR: the controllers have no M key; the map-exit button (or the
+		 * voice command) closes the map. */
 		const float x = (float)view->viewport.x + 0.5f * (float)view->viewport.width;
 		const float y = (float)view->viewport.y + (float)view->viewport.height - 3.0f * line_height;
-		XwaRemasterText_AddFlightString(map_state.text, font, "Press B to exit the map (or say \"close map\")", x, y,
+		char hint[96];
+		snprintf(hint, sizeof hint, "Press %s to exit the map (or say \"close map\")",
+				 XwaVrButtons_ButtonName(XWA_VR_MAP_EXIT_BUTTON, 0));
+		XwaRemasterText_AddFlightString(map_state.text, font, hint, x, y,
 										font_size, XWA_REMASTER_TEXT_ALIGN_CENTER, 0xFFFFE070u, &view->viewport);
 	}
 	if (!AeronDrawList_Prepare(map_state.annotations[0], cmd) ||

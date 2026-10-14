@@ -10,6 +10,9 @@
 #include "aeron/vfs.h"
 #include "xwa_remaster/vr_gloves.h"
 #include "xwa_remaster/vr_flight_stick.h"
+#include "xwa_runtime/runtime/vr_buttons.h"
+
+#include <ctype.h>
 
 #include <math.h>
 #include <stdio.h>
@@ -1821,9 +1824,9 @@ int XwaVrConsole_Frame(AeronCommandBuffer* cmd, int width, int height, const Aer
 /* ---- Button card ------------------------------------------------------- */
 
 /* The controller layout in flight: Quest Touch controllers in outline,
- * three-quarter view from above, each control labelled. Keep in step with
- * the VR button bindings in xwa_runtime/runtime/port.c and the Touch mapping
- * in Aeron's xr_input_map.h. "grip+" = with the left grip held. */
+ * three-quarter view from above, each control labelled. The labels come
+ * from the VR bindings (xwa_runtime/runtime/vr_buttons.c), so they follow a
+ * changed binding. "grip+" = with the left grip held. */
 
 /* Outline paths of the LEFT controller, in card pixels around the top
  * face's centre (y down); the right one is its mirror image. */
@@ -1853,28 +1856,73 @@ static const float k_ctl_part[CTL_PARTS][3] = {
 
 typedef struct VcCardLabel {
 	int part;
-	const char* action;
-	const char* more;
-	float y; /* label row (card pixels) */
+	int button;        /* AeronXrButton whose bindings it shows, -1 = none */
+	const char* fixed; /* the control's own role (axes, fire, grip) or NULL */
+	const char* more;  /* fixed second line, or NULL */
+	float y;           /* label row (card pixels) */
 } VcCardLabel;
 
 static const VcCardLabel k_card_left[] = {
-	{ CTL_STICK, "Throttle (fwd/back) - roll", "click: fire link (X)   grip+: release", 96.0f },
-	{ CTL_UPPER, "Y: match speed (Enter)", "grip+: pick up", 168.0f },
-	{ CTL_LOWER, "X: countermeasure (C)", "grip+: confirm (Space)", 232.0f },
-	{ CTL_MENU, "Pause / menu", NULL, 296.0f },
-	{ CTL_GRIP, "Hold: grip+ layer", "on a panel or the stick: move it", 380.0f },
-	{ CTL_TRIGGER, "Cycle warheads (W)", "grip+: dock / board", 452.0f },
+	{ CTL_STICK, AERON_XR_BUTTON_LEFT_STICK, "Throttle (fwd/back) - roll", NULL, 96.0f },
+	{ CTL_UPPER, AERON_XR_BUTTON_Y, NULL, NULL, 168.0f },
+	{ CTL_LOWER, AERON_XR_BUTTON_X, NULL, NULL, 232.0f },
+	{ CTL_MENU, -1, "Pause / menu", NULL, 296.0f },
+	{ CTL_GRIP, -1, "Hold: grip+ layer", "on a panel or the stick: move it", 380.0f },
+	{ CTL_TRIGGER, AERON_XR_BUTTON_LEFT_TRIGGER, NULL, NULL, 452.0f },
 };
 
 static const VcCardLabel k_card_right[] = {
-	{ CTL_STICK, "Yaw / pitch", "click: my attacker (E)   grip+: (A)", 96.0f },
-	{ CTL_UPPER, "B: next target (T)", "grip+: previous (Y)   map: exit", 168.0f },
-	{ CTL_LOWER, "A: nearest enemy (R)", "grip+: nearest objective (O)", 232.0f },
-	{ CTL_MENU, "Meta: system menu", NULL, 296.0f },
-	{ CTL_GRIP, "Target in sights", "on the flight stick: fly with it", 380.0f },
-	{ CTL_TRIGGER, "Fire", "both triggers: land / hyperspace", 452.0f },
+	{ CTL_STICK, AERON_XR_BUTTON_RIGHT_STICK, "Yaw / pitch", NULL, 96.0f },
+	{ CTL_UPPER, AERON_XR_BUTTON_B, NULL, NULL, 168.0f },
+	{ CTL_LOWER, AERON_XR_BUTTON_A, NULL, NULL, 232.0f },
+	{ CTL_MENU, -1, "Meta: system menu", NULL, 296.0f },
+	{ CTL_GRIP, -1, XWA_VR_RIGHT_GRIP_ACTION, "on the flight stick: fly with it", 380.0f },
+	{ CTL_TRIGGER, -1, "Fire", XWA_VR_CHORD_LABEL ": land / hyperspace", 452.0f },
 };
+
+/* "next target (T)" / "(A)": what a key does, with its keyboard key. */
+static void vc_card_key_text(char* out, size_t size, uint16_t key, int with_key) {
+	const char* action = XwaVrButtons_KeyAction(key);
+	if (!action) {
+		snprintf(out, size, "(%s)", XwaVrButtons_KeyName(key));
+	} else if (with_key) {
+		snprintf(out, size, "%s (%s)", action, XwaVrButtons_KeyName(key));
+	} else {
+		snprintf(out, size, "%s", action);
+	}
+}
+
+/* The two label lines of a control, from its bindings. */
+static void vc_card_label_text(const VcCardLabel* l, char* action, char* more, size_t size) {
+	snprintf(action, size, "%s", l->fixed ? l->fixed : "");
+	snprintf(more, size, "%s", l->more ? l->more : "");
+	if (l->button < 0) {
+		return;
+	}
+	const XwaVrButtonBinding* b = XwaVrButtons_Binding((AeronXrButton)l->button);
+	char plain[64] = "", shifted[64] = "";
+	if (b->plain) {
+		vc_card_key_text(plain, sizeof plain, b->plain, 1);
+	}
+	if (b->shifted) {
+		vc_card_key_text(shifted, sizeof shifted, b->shifted, b->shifted == 0x20 /* Space */);
+	}
+	const int face = l->part == CTL_UPPER || l->part == CTL_LOWER;
+	if (l->part == CTL_STICK) {
+		/* The stick's axes are its role; the click goes below. */
+		snprintf(more, size, "%s%s%s%s%s", plain[0] ? "click: " : "", plain, plain[0] && shifted[0] ? "   " : "",
+				 shifted[0] ? "grip+: " : "", shifted);
+		return;
+	}
+	if (face) {
+		snprintf(action, size, "%s: %s", XwaVrButtons_ButtonName((AeronXrButton)l->button, 0), plain);
+	} else {
+		snprintf(action, size, "%s", plain);
+		action[0] = (char)toupper((unsigned char)action[0]);
+	}
+	snprintf(more, size, "%s%s%s", shifted[0] ? "grip+: " : "", shifted,
+			 l->button == XWA_VR_MAP_EXIT_BUTTON ? "   map: exit" : "");
+}
 
 /* Smooth open/closed path through `pts` (Catmull-Rom), offset and
  * optionally mirrored. */
@@ -1985,9 +2033,11 @@ static void vc_card_controller(float cx, float cy, float sx, const VcCardLabel* 
 		const float* tc = l->part == CTL_TRIGGER ? (const float[3]) { VC_AMBER }
 						  : l->part == CTL_GRIP  ? (const float[3]) { 0.80f, 0.72f, 1.0f }
 												 : (const float[3]) { 0.85f, 0.97f, 1.0f };
-		vc_text(tx, l->y, l->action, 20.0f, align, tc[0], tc[1], tc[2], 1.0f);
-		if (l->more) {
-			vc_text(tx, l->y + 24.0f, l->more, 15.0f, align, 0.62f, 0.85f, 0.92f, 0.9f);
+		char action[96], more[96];
+		vc_card_label_text(l, action, more, sizeof action);
+		vc_text(tx, l->y, action, 20.0f, align, tc[0], tc[1], tc[2], 1.0f);
+		if (more[0]) {
+			vc_text(tx, l->y + 24.0f, more, 15.0f, align, 0.62f, 0.85f, 0.92f, 0.9f);
 		}
 	}
 }
@@ -2021,10 +2071,24 @@ static void vc_card_draw(void) {
 			1, 0.85f, 0.97f, 1.0f, 0.95f);
 	vc_text(W * 0.5f, H - 132.0f, "Voice: double-tap a thumb rest, then say e.g. \"attack my target\", \"nearest enemy\"",
 			17.0f, 1, 0.85f, 0.97f, 1.0f, 0.95f);
-	vc_text(W * 0.5f, H - 104.0f, "Right stick flicks, grip+:  up  lasers > shields    down  shields > lasers", 17.0f, 1,
-			0.62f, 0.85f, 0.92f, 0.9f);
-	vc_text(W * 0.5f, H - 78.0f, "left  shield balance (S)    right  nav buoy (N)", 17.0f, 1, 0.62f, 0.85f,
-			0.92f, 0.9f);
+	{
+		/* The right stick's flicks (grip held), from their bindings. */
+		char f[4][64], line[2][160];
+		static const AeronXrButton flicks[4] = { AERON_XR_BUTTON_FLICK_UP, AERON_XR_BUTTON_FLICK_DOWN,
+												 AERON_XR_BUTTON_FLICK_LEFT, AERON_XR_BUTTON_FLICK_RIGHT };
+		for (int i = 0; i < 4; ++i) {
+			const uint16_t key = XwaVrButtons_Binding(flicks[i])->shifted;
+			if (key) {
+				vc_card_key_text(f[i], sizeof f[i], key, i >= 2);
+			} else {
+				snprintf(f[i], sizeof f[i], "-");
+			}
+		}
+		snprintf(line[0], sizeof line[0], "Right stick flicks, grip+:  up  %s    down  %s", f[0], f[1]);
+		snprintf(line[1], sizeof line[1], "left  %s    right  %s", f[2], f[3]);
+		vc_text(W * 0.5f, H - 104.0f, line[0], 17.0f, 1, 0.62f, 0.85f, 0.92f, 0.9f);
+		vc_text(W * 0.5f, H - 78.0f, line[1], 17.0f, 1, 0.62f, 0.85f, 0.92f, 0.9f);
+	}
 }
 
 /* The voice command list (left card). Keep in step with the command table

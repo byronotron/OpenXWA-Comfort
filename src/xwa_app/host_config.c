@@ -1199,6 +1199,28 @@ int XwaHostConfig_SaveInputOptions(AeronVfs* vfs, const XwaModernInputOptions* o
 	return host_config_save_user_document(vfs, document, error, error_size);
 }
 
+int XwaHostConfig_SaveVideoMsaa(AeronVfs* vfs, XwaModernMsaa msaa, char* error, size_t error_size) {
+	static const char* const msaa_names[] = { "off", "2x", "4x", "8x" };
+	AeronConfigFile* document = NULL;
+	AeronConfigError config_error = { 0 };
+
+	if (!vfs || msaa < XWA_MODERN_MSAA_OFF || msaa > XWA_MODERN_MSAA_8X) {
+		return host_config_error(error, error_size, "cannot save invalid MSAA setting to %s", "config.yaml");
+	}
+	if (!host_config_prepare_user_document(vfs, &document, error, error_size)) {
+		return 0;
+	}
+	/* MSAA and FSR exclude each other. */
+	if (!AeronConfigFile_SetString(document, "video.msaa", msaa_names[msaa], &config_error) ||
+		(msaa != XWA_MODERN_MSAA_OFF &&
+		 !AeronConfigFile_SetString(document, "video.fsr_upscaling", "off", &config_error))) {
+		AeronConfigFile_Destroy(document);
+		return host_config_error(error, error_size, "could not update user configuration: %s",
+								 config_error.message[0] ? config_error.message : "invalid MSAA setting");
+	}
+	return host_config_save_user_document(vfs, document, error, error_size);
+}
+
 int XwaHostConfig_SaveVideoOptions(AeronVfs* vfs, const XwaModernVideoOptions* options, char* error,
 								   size_t error_size) {
 	AeronConfigFile* document = NULL;

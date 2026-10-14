@@ -9,10 +9,12 @@
  *   vkCreateDevice      enables the extension and its features when the
  *                       device has them (fragmentDensityMap and
  *                       fragmentDensityMapNonSubsampledImages).
- *   vkCreateRenderPass  adds a fragment density map attachment to every render
- *                       pass with a multisampled colour attachment: the 3D
- *                       scene's forward pass (and the pipelines created for
- *                       it, which SDL makes against such a pass).
+ *   vkCreateRenderPass  adds a fragment density map attachment to the render
+ *                       passes that draw the 3D scene: every multisampled one,
+ *                       and without MSAA every pass with colour and depth (the
+ *                       scene's forward pass; the tonemap, bloom, HUD and
+ *                       panel passes have no depth). SDL makes the pipelines
+ *                       against the changed pass.
  *   vkCreateFramebuffer gives those passes their map: the foveated one when the
  *                       framebuffer is the VR eye size, else a full-density map
  *                       (no change).
@@ -26,6 +28,8 @@
  *
  * Environment (read when needed):
  *   XWA_XR_FOVEATION         0/off, low (default), medium, high
+ *   XWA_XR_FOVEATION_1X      0 = only multisampled passes (default 1: also the
+ *                            single-sample colour + depth passes)
  *   OPENXWA_FOVEATION_EYE    "w h cx_left cy_left cx_right cy_right": the eye
  *                            framebuffer size and each eye's optical centre in
  *                            [-1,1] image coordinates (+y down), set by the game
@@ -178,6 +182,7 @@ static int g_eye_w, g_eye_h, g_eye_tried, g_logged_eye;
 /* ---- GPU timing --------------------------------------------------------- */
 
 static double shim_now(void);
+static int fmt_is_depth(VkFormat f);
 
 /* What a render pass is: its first attachment's format, samples, attachment
  * count; plus the framebuffer size. Passes of one kind are summed. */
@@ -1180,10 +1185,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateRenderPass(VkDevice device, con
 		/* The first colour attachment describes the pass. */
 		for (uint32_t i = 0; i < ci->attachmentCount; ++i) {
 			const VkFormat f = ci->pAttachments[i].format;
-			const int depth = f == VK_FORMAT_D16_UNORM || f == VK_FORMAT_D24_UNORM_S8_UINT ||
-							  f == VK_FORMAT_D32_SFLOAT || f == VK_FORMAT_D32_SFLOAT_S8_UINT ||
-							  f == VK_FORMAT_X8_D24_UNORM_PACK32 || f == VK_FORMAT_D16_UNORM_S8_UINT;
-			if (!depth) {
+			if (!fmt_is_depth(f)) {
 				d.format = f;
 				d.samples = ci->pAttachments[i].samples;
 				d.depth_only = 0;
@@ -1199,13 +1201,39 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateRenderPass(VkDevice device, con
 	return r;
 }
 
-static VkResult shim_CreateRenderPassFdm(VkDevice device, const VkRenderPassCreateInfo* ci,
-										 const VkAllocationCallbacks* a, VkRenderPass* out) {
-	int msaa = 0;
+static int fmt_is_depth(VkFormat f) {
+	return f == VK_FORMAT_D16_UNORM || f == VK_FORMAT_D24_UNORM_S8_UINT || f == VK_FORMAT_D32_SFLOAT ||
+		   f == VK_FORMAT_D32_SFLOAT_S8_UINT || f == VK_FORMAT_X8_D24_UNORM_PACK32 || f == VK_FORMAT_D16_UNORM_S8_UINT ||
+		   f == VK_FORMAT_S8_UINT;
+}
+
+/* 1 for the passes that draw the 3D scene: multisampled, or (MSAA off)
+ * colour plus depth. */
+static int pass_is_scene(const VkRenderPassCreateInfo* ci) {
+	int msaa = 0, color = 0, depth = 0;
 	for (uint32_t i = 0; i < ci->attachmentCount; ++i) {
 		msaa |= ci->pAttachments[i].samples != VK_SAMPLE_COUNT_1_BIT;
+		if (fmt_is_depth(ci->pAttachments[i].format)) {
+			depth = 1;
+		} else {
+			color = 1;
+		}
 	}
-	if (device != g_dev.device || !g_dev.active || !msaa || g_pass_count >= SHIM_MAX_PASSES) {
+	if (msaa) {
+		return 1;
+	}
+	static int single = -1;
+	if (single < 0) {
+		const char* v = getenv("XWA_XR_FOVEATION_1X");
+		single = !(v && (v[0] == '0' || strcmp(v, "off") == 0));
+	}
+	/* One subpass only: the density map then covers exactly what it draws. */
+	return single && color && depth && ci->subpassCount == 1;
+}
+
+static VkResult shim_CreateRenderPassFdm(VkDevice device, const VkRenderPassCreateInfo* ci,
+										 const VkAllocationCallbacks* a, VkRenderPass* out) {
+	if (device != g_dev.device || !g_dev.active || !pass_is_scene(ci) || g_pass_count >= SHIM_MAX_PASSES) {
 		PFN_vkCreateRenderPass real = device == g_dev.device && g_dev.CreateRenderPass
 										  ? g_dev.CreateRenderPass
 										  : (PFN_vkCreateRenderPass)g_real_gipa(g_instance, "vkCreateRenderPass");
@@ -1246,7 +1274,8 @@ static VkResult shim_CreateRenderPassFdm(VkDevice device, const VkRenderPassCrea
 	static int logged;
 	if (logged < 4) {
 		logged++;
-		LOGI("multisampled render pass %d: density map attachment added (%u attachments)", logged,
+		LOGI("scene render pass %d (%s): density map attachment added (%u attachments)", logged,
+			 ci->pAttachments[0].samples != VK_SAMPLE_COUNT_1_BIT ? "multisampled" : "single-sample",
 			 mine.attachmentCount);
 	}
 	return r;
@@ -1320,7 +1349,7 @@ static VkResult shim_CreateFramebufferFdm(VkDevice device, const VkFramebufferCr
 	static int logged;
 	if (logged < 6) {
 		logged++;
-		LOGI("framebuffer %ux%u for a multisampled pass: %s density map", ci->width, ci->height,
+		LOGI("framebuffer %ux%u for a scene pass: %s density map", ci->width, ci->height,
 			 map == &g_eye ? "foveated" : "full");
 	}
 	const VkResult r = g_dev.CreateFramebuffer(device, &mine, a, out);

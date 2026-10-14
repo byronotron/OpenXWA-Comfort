@@ -32,6 +32,8 @@ int XwaHostConfig_Load(AeronVfs* vfs, XwaHostConfig* out, char* error, size_t er
 int XwaHostConfig_SaveGameDataPath(AeronVfs* vfs, const char* game_data_path, char* error, size_t error_size);
 int XwaHostConfig_SaveVideoOptions(AeronVfs* vfs, const XwaModernVideoOptions* options, char* error,
 								   size_t error_size);
+/* Writes only video.msaa (and FSR off when MSAA is on). */
+int XwaHostConfig_SaveVideoMsaa(AeronVfs* vfs, XwaModernMsaa msaa, char* error, size_t error_size);
 int XwaHostConfig_SaveInputOptions(AeronVfs* vfs, const XwaModernInputOptions* options, char* error,
 								   size_t error_size);
 
