@@ -13,11 +13,13 @@
 
 #include <SDL3/SDL_iostream.h>
 #include <SDL3/SDL_stdinc.h>
+#include <SDL3/SDL_timer.h>
 
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* A prop of the classic carrier hangar (Hangar_EnterHangar's default
  * layout, highest detail level): position relative to the launch
@@ -339,7 +341,20 @@ static EnvMode env_mode(void) {
 	if (v && SDL_strcasecmp(v, "tiefighter") == 0) {
 		return ENV_TIEART;
 	}
-	return ENV_ENDOR;
+	if (v && SDL_strcasecmp(v, "endor") == 0) {
+		return ENV_ENDOR;
+	}
+	/* "random" (and the default): one of the space scenes, picked once per
+	 * start. */
+	static EnvMode picked = ENV_OFF;
+	if (picked == ENV_OFF) {
+		static const EnvMode scenes[] = { ENV_ENDOR, ENV_BOXART, ENV_TIEART };
+		const uint64_t seed = SDL_GetPerformanceCounter() ^ ((uint64_t)time(NULL) * 2654435761u);
+		picked = scenes[(seed ^ (seed >> 17) ^ (seed >> 31)) % (sizeof scenes / sizeof scenes[0])];
+		Aeron_LogInfo("xwa.remaster", "VR environment: random pick %s",
+					  picked == ENV_ENDOR ? "endor" : picked == ENV_BOXART ? "xwing" : "tiefighter");
+	}
+	return picked;
 }
 
 /* The ship list of the selected space scene (NULL in the hangar). */
@@ -1572,7 +1587,7 @@ static void env_submit_tieart_sprites(AeronScene3D* scene) {
 	if (s_env.tex[ENV_TEX_VADER]) {
 		const float b = env_float("XWA_XR_VADER_BRIGHTNESS", 1.0f);
 		const float tint[4] = { 0.18f * b, 0.17f * b, 0.42f * b, 1.0f };
-		const float h = 90.0f;
+		const float h = 58.5f; /* 35 % smaller than the cover's */
 		const float w = h * (float)s_env.tex_w[ENV_TEX_VADER] / (float)s_env.tex_h[ENV_TEX_VADER];
 		env_sky_rect(scene, ENV_TEX_VADER, 0.0f, 12.0f, w, h, 0.0f, tint);
 	}

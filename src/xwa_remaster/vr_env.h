@@ -5,7 +5,8 @@
  * VR environment for the 2D screens (concourse, briefings, menus, films),
  * built from the installed game data and drawn in stereo around the flat
  * virtual screen. XWA_XR_ENVIRONMENT selects it:
- *   endor (default) — a still of the Battle of Endor after the box art:
+ *   random (default) — endor, xwing or tiefighter, picked at each start;
+ *   endor           — a still of the Battle of Endor after the box art:
  *                     game craft, the Death Star II and Endor sprites, the
  *                     logo above the screen (vr/logo.rgba, shipped in the
  *                     APK assets);
