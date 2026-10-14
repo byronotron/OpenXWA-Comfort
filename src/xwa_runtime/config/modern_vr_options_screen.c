@@ -44,6 +44,8 @@ enum {
 	VR_REFRESH,
 	VR_GPU_OPT,
 	VR_FOVEATION,
+	VR_SHADING,
+	VR_DIRECT,
 	VR_COUNT
 };
 
@@ -68,6 +70,8 @@ static const char* const k_env_texts[] = { "Off", "Battle of Endor", "Hangar" };
 static const char* const k_env_values[] = { "0", "endor", "hangar" };
 static const char* const k_refresh_texts[] = { "Headset Setting", "72 Hz", "80 Hz", "90 Hz", "120 Hz" };
 static const char* const k_refresh_values[] = { "0", "72", "80", "90", "120" };
+static const char* const k_shading_texts[] = { "Full", "Lite (faster)" };
+static const char* const k_shading_values[] = { "full", "lite" };
 
 static const VrSetting k_settings[VR_COUNT] = {
 	{ "XWA_XR_HUD_LAYOUT", "HUD Layout", k_layout_texts, k_layout_values, 3, 0, 80 },
@@ -88,6 +92,8 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "AERON_XR_REFRESH_RATE", "Refresh Rate", k_refresh_texts, k_refresh_values, 5, 0, 99 },
 	{ "XWA_XR_GPU_OPT", "GPU Optimizations", k_toggle_texts, k_toggle_values, 2, 1, 79 },
 	{ "XWA_XR_FOVEATION", "Foveation (restart)", k_fov_texts, k_fov_values, 4, 1, 78 },
+	{ "XWA_XR_SHADING", "Ship Shading (restart)", k_shading_texts, k_shading_values, 2, 1, 77 },
+	{ "XWA_XR_DIRECT_OUTPUT", "Direct Output (no bloom)", k_toggle_texts, k_toggle_values, 2, 0, 76 },
 };
 
 static struct {
@@ -104,7 +110,7 @@ static int vr_index_from_env(const VrSetting* setting) {
 		return best;
 	}
 	if (setting->values == k_layout_values || setting->values == k_voice_values || setting->values == k_fov_values ||
-		setting->values == k_env_values) {
+		setting->values == k_env_values || setting->values == k_shading_values) {
 		for (int i = 0; i < setting->count; i++) {
 			if (SDL_strcasecmp(env, setting->values[i]) == 0) {
 				return i;
@@ -341,7 +347,7 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 		return 0;
 	}
 	vr_load();
-	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 44, cursor_row, VR_COUNT + 4);
+	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 38, cursor_row, VR_COUNT + 4);
 	XwaModernOptionsMenu_DrawTitle(&menu, "OpenXWA VR Options");
 
 	for (int i = 0; i < VR_COUNT; i++) {
@@ -365,25 +371,25 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 			 * before quitting, without backing out of this screen. */
 			XwaModernVrOptions_SaveValue(setting->key, setting->values[value]);
 		}
-		menu.y -= 2; /* 18 px rows: the list has outgrown 20 */
+		menu.y -= 3; /* 17 px rows: the list has outgrown 20 */
 	}
 
 	if (XwaModernOptionsMenu_DrawAction(&menu, "Reset HUD Panel Positions", 93, 0)) {
 		vr_reset_hud_layouts();
 	}
-	menu.y -= 2;
+	menu.y -= 3;
 	if (XwaModernOptionsMenu_DrawAction(&menu, "Reset Lap Console Position", 91, 0)) {
 		SDL_setenv_unsafe("XWA_XR_CONSOLE_POSE", "", 1);
 		XwaModernVrOptions_SaveValue("XWA_XR_CONSOLE_POSE", "");
 		Aeron_LogInfo("xwa.config", "lap console back at its default spot");
 	}
-	menu.y -= 2;
+	menu.y -= 3;
 	if (XwaModernOptionsMenu_DrawAction(&menu, "Reset Flight Stick Position", 95, 0)) {
 		SDL_setenv_unsafe("XWA_XR_STICK_POS", "", 1);
 		XwaModernVrOptions_SaveValue("XWA_XR_STICK_POS", "");
 		Aeron_LogInfo("xwa.config", "flight stick back at its default spot");
 	}
-	menu.y -= 2;
+	menu.y -= 3;
 	back = XwaModernOptionsMenu_DrawAction(&menu, FrontendString_Get(STR_BACK), 87, 0);
 	back |= XwaModernOptionsMenu_TakeEscape(&menu);
 	if (!back) {

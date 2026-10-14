@@ -888,6 +888,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateInstance(const VkInstanceCreate
 #define DEV_LOAD(name) g_dev.name = (PFN_vk##name)g_dev.gdpa(g_dev.device, "vk" #name)
 
 static void dev_load(VkDevice device, VkPhysicalDevice phys, const VkDeviceCreateInfo* ci);
+static int shim_add_astc(VkPhysicalDevice phys, VkDeviceCreateInfo* mine, VkPhysicalDeviceFeatures* storage);
+static void shim_astc_result(int enabled);
 static VkResult dev_plain(PFN_vkCreateDevice real, VkPhysicalDevice phys, const VkDeviceCreateInfo* ci,
 						  const VkAllocationCallbacks* a, VkDevice* out);
 
@@ -970,8 +972,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateDevice(VkPhysicalDevice phys, c
 		.fragmentDensityMapNonSubsampledImages = VK_TRUE,
 	};
 	mine.pNext = &enable;
+	VkPhysicalDeviceFeatures astc_features;
+	const int astc = shim_add_astc(phys, &mine, &astc_features);
 	VkResult r = real(phys, &mine, a, out);
 	free(names);
+	if (r == VK_SUCCESS) {
+		shim_astc_result(astc);
+	}
 	if (r != VK_SUCCESS) {
 		LOGW("device with fragment density map failed (%d): rendering without it", r);
 		return dev_plain(real, phys, ci, a, out);
@@ -1053,11 +1060,61 @@ static void dev_load(VkDevice device, VkPhysicalDevice phys, const VkDeviceCreat
 /* A device without foveation (still timed). */
 static VkResult dev_plain(PFN_vkCreateDevice real, VkPhysicalDevice phys, const VkDeviceCreateInfo* ci,
 						  const VkAllocationCallbacks* a, VkDevice* out) {
-	const VkResult r = real(phys, ci, a, out);
+	VkDeviceCreateInfo mine = *ci;
+	VkPhysicalDeviceFeatures astc_features;
+	const int astc = shim_add_astc(phys, &mine, &astc_features);
+	VkResult r = real(phys, &mine, a, out);
+	if (r != VK_SUCCESS && astc) {
+		r = real(phys, ci, a, out);
+		shim_astc_result(0);
+	} else if (r == VK_SUCCESS) {
+		shim_astc_result(astc);
+	}
 	if (r == VK_SUCCESS) {
 		dev_load(*out, phys, ci);
 	}
 	return r;
+}
+
+/* ASTC textures need the textureCompressionASTC_LDR feature, which SDL
+ * does not request: added to the device's features when the GPU has it
+ * (in pEnabledFeatures, or the VkPhysicalDeviceFeatures2 in the chain). */
+static int shim_add_astc(VkPhysicalDevice phys, VkDeviceCreateInfo* mine, VkPhysicalDeviceFeatures* storage) {
+	PFN_vkGetPhysicalDeviceFeatures features =
+		(PFN_vkGetPhysicalDeviceFeatures)g_real_gipa(g_instance, "vkGetPhysicalDeviceFeatures");
+	VkPhysicalDeviceFeatures have;
+	if (!features) {
+		return 0;
+	}
+	memset(&have, 0, sizeof have);
+	features(phys, &have);
+	if (!have.textureCompressionASTC_LDR) {
+		return 0;
+	}
+	if (mine->pEnabledFeatures) {
+		*storage = *mine->pEnabledFeatures;
+		storage->textureCompressionASTC_LDR = VK_TRUE;
+		mine->pEnabledFeatures = storage;
+		return 1;
+	}
+	for (VkBaseOutStructure* n = (VkBaseOutStructure*)mine->pNext; n; n = n->pNext) {
+		if (n->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2) {
+			((VkPhysicalDeviceFeatures2*)n)->features.textureCompressionASTC_LDR = VK_TRUE;
+			return 1;
+		}
+	}
+	memset(storage, 0, sizeof *storage);
+	storage->textureCompressionASTC_LDR = VK_TRUE;
+	mine->pEnabledFeatures = storage;
+	return 1;
+}
+
+/* Tells the game whether ASTC textures may be used (AERON_TEXTURE_ASTC). */
+static void shim_astc_result(int enabled) {
+	LOGI("ASTC texture compression %s", enabled ? "enabled" : "unavailable");
+	if (!enabled) {
+		setenv("AERON_TEXTURE_ASTC", "0", 1);
+	}
 }
 
 static VKAPI_ATTR void VKAPI_CALL shim_DestroyDevice(VkDevice device, const VkAllocationCallbacks* a) {

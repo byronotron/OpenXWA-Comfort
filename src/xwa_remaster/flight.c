@@ -3968,6 +3968,14 @@ static float s_xr_eye_gain_last = 1.0f; /* the menu environment's, for its frame
 static AeronDrawList2D* s_xr_eye_alpha; /* drawn into the next eye output (its alpha) */
 static AeronTexture* s_xr_bloom_last;   /* the bloom the last eye output computed */
 
+/* XWA_XR_DIRECT_OUTPUT (VR flight): 1 = the eyes' forward passes write
+ * tonemapped colour straight into the headset images (no HDR
+ * intermediate, no separate tonemap pass, no bloom); 0 = the HDR path. */
+static int fl_xr_direct_output(void) {
+	const char* env = getenv("XWA_XR_DIRECT_OUTPUT");
+	return env && env[0] == '1';
+}
+
 /* XWA_XR_BLOOM: 1 (default) one bloom for both eyes, computed from the left
  * eye: a glow is a wide blur, so the eyes' few pixels of parallax do not
  * show in it, and it saves the whole bloom chain (a dozen small passes) for
@@ -5090,7 +5098,16 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		AeronScene_SetOpaqueOrder(s.scene, reorder && s.before_opaque_mode != FL_BEFORE_OPAQUE_HYPERSPACE,
 								  reorder);
 	}
+	/* Direct output: the eyes' forward passes resolve straight into the
+	 * headset images, tonemapped in their shaders (no HDR intermediate,
+	 * tonemap pass or bloom). */
+	const int direct = stereo && fl_xr_direct_output();
+	int direct_used[2] = { 0, 0 };
+	if (direct) {
+		AeronScene_SetDirectOutput(s.scene, xr_frame.eye_targets[0], xr_frame.format, NULL);
+	}
 	int render_ok = AeronScene_Render(s.scene, cmd);
+	direct_used[0] = direct && AeronScene_DirectOutputUsed(s.scene);
 	if (render_ok && shift_cockpit) {
 		const float to_right[3] = { cockpit_eye_shift[1][0] - cockpit_eye_shift[0][0],
 									cockpit_eye_shift[1][1] - cockpit_eye_shift[0][1],
@@ -5103,11 +5120,17 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		 * XWA_XR_SHADOW_REUSE=0. */
 		const char* shadow_reuse = getenv("XWA_XR_SHADOW_REUSE");
 		AeronScene_SetShadowReuse(s.scene, !(shadow_reuse && shadow_reuse[0] == '0'));
-		render_ok = fl_xr_output_eye(cmd, xr_frame.eye_targets[0], xr_frame.format, NULL) &&
+		render_ok = (direct_used[0] || fl_xr_output_eye(cmd, xr_frame.eye_targets[0], xr_frame.format, NULL)) &&
 					AeronScene_SetCamera(s.scene, &xr_eyes[1]) &&
 					(!stars_prepared || XwaRemasterSkyStars_Prepare(s.sky_stars, s.scene, fl_world_to_cube,
-																	&stars_params)) &&
-					AeronScene_Render(s.scene, cmd);
+																	&stars_params));
+		if (render_ok) {
+			if (direct) {
+				AeronScene_SetDirectOutput(s.scene, xr_frame.eye_targets[1], xr_frame.format, NULL);
+			}
+			render_ok = AeronScene_Render(s.scene, cmd);
+			direct_used[1] = direct && AeronScene_DirectOutputUsed(s.scene);
+		}
 	}
 	AeronScene_SetOpaqueOrder(s.scene, 0, 0);
 	if (!render_ok) {
@@ -5169,8 +5192,9 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 			XwaVrHudOcclusion_Prepare(cmd, xr_frame.views, &occlude_quad, g_xr_hud_w > 0 ? g_xr_hud_w : s.rt_w,
 									  g_xr_hud_h > 0 ? g_xr_hud_h : s.rt_h);
 		}
-		if (fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format,
-							 s.present_bloom_tex ? s.present_bloom_tex : fl_xr_right_bloom(cmd, xr_frame.views)) &&
+		if ((direct_used[1] ||
+			 fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format,
+							  s.present_bloom_tex ? s.present_bloom_tex : fl_xr_right_bloom(cmd, xr_frame.views))) &&
 			fl_xr_output_hud(cmd, xr_frame.hud_target, head_parts, cockpit_active) &&
 			(!cmd_aux || fl_xr_output_hud(cmd, xr_frame.hud_aux_target, FL_HUD_CMD, 2)) &&
 			(!split || fl_xr_output_hud(cmd, xr_frame.hud_world_target, FL_HUD_WORLD, 0))) {

@@ -364,8 +364,16 @@ static void android_load_settings(void) {
 				  "#AERON_XR_PERF_LEVEL=high\n"
 				  "# 0 = turn off the GPU optimizations (A/B test; also in the VR options):\n"
 				  "#XWA_XR_GPU_OPT=1\n"
+				  "# 0 = ship textures uncompressed instead of ASTC (compressed once, kept\n"
+				  "# in astc-cache):\n"
+				  "#XWA_XR_ASTC=1\n"
+				  "# Mesh shading: lite (cheaper, for the Quest) or full (the desktop shader):\n"
+				  "#XWA_XR_SHADING=lite\n"
 				  "# Anisotropic texture filtering cap (1 = trilinear only):\n"
 				  "#XWA_XR_ANISOTROPY=2\n"
+				  "# 1 = flight renders straight into the headset images, tonemapped in\n"
+				  "# the shaders: no bloom, less GPU memory traffic:\n"
+				  "#XWA_XR_DIRECT_OUTPUT=0\n"
 				  "# Bloom: 1 = one for both eyes, eye = per eye, 0 = off:\n"
 				  "#XWA_XR_BLOOM=1\n"
 				  "# 0 = no GPU timing (the log lists each kind of render pass's ms per frame):\n"
@@ -541,6 +549,7 @@ static void android_xr_defaults(void) {
 		if (guard) {
 			/* The last start with the shim never got going: run without it and
 			 * leave it off (the VR options turn it back on). */
+			SDL_setenv_unsafe("AERON_TEXTURE_ASTC", "0", 1);
 			fclose(guard);
 			remove(g_shim_guard);
 			g_shim_guard[0] = '\0';
@@ -564,9 +573,11 @@ static void android_xr_defaults(void) {
 			} else {
 				g_shim_guard[0] = '\0';
 				Aeron_LogWarn("xwa.config", "foveation shim not found: %s", dlerror());
+				SDL_setenv_unsafe("AERON_TEXTURE_ASTC", "0", 1); /* the shim enables the GPU feature */
 			}
 		} else {
 			g_shim_guard[0] = '\0';
+			SDL_setenv_unsafe("AERON_TEXTURE_ASTC", "0", 1);
 		}
 	}
 	{
@@ -630,6 +641,30 @@ static void apply_quest_render_profile(XwaHostConfig* host) {
 	}
 	if (!SDL_getenv("XWA_XR_ANISOTROPY")) {
 		SDL_setenv_unsafe("XWA_XR_ANISOTROPY", "2", 1);
+	}
+	/* XWA_XR_ASTC (default 1): ship textures compressed to ASTC 4x4, which
+	 * the Quest's GPU reads natively (a quarter of the uncompressed
+	 * traffic). Compressed once per texture and kept in astc-cache next to
+	 * the game data, so only the first load of a ship pays for it. */
+	if (!SDL_getenv("AERON_TEXTURE_ASTC")) {
+		const char* astc = SDL_getenv("XWA_XR_ASTC");
+		SDL_setenv_unsafe("AERON_TEXTURE_ASTC", astc && astc[0] == '0' ? "0" : "1", 1);
+	}
+#if defined(SDL_PLATFORM_ANDROID)
+	if (!SDL_getenv("AERON_ASTC_CACHE_DIR")) {
+		const char* external = SDL_GetAndroidExternalStoragePath();
+		if (external && external[0]) {
+			char dir[1024];
+			snprintf(dir, sizeof dir, "%s/astc-cache", external);
+			SDL_setenv_unsafe("AERON_ASTC_CACHE_DIR", dir, 1);
+		}
+	}
+#endif
+	/* XWA_XR_SHADING: lite (default) = the cheaper mesh shader, full = the
+	 * desktop one. */
+	if (!SDL_getenv("AERON_PBR_SHADER")) {
+		const char* shading = SDL_getenv("XWA_XR_SHADING");
+		SDL_setenv_unsafe("AERON_PBR_SHADER", shading && strcmp(shading, "full") == 0 ? "full" : "lite", 1);
 	}
 	/* Laser and explosion point lights are what saturates the Quest GPU in
 	 * dogfights (each one is shaded per pixel, per eye). */
