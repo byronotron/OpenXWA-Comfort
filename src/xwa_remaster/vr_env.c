@@ -122,10 +122,9 @@ static const EnvShip k_endor[] = {
  * list) from the shooter's guns, as spans of the shooter-target distance
  * along its nose. */
 typedef enum EnvGuns {
-	ENV_GUNS_XWING,      /* four wingtip cannons, red */
-	ENV_GUNS_XWING_GOLD, /* the same, the box art's gold */
-	ENV_GUNS_TIE,        /* two chin guns, green */
-	ENV_GUNS_AWING,      /* two wingtip cannons, red */
+	ENV_GUNS_XWING, /* four wingtip cannons, red */
+	ENV_GUNS_TIE,   /* two chin guns, green */
+	ENV_GUNS_AWING, /* two wingtip cannons, red */
 } EnvGuns;
 
 typedef struct EnvSalvo {
@@ -146,7 +145,8 @@ static const EnvSalvo k_salvos[] = {
 
 /* ---- "X-Wing": the X-Wing box art -------------------------------------
  * After the cover of the original X-Wing: X-wings diving into TIE
- * fighters over a purple nebula, one TIE bursting upper left. Rearranged
+ * fighters over a purple nebula, one TIE bursting upper left. Rebel
+ * craft (X-wings, A-wings) fire red, Imperial TIEs green. Rearranged
  * around the menu screen (straight ahead, about 20 degrees either side and
  * 15 below to 30 above with the logo): the big X-wing seen from behind
  * lower right, the TIEs it fights to the right, a second X-wing and its TIE
@@ -188,9 +188,9 @@ static const EnvShip k_boxart[] = {
 #define ENV_BOX_FRIGATE 11
 
 static const EnvSalvo k_box_salvos[] = {
-	{ 0, 3, ENV_GUNS_XWING_GOLD, { { 0.18f, 0.30f }, { 0.48f, 0.60f } }, 2 },
-	{ 1, 5, ENV_GUNS_XWING_GOLD, { { 0.20f, 0.32f } }, 1 },
-	{ 2, ENV_BOX_VICTIM, ENV_GUNS_XWING_GOLD, { { 0.30f, 0.45f } }, 1 },
+	{ 0, 3, ENV_GUNS_XWING, { { 0.18f, 0.30f }, { 0.48f, 0.60f } }, 2 },
+	{ 1, 5, ENV_GUNS_XWING, { { 0.20f, 0.32f } }, 1 },
+	{ 2, ENV_BOX_VICTIM, ENV_GUNS_XWING, { { 0.30f, 0.45f } }, 1 },
 	{ 3, 0, ENV_GUNS_TIE, { { 0.15f, 0.26f }, { 0.42f, 0.53f } }, 2 },
 	{ 4, 0, ENV_GUNS_TIE, { { 0.30f, 0.40f } }, 1 },
 	{ 5, 1, ENV_GUNS_TIE, { { 0.18f, 0.28f }, { 0.45f, 0.55f } }, 2 },
@@ -1304,15 +1304,11 @@ static void env_submit_salvos(AeronScene3D* scene) {
 		static const float tie_guns[2][2] = { { 0.6f, -1.0f }, { -0.6f, -1.0f } };
 		static const float aw_guns[2][2] = { { 3.3f, 0.0f }, { -3.3f, 0.0f } };
 		static const float red[4] = { 2.4f, 0.35f, 0.25f, 1.0f };
-		static const float gold[4] = { 2.6f, 1.5f, 0.3f, 1.0f };
 		static const float green[4] = { 0.4f, 2.4f, 0.45f, 1.0f };
 		const float(*guns)[2] = xw_guns;
 		int gun_count = 4;
 		const float* tint = red;
 		switch (sv->guns) {
-			case ENV_GUNS_XWING_GOLD:
-				tint = gold;
-				break;
 			case ENV_GUNS_TIE:
 				guns = tie_guns;
 				gun_count = 2;
