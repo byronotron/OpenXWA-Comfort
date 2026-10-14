@@ -3238,6 +3238,19 @@ static void fl_xr_seat_shift(const XwaSnapshot* snap, float m[16]) {
 	m[11] += m[8] * d;
 }
 
+/* VR with one bloom for both eyes (XWA_XR_BLOOM=1): the bloom comes from
+ * the left eye and is shifted for the right as if everything were far
+ * away, which puts the glow of a cockpit light a few centimetres beside it
+ * in the right eye. The cockpit is kept just below the bloom threshold
+ * (1.0, brightest channel) there instead: no cockpit glow, nothing beside
+ * it. Returns the instance's base_color_emissive_strength (a negative
+ * value caps its colour; 0 = as usual). */
+static int fl_xr_bloom_mode(void);
+static int fl_xr_direct_output(void);
+static float fl_xr_cockpit_bloom_cap(int stereo) {
+	return stereo && fl_xr_bloom_mode() == 1 && !fl_xr_direct_output() ? -0.98f : 0.0f;
+}
+
 static void fl_submit_hyperspace_cockpit(AeronCommandBuffer* cmd, XwaRemasterAssets* assets,
 										 const XwaSnapshot* snap, const XwaFlightCamera* cam,
 										 const float anchor_bw[9], int anchor_found,
@@ -3294,6 +3307,7 @@ static void fl_submit_hyperspace_cockpit(AeronCommandBuffer* cmd, XwaRemasterAss
 	memset(&inst, 0, sizeof inst);
 	inst.mesh = cockpit_mesh;
 	inst.variant = player_f ? player_f->node_switch : 0;
+	inst.base_color_emissive_strength = fl_xr_cockpit_bloom_cap(fl_xr_stereo_eligible(cam));
 	memcpy(inst.transform, m, sizeof m);
 	memcpy(inst.prev_transform, m, sizeof m);
 	inst.no_local_lights = 1;
@@ -5046,6 +5060,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 			memset(&inst, 0, sizeof inst);
 			inst.mesh = cockpit_mesh;
 			inst.variant = cockpit_anchor->node_switch;
+			inst.base_color_emissive_strength = fl_xr_cockpit_bloom_cap(stereo);
 			memcpy(inst.transform, m, sizeof m);
 			memcpy(inst.prev_transform, m, sizeof m);
 			inst.no_local_lights = 1;
