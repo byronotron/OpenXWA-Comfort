@@ -451,7 +451,10 @@ static void android_load_settings(void) {
 				  "# Helmet HUD distance in metres and size:\n"
 				  "#XWA_XR_HUD_DISTANCE=3.0\n"
 				  "#XWA_XR_HUD_SCALE=0.65\n"
-				  "#AERON_XR_SCREEN_DISTANCE=2.1\n"
+				  "# Screen distance in metres; the menu scene's viewer sits XWA_XR_ENV_BACK\n"
+				  "# metres behind its reference point:\n"
+				  "#AERON_XR_SCREEN_DISTANCE=2.9\n"
+				  "#XWA_XR_ENV_BACK=0.8\n"
 				  "#AERON_XR_SCREEN_WIDTH=2.1\n"
 				  "#AERON_XR_THROTTLE_RATE=0.8\n"
 				  "# Skip the Quest render defaults (SSAO/MSAA/... follow the in-game options):\n"
@@ -529,6 +532,11 @@ static void android_xr_defaults(void) {
 	}
 	if (!SDL_getenv("AERON_XR_RESOLUTION_SCALE")) {
 		SDL_setenv_unsafe("AERON_XR_RESOLUTION_SCALE", "0.9", 1);
+	}
+	if (!SDL_getenv("AERON_XR_SCREEN_DISTANCE")) {
+		/* 0.8 m further than the 2.1 m it was (the menu scene's viewer
+		 * moves back with it: XWA_XR_ENV_BACK). */
+		SDL_setenv_unsafe("AERON_XR_SCREEN_DISTANCE", "2.9", 1);
 	}
 	if (!SDL_getenv("AERON_XR_SCREEN_PIXELS")) {
 		/* A 4:3 virtual screen: the game's menus, briefings and films fill
