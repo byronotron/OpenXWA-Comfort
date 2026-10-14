@@ -263,9 +263,9 @@ static const EnvShip k_xvtart[] = {
 	/* 2: the X-wing in the explosion, coming out of it toward us and to
 	 * the lower left. */
 	{ "Xwing", -8.0f, -33.0f, 60.0f, { -0.186f, -0.958f, -0.217f }, { 0.514f, -0.283f, 0.810f }, 0, 1 },
-	/* 3: the small X-wing at the explosion's top, flying into it: the
-	 * engines toward us. */
-	{ "Xwing", 25.0f, -2.0f, 80.0f, { -0.310f, 0.852f, -0.423f }, { -0.457f, 0.256f, 0.852f }, 0, 1 },
+	/* 3: the small X-wing at the explosion's top, coming out of it toward
+	 * us, down to the left. */
+	{ "Xwing", 25.0f, -2.0f, 80.0f, { -0.310f, -0.852f, -0.423f }, { -0.457f, -0.256f, 0.852f }, 0, 1 },
 	/* 4: the far X-wing on the right, head on, rolled into a tall X. */
 	{ "Xwing", 31.0f, 10.0f, 110.0f, { 0.0f, -0.990f, 0.139f }, { -0.777f, 0.088f, 0.623f }, 0, 1 },
 	/* 5: TIE fighter upper left of the middle: toward us, window down to
@@ -1769,7 +1769,7 @@ static void env_submit_xvtart_sprites(AeronScene3D* scene) {
 		static const struct {
 			int slot;
 			float yaw, h;
-		} pilots[] = { { ENV_TEX_TIE_PILOT, -31.0f, 46.0f }, { ENV_TEX_REBEL_PILOT, 35.0f, 42.0f } };
+		} pilots[] = { { ENV_TEX_TIE_PILOT, -31.0f, 41.4f }, { ENV_TEX_REBEL_PILOT, 35.0f, 35.7f } };
 		for (size_t i = 0; i < sizeof pilots / sizeof pilots[0]; ++i) {
 			const int slot = pilots[i].slot;
 			if (s_env.tex[slot] && s_env.tex_h[slot] > 0) {
