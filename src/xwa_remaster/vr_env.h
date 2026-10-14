@@ -20,7 +20,9 @@
  *                     Vader's helmet (vr/vader.rgba, APK assets only);
  *   xvt             — the X-Wing vs. TIE Fighter box art: its X-wings, TIE
  *                     Interceptor and TIE fighters round the explosion and
- *                     its pillar of light, at their cover attitudes;
+ *                     its pillar of light, at their cover attitudes, before
+ *                     the TIE pilot and the rebel pilot (vr/xvt_tie_pilot.rgba,
+ *                     vr/xvt_rebel_pilot.rgba, APK assets only);
  *   hangar          — the carrier hangar (Hangar.opt and its props, laid
  *                     out like the in-mission hangar);
  *   0               — off.

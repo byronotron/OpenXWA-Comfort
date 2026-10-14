@@ -252,26 +252,30 @@ typedef struct EnvStreak {
  * (view-relative); the middle, behind the screen on the cover, moves below
  * it, the rest out just far enough to clear the screen and logo. */
 static const EnvShip k_xvtart[] = {
-	/* 0: the big X-wing lower right: nose toward us, down to the right, its
-	 * top toward us, upper wings to the upper right. */
-	{ "Xwing", 40.0f, -29.0f, 16.0f, { 0.62f, -0.55f, -0.45f }, { 0.06f, -0.55f, 0.76f }, 0, 1 },
-	/* 1: the TIE Interceptor lower left: facing us, window a little to the
-	 * right, wing axis falling to the right. */
-	{ "TieInterceptor", -32.0f, -28.0f, 14.0f, { 0.20f, -0.95f, -0.10f }, { 0.50f, 0.02f, 0.85f }, 0, 1 },
-	/* 2: the X-wing in the explosion, banking up to the left, seen from above. */
-	{ "Xwing", -8.0f, -33.0f, 60.0f, { -0.65f, 0.35f, 0.60f }, { 0.30f, -0.60f, 0.60f }, 0, 1 },
-	/* 3: the small X-wing at the explosion's top, coming at us. */
-	{ "Xwing", 25.0f, -2.0f, 80.0f, { -0.30f, -0.90f, -0.30f }, { 0.0f, -0.30f, 0.95f }, 0, 1 },
-	/* 4: the far X-wing on the right, coming at us. */
-	{ "Xwing", 31.0f, 10.0f, 110.0f, { -0.40f, -0.85f, -0.35f }, { 0.20f, -0.40f, 0.90f }, 0, 1 },
-	/* 5: TIE fighter upper left of the middle: three-quarters from the
-	 * front left, wing axis rising to the right. */
-	{ "TieFighter", -26.0f, 12.0f, 50.0f, { -0.55f, -0.75f, 0.10f }, { -0.40f, 0.41f, 0.88f }, 0, 1 },
-	/* 6: the TIE fighter left of it, smaller. */
-	{ "TieFighter", -34.0f, 6.0f, 75.0f, { -0.55f, -0.75f, 0.10f }, { -0.40f, 0.41f, 0.88f }, 0, 1 },
-	/* 7, 8: the two tiny TIEs far left. */
-	{ "TieFighter", -46.0f, 18.0f, 160.0f, { 0.30f, -0.60f, 0.70f }, { 0.0f, 0.70f, 0.70f }, 0, 1 },
-	{ "TieFighter", -40.0f, 19.0f, 160.0f, { -0.60f, -0.70f, 0.30f }, { -0.20f, 0.20f, 0.95f }, 0, 1 },
+	/* Attitudes fitted to the cover (keypoint pose fits for the X-wings,
+	 * real-mesh renders compared side by side for the TIEs). */
+	/* 0: the big X-wing lower right: nose toward us and to the right, its
+	 * top tilted toward us, the left wings up to the right. */
+	{ "Xwing", 40.0f, -29.0f, 16.0f, { 0.325f, -0.932f, -0.161f }, { -0.471f, -0.308f, 0.827f }, 0, 1 },
+	/* 1: the TIE Interceptor lower left: window toward us, turned a
+	 * little to its right and down, wings falling to the right. */
+	{ "TieInterceptor", -32.0f, -28.0f, 14.0f, { -0.439f, -0.861f, -0.259f }, { 0.255f, -0.395f, 0.882f }, 0, 1 },
+	/* 2: the X-wing in the explosion, coming out of it toward us and to
+	 * the lower left. */
+	{ "Xwing", -8.0f, -33.0f, 60.0f, { -0.186f, -0.958f, -0.217f }, { 0.514f, -0.283f, 0.810f }, 0, 1 },
+	/* 3: the small X-wing at the explosion's top, flying into it: the
+	 * engines toward us. */
+	{ "Xwing", 25.0f, -2.0f, 80.0f, { -0.310f, 0.852f, -0.423f }, { -0.457f, 0.256f, 0.852f }, 0, 1 },
+	/* 4: the far X-wing on the right, head on, rolled into a tall X. */
+	{ "Xwing", 31.0f, 10.0f, 110.0f, { 0.0f, -0.990f, 0.139f }, { -0.777f, 0.088f, 0.623f }, 0, 1 },
+	/* 5: TIE fighter upper left of the middle: toward us, window down to
+	 * the lower left, wings near edge on, pylons rising to the right. */
+	{ "TieFighter", -26.0f, 12.0f, 50.0f, { 0.296f, -0.814f, -0.500f }, { -0.384f, -0.581f, 0.718f }, 0, 1 },
+	/* 6: the TIE fighter left of it, smaller, the same way. */
+	{ "TieFighter", -34.0f, 6.0f, 75.0f, { 0.296f, -0.814f, -0.500f }, { -0.258f, -0.572f, 0.778f }, 0, 1 },
+	/* 7, 8: the two tiny TIEs far left: head on from below and above. */
+	{ "TieFighter", -46.0f, 18.0f, 160.0f, { 0.0f, -0.866f, 0.500f }, { -0.407f, 0.457f, 0.791f }, 0, 1 },
+	{ "TieFighter", -40.0f, 19.0f, 160.0f, { 0.075f, -0.863f, -0.500f }, { 0.349f, -0.447f, 0.824f }, 0, 1 },
 };
 
 /* The explosion: yaw, pitch, metres, diameter in metres. */
@@ -310,6 +314,8 @@ enum {
 	ENV_TEX_BEAM,
 	ENV_TEX_NEBULA, /* generated: the box art's purple nebula */
 	ENV_TEX_VADER,  /* vr/vader.rgba: the helmet behind the TIE Fighter scene */
+	ENV_TEX_TIE_PILOT,   /* vr/xvt_tie_pilot.rgba: X-Wing vs. TIE backdrop, left */
+	ENV_TEX_REBEL_PILOT, /* vr/xvt_rebel_pilot.rgba: X-Wing vs. TIE backdrop, right */
 	ENV_TEX_COUNT
 };
 
@@ -328,6 +334,8 @@ static const EnvTexSource k_tex_sources[ENV_TEX_COUNT] = {
 	{ NULL, 0, 0 },            /* generated */
 	{ NULL, 0, 0 },            /* generated */
 	{ NULL, 0, 0 },            /* vr/vader.rgba */
+	{ NULL, 0, 0 },            /* vr/xvt_tie_pilot.rgba */
+	{ NULL, 0, 0 },            /* vr/xvt_rebel_pilot.rgba */
 };
 
 typedef enum EnvMode { ENV_OFF = 0, ENV_ENDOR, ENV_HANGAR, ENV_BOXART, ENV_TIEART, ENV_XVTART } EnvMode;
@@ -941,7 +949,10 @@ static int env_make_nebula(AeronCommandBuffer* cmd) {
  *   frame — the frame around the 4:3 screen (XWA_XR_FRAME, 0 = none); its
  *           opening is the rectangle k_frame_opening in image pixels.
  *   vader — the helmet behind the TIE Fighter scene (XWA_XR_VADER), grey
- *           (tinted here), faded out at the bottom. */
+ *           (tinted here), faded out at the bottom.
+ *   xvt_tie_pilot, xvt_rebel_pilot — the two pilots behind the X-Wing vs.
+ *           TIE Fighter scene (XWA_XR_TIE_PILOT, XWA_XR_REBEL_PILOT), the
+ *           rebel facing left, vignetted to transparent at the edges. */
 static int env_load_rgba(AeronCommandBuffer* cmd, int slot, const char* name, const char* override_env) {
 	const char* override = getenv(override_env);
 	if (override && strcmp(override, "0") == 0) {
@@ -1028,11 +1039,14 @@ static void env_load_dat_sprite(AeronCommandBuffer* cmd, int slot) {
 static int env_tex_needed(int slot) {
 	switch (s_env.mode) {
 		case ENV_ENDOR:
-			return slot != ENV_TEX_NEBULA && slot != ENV_TEX_VADER;
+			return slot != ENV_TEX_NEBULA && slot != ENV_TEX_VADER && slot != ENV_TEX_TIE_PILOT &&
+				   slot != ENV_TEX_REBEL_PILOT;
 		case ENV_BOXART:
-			return slot != ENV_TEX_DEATHSTAR && slot != ENV_TEX_ENDOR && slot != ENV_TEX_VADER;
+			return slot != ENV_TEX_DEATHSTAR && slot != ENV_TEX_ENDOR && slot != ENV_TEX_VADER &&
+				   slot != ENV_TEX_TIE_PILOT && slot != ENV_TEX_REBEL_PILOT;
 		case ENV_TIEART:
-			return slot != ENV_TEX_DEATHSTAR && slot != ENV_TEX_ENDOR;
+			return slot != ENV_TEX_DEATHSTAR && slot != ENV_TEX_ENDOR && slot != ENV_TEX_TIE_PILOT &&
+				   slot != ENV_TEX_REBEL_PILOT;
 		case ENV_XVTART:
 			return slot != ENV_TEX_DEATHSTAR && slot != ENV_TEX_ENDOR && slot != ENV_TEX_NEBULA &&
 				   slot != ENV_TEX_VADER;
@@ -1058,6 +1072,10 @@ static int env_load_sprites(AeronCommandBuffer* cmd) {
 			env_load_rgba(cmd, i, "frame", "XWA_XR_FRAME");
 		} else if (i == ENV_TEX_VADER) {
 			env_load_rgba(cmd, i, "vader", "XWA_XR_VADER");
+		} else if (i == ENV_TEX_TIE_PILOT) {
+			env_load_rgba(cmd, i, "xvt_tie_pilot", "XWA_XR_TIE_PILOT");
+		} else if (i == ENV_TEX_REBEL_PILOT) {
+			env_load_rgba(cmd, i, "xvt_rebel_pilot", "XWA_XR_REBEL_PILOT");
 		} else {
 			env_load_dat_sprite(cmd, i);
 		}
@@ -1734,9 +1752,28 @@ static void env_submit_tieart_sprites(AeronScene3D* scene) {
 }
 
 /* The X-Wing vs. TIE Fighter box art: the explosion and its pillar of
- * light, the fire round the banking X-wing, the green streaks. */
+ * light, the fire round the X-wing coming out of it, the green streaks. */
 static void env_submit_xvtart_sprites(AeronScene3D* scene) {
 	const float k = AERON_OPT_UNITS_PER_METER;
+	/* The two pilots looming behind the fight, the TIE pilot on the left and
+	 * the rebel on the right, both looking toward the middle; dimmed into the
+	 * dark blue of the cover. XWA_XR_PILOTS_BRIGHTNESS scales them. */
+	{
+		const float b = env_float("XWA_XR_PILOTS_BRIGHTNESS", 1.0f);
+		const float tint[4] = { 0.40f * b, 0.42f * b, 0.55f * b, 1.0f };
+		static const struct {
+			int slot;
+			float yaw;
+		} pilots[] = { { ENV_TEX_TIE_PILOT, -31.0f }, { ENV_TEX_REBEL_PILOT, 31.0f } };
+		for (size_t i = 0; i < sizeof pilots / sizeof pilots[0]; ++i) {
+			const int slot = pilots[i].slot;
+			if (s_env.tex[slot] && s_env.tex_h[slot] > 0) {
+				const float h = 46.0f;
+				const float w = h * (float)s_env.tex_w[slot] / (float)s_env.tex_h[slot];
+				env_sky_rect(scene, slot, pilots[i].yaw, 24.0f, w, h, 0.0f, tint);
+			}
+		}
+	}
 	/* The pillar of light, straight up and down through the explosion. */
 	{
 		float lo[3], hi[3];
@@ -1750,7 +1787,7 @@ static void env_submit_xvtart_sprites(AeronScene3D* scene) {
 		env_beam(scene, AERON_SCENE_BILLBOARD_STAGE_SKY, lo, hi, thin, core);
 	}
 	env_submit_fireball(scene, k_xvt_blast);
-	/* Fire round the X-wing banking through it. */
+	/* Fire round the X-wing coming out of it. */
 	{
 		float q[3], c[4][3];
 		static const float white[4] = { 1.5f, 1.4f, 1.3f, 1.0f };
