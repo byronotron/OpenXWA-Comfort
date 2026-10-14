@@ -4039,15 +4039,26 @@ static AeronTexture* fl_xr_right_bloom(AeronCommandBuffer* cmd, const AeronXrVie
 	const float ax = (rr - lr) / (rl - ll), bx = (lr - ll) / (rl - ll);
 	const float ay = (ur - dr) / (ul - dl), by = (ul - ur) / (ul - dl);
 	AeronDrawList_Begin(s_xr_bloom_blit, s_xr_bloom_right, w, h, AERON_DRAWLIST2D_CLEAR, NULL);
+	/* Only where the left eye saw the same directions: the right eye's far
+	 * right edge lies outside the left eye's view, and clamped sampling
+	 * there smeared the edge texels into streaks. That strip keeps no bloom
+	 * (the target is cleared to zero). */
+	const float x0 = fmaxf(0.0f, -bx / ax), x1 = fminf(1.0f, (1.0f - bx) / ax);
+	const float y0 = fmaxf(0.0f, -by / ay), y1 = fminf(1.0f, (1.0f - by) / ay);
+	if (x1 <= x0 || y1 <= y0) {
+		return NULL;
+	}
 	AeronDrawList2DSprite sp;
 	memset(&sp, 0, sizeof sp);
 	sp.texture = left;
-	sp.src_u0 = bx;
-	sp.src_u1 = ax + bx;
-	sp.src_v0 = by;
-	sp.src_v1 = ay + by;
-	sp.dst_w = (float)w;
-	sp.dst_h = (float)h;
+	sp.src_u0 = ax * x0 + bx;
+	sp.src_u1 = ax * x1 + bx;
+	sp.src_v0 = ay * y0 + by;
+	sp.src_v1 = ay * y1 + by;
+	sp.dst_x = x0 * (float)w;
+	sp.dst_y = y0 * (float)h;
+	sp.dst_w = (x1 - x0) * (float)w;
+	sp.dst_h = (y1 - y0) * (float)h;
 	sp.tint[0] = sp.tint[1] = sp.tint[2] = sp.tint[3] = 1.0f;
 	sp.blend = AERON_BLIT2D_BLEND_NONE;
 	sp.filter = AERON_BLIT2D_FILTER_LINEAR;
