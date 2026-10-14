@@ -216,8 +216,9 @@ static const EnvShip k_tieart[] = {
 	/* 3: TIE Bomber upper right: from the front above, rolled, firing to
 	 * the upper right. */
 	{ "TieBomber", 36.0f, 16.0f, 28.0f, { 0.30f, -0.60f, 0.75f }, { -0.45f, 0.60f, 0.66f }, 0, 1 },
-	/* 4: the small TIE fighter right of the middle, seen from above. */
-	{ "TieFighter", 28.0f, 2.0f, 90.0f, { 0.30f, -0.50f, -0.80f }, { 0.0f, -0.85f, 0.50f }, 0, 1 },
+	/* 4: the small TIE fighter right of the middle, coming at us, its
+	 * cockpit window toward us. */
+	{ "TieFighter", 28.0f, 2.0f, 90.0f, { 0.28f, -0.94f, -0.18f }, { 0.05f, -0.17f, 0.98f }, 0, 1 },
 	/* 5: the X-wing breaking up in the explosion, nose down to the right. */
 	{ "Xwing", 18.0f, -32.0f, 45.0f, { 0.55f, -0.35f, -0.75f }, { 0.30f, -0.60f, 0.50f }, 0, 1 },
 };
@@ -1720,9 +1721,10 @@ static void env_submit_tieart_sprites(AeronScene3D* scene) {
 	if (s_env.tex[ENV_TEX_VADER]) {
 		const float b = env_float("XWA_XR_VADER_BRIGHTNESS", 1.0f);
 		const float tint[4] = { 0.18f * b, 0.17f * b, 0.42f * b, 1.0f };
-		const float h = 58.5f; /* 35 % smaller than the cover's */
+		const float h = 46.8f; /* 35 %, then 20 % smaller than the cover's */
 		const float w = h * (float)s_env.tex_w[ENV_TEX_VADER] / (float)s_env.tex_h[ENV_TEX_VADER];
-		env_sky_rect(scene, ENV_TEX_VADER, 0.0f, 12.0f, w, h, 0.0f, tint);
+		const float pitch = env_float("XWA_XR_VADER_PITCH", 30.0f); /* the eyes above the screen and logo */
+		env_sky_rect(scene, ENV_TEX_VADER, 0.0f, pitch, w, h, 0.0f, tint);
 	}
 	/* Purple clouds below. */
 	{
