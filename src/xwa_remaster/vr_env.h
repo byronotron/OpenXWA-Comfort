@@ -48,6 +48,11 @@ void XwaVrEnv_Submit(AeronScene3D* scene);
  * Returns 0 when the frame has no layer (it is then drawn in the scene). */
 int XwaVrEnv_CommitFrameLayer(AeronCommandBuffer* cmd, float brightness);
 
+/* The flat rectangle the compositor layers cover in the menus (the frame,
+ * or the bare screen without one), facing the viewer: centre and size in
+ * metres, LOCAL space (x right, y up, -z ahead). */
+int XwaVrEnv_LayerRect(float centre[3], float size[2]);
+
 /* Frees the GPU meshes (the flight scene loads its own hangar). */
 void XwaVrEnv_Release(void);
 

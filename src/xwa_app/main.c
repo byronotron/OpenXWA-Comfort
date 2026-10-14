@@ -364,6 +364,12 @@ static void android_load_settings(void) {
 				  "#AERON_XR_PERF_LEVEL=high\n"
 				  "# 0 = turn off the GPU optimizations (A/B test; also in the VR options):\n"
 				  "#XWA_XR_GPU_OPT=1\n"
+				  "# Anisotropic texture filtering cap (1 = trilinear only):\n"
+				  "#XWA_XR_ANISOTROPY=2\n"
+				  "# Bloom: 1 = one for both eyes, eye = per eye, 0 = off:\n"
+				  "#XWA_XR_BLOOM=1\n"
+				  "# 0 = no GPU timing (the log lists each kind of render pass's ms per frame):\n"
+				  "#XWA_XR_GPU_TIMING=1\n"
 				  "# 0 = classic draw order (sky first) instead of near meshes first:\n"
 				  "#XWA_XR_DRAW_ORDER=1\n"
 				  "# 1 = dynamic lights from lasers/explosions (costs GPU time in combat):\n"
@@ -480,9 +486,13 @@ static void android_load_settings(void) {
 static char g_shim_guard[1024];
 static int (*g_shim_take_log)(char* out, int size);
 static int (*g_shim_foveating)(void);
+static void (*g_shim_frame_mark)(void);
 
 static void shim_frame(void) {
 	static int frames;
+	if (g_shim_frame_mark) {
+		g_shim_frame_mark(); /* its GPU timing reports per frame */
+	}
 	if (g_shim_take_log) {
 		char text[4096];
 		if (g_shim_take_log(text, (int)sizeof text) > 0) {
@@ -537,12 +547,15 @@ static void android_xr_defaults(void) {
 			SDL_setenv_unsafe("XWA_XR_FOVEATION", "0", 1);
 			XwaModernVrOptions_SaveValue("XWA_XR_FOVEATION", "0");
 			Aeron_LogWarn("xwa.config", "foveation: the last start with it failed, so it is now off");
-		} else if (!(fov && (fov[0] == '0' || SDL_strcasecmp(fov, "off") == 0))) {
+		} else if (!(fov && (fov[0] == '0' || SDL_strcasecmp(fov, "off") == 0)) ||
+				   !(SDL_getenv("XWA_XR_GPU_TIMING") && SDL_getenv("XWA_XR_GPU_TIMING")[0] == '0')) {
+			/* Also with foveation off: the shim then only times the GPU. */
 			void* shim = dlopen("libopenxwa_vkshim.so", RTLD_NOW | RTLD_LOCAL);
 			if (shim && dlsym(shim, "vkGetInstanceProcAddr")) {
 				SDL_SetHint(SDL_HINT_VULKAN_LIBRARY, "libopenxwa_vkshim.so");
 				g_shim_take_log = (int (*)(char*, int))dlsym(shim, "OpenXWA_VkShim_TakeLog");
 				g_shim_foveating = (int (*)(void))dlsym(shim, "OpenXWA_VkShim_Foveating");
+				g_shim_frame_mark = (void (*)(void))dlsym(shim, "OpenXWA_VkShim_FrameMark");
 				if (g_shim_guard[0] && (guard = fopen(g_shim_guard, "w")) != NULL) {
 					fclose(guard);
 				}
@@ -614,6 +627,9 @@ static void apply_quest_render_profile(XwaHostConfig* host) {
 	}
 	if (!SDL_getenv("XWA_XR_SHADOWS")) {
 		SDL_setenv_unsafe("XWA_XR_SHADOWS", "0", 1);
+	}
+	if (!SDL_getenv("XWA_XR_ANISOTROPY")) {
+		SDL_setenv_unsafe("XWA_XR_ANISOTROPY", "2", 1);
 	}
 	/* Laser and explosion point lights are what saturates the Quest GPU in
 	 * dogfights (each one is shaded per pixel, per eye). */

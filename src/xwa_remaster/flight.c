@@ -1128,7 +1128,18 @@ void XwaRemasterFlight_GetPointLightStats(XwaFlightPointLightStats* out) {
 
 static int fl_apply_texture_filtering(const XwaFlightTextureFilteringParams* in) {
 	AeronSampler* sampler = NULL;
-	if (in->anisotropic) {
+	/* XWA_XR_ANISOTROPY caps it (the Quest profile sets 2): at headset
+	 * resolution 8x+ is barely visible and costs texture bandwidth on four
+	 * uncompressed atlases per pixel. 1 = plain trilinear. */
+	float max_aniso = in->max_anisotropy;
+	{
+		const char* cap = getenv("XWA_XR_ANISOTROPY");
+		const float c = cap && cap[0] ? (float)atof(cap) : 0.0f;
+		if (c >= 1.0f && c < max_aniso) {
+			max_aniso = c;
+		}
+	}
+	if (in->anisotropic && max_aniso > 1.0f) {
 		sampler = Aeron_CreateSampler(&(AeronSamplerDesc) {
 			.min_filter = AERON_FILTER_LINEAR,
 			.mag_filter = AERON_FILTER_LINEAR,
@@ -1138,7 +1149,7 @@ static int fl_apply_texture_filtering(const XwaFlightTextureFilteringParams* in)
 			.address_w = AERON_ADDRESS_CLAMP_TO_EDGE,
 			.max_lod = 1000.0f,
 			.enable_anisotropy = 1,
-			.max_anisotropy = in->max_anisotropy,
+			.max_anisotropy = max_aniso,
 		});
 		if (!sampler) {
 			Aeron_LogWarn("xwa.remaster",
@@ -3500,6 +3511,7 @@ static void fl_add_ambient_cube(XwaShipAmbientCube* base, const XwaShipAmbientCu
 static int fl_xr_stereo_eligible(const XwaFlightCamera* cam);
 static float fl_xr_env(const char* name, float fallback);
 static void fl_xr_eye_camera(const AeronSceneCamera* base, const AeronXrView* v, AeronSceneCamera* out);
+static AeronTexture* fl_xr_right_bloom(void);
 static int fl_xr_output_eye(AeronCommandBuffer* cmd, AeronRenderTarget* target, AeronTextureFormat format,
 							AeronTexture* bloom_tex);
 
@@ -3663,7 +3675,8 @@ static AeronTexture* fl_render_hyperspace(AeronCommandBuffer* cmd, const XwaSnap
 			out = s.present_scene_tex;
 		}
 		/* No HUD in the jump: just the eyes. */
-		if (out && fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format, s.present_bloom_tex)) {
+		if (out && fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format,
+									s.present_bloom_tex ? s.present_bloom_tex : fl_xr_right_bloom())) {
 			Aeron_XrStereoCommitHuds(NULL, NULL);
 		}
 		return out;
@@ -3953,6 +3966,30 @@ static int g_xr_hud_w, g_xr_hud_h;
 static float s_xr_eye_gain = 1.0f;
 static float s_xr_eye_gain_last = 1.0f; /* the menu environment's, for its frame layer */
 static AeronDrawList2D* s_xr_eye_alpha; /* drawn into the next eye output (its alpha) */
+static AeronTexture* s_xr_bloom_last;   /* the bloom the last eye output computed */
+
+/* XWA_XR_BLOOM: 1 (default) one bloom for both eyes, computed from the left
+ * eye: a glow is a wide blur, so the eyes' few pixels of parallax do not
+ * show in it, and it saves the whole bloom chain (a dozen small passes) for
+ * the right eye. "eye" = per eye, 0 = no bloom in VR. */
+static int fl_xr_bloom_mode(void) {
+	const char* env = getenv("XWA_XR_BLOOM");
+	if (env && env[0] == '0') {
+		return 0;
+	}
+	if (env && strcmp(env, "eye") == 0) {
+		return 2;
+	}
+	return 1;
+}
+
+/* The bloom for the right eye: the left eye's when shared, else NULL (the
+ * eye output computes its own). */
+static AeronTexture* fl_xr_right_bloom(void) {
+	AeronTexture* tex = fl_xr_bloom_mode() == 1 ? s_xr_bloom_last : NULL;
+	s_xr_bloom_last = NULL;
+	return tex;
+}
 
 static int fl_xr_output_eye(AeronCommandBuffer* cmd, AeronRenderTarget* target, AeronTextureFormat format,
 							AeronTexture* bloom_tex) {
@@ -3962,12 +3999,16 @@ static int fl_xr_output_eye(AeronCommandBuffer* cmd, AeronRenderTarget* target, 
 	if (!chain || !scene_tex || !s.present_sampler) {
 		return 0;
 	}
-	if (!bloom_tex && s.bloom && AeronSceneBloom_Intensity() > 0.0f) {
+	s_xr_bloom_last = NULL;
+	if (fl_xr_bloom_mode() == 0) {
+		bloom_tex = NULL;
+	} else if (!bloom_tex && s.bloom && AeronSceneBloom_Intensity() > 0.0f) {
 		if (!AeronSceneBloom_Apply(s.bloom, cmd, scene_tex, s.rt_w, s.rt_h, s.rt_h)) {
 			return 0;
 		}
 		AeronRenderTarget* bloom_rt = AeronSceneBloom_ColorRt(s.bloom);
 		bloom_tex = bloom_rt ? Aeron_RenderTargetGetTexture(bloom_rt) : NULL;
+		s_xr_bloom_last = bloom_tex;
 	}
 	AeronRenderPass* pass = Aeron_BeginRenderPass(&(AeronRenderPassDesc) {
 		.color_target = target,
@@ -5052,7 +5093,8 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 			XwaVrHudOcclusion_Prepare(cmd, xr_frame.views, &occlude_quad, g_xr_hud_w > 0 ? g_xr_hud_w : s.rt_w,
 									  g_xr_hud_h > 0 ? g_xr_hud_h : s.rt_h);
 		}
-		if (fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format, s.present_bloom_tex) &&
+		if (fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format,
+							 s.present_bloom_tex ? s.present_bloom_tex : fl_xr_right_bloom()) &&
 			fl_xr_output_hud(cmd, xr_frame.hud_target, head_parts, cockpit_active) &&
 			(!cmd_aux || fl_xr_output_hud(cmd, xr_frame.hud_aux_target, FL_HUD_CMD, 2)) &&
 			(!split || fl_xr_output_hud(cmd, xr_frame.hud_world_target, FL_HUD_WORLD, 0))) {
@@ -5278,7 +5320,7 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 			}
 		}
 		s_xr_eye_alpha = hands_over ? XwaVrHandOverlay_List(e) : NULL;
-		ok = fl_xr_output_eye(cmd, xr_frame.eye_targets[e], xr_frame.format, NULL);
+		ok = fl_xr_output_eye(cmd, xr_frame.eye_targets[e], xr_frame.format, e ? fl_xr_right_bloom() : NULL);
 		s_xr_eye_alpha = NULL;
 	}
 	s_xr_eye_gain_last = s_xr_eye_gain;

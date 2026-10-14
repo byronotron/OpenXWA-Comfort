@@ -20,6 +20,10 @@
  * Attachments stay ordinary (not subsampled): the GPU shades the periphery in
  * larger fragments and writes them to every covered pixel.
  *
+ * It also times the GPU work of every render pass (timestamps around
+ * vkCmdBeginRenderPass / vkCmdEndRenderPass) and logs every 10 s what each
+ * kind of pass costs per frame (XWA_XR_GPU_TIMING=0 turns that off).
+ *
  * Environment (read when needed):
  *   XWA_XR_FOVEATION         0/off, low (default), medium, high
  *   OPENXWA_FOVEATION_EYE    "w h cx_left cy_left cx_right cy_right": the eye
@@ -138,6 +142,12 @@ static struct {
 	PFN_vkGetDeviceQueue GetDeviceQueue;
 	PFN_vkQueueSubmit QueueSubmit;
 	PFN_vkQueueWaitIdle QueueWaitIdle;
+	PFN_vkCmdEndRenderPass CmdEndRenderPass;
+	PFN_vkCmdWriteTimestamp CmdWriteTimestamp;
+	PFN_vkCmdResetQueryPool CmdResetQueryPool;
+	PFN_vkCreateQueryPool CreateQueryPool;
+	PFN_vkDestroyQueryPool DestroyQueryPool;
+	PFN_vkGetQueryPoolResults GetQueryPoolResults;
 	VkPhysicalDeviceMemoryProperties memory;
 } g_dev;
 
@@ -164,6 +174,390 @@ static int g_eye_fb_count;
 static unsigned g_eye_begins, g_other_begins;
 static double g_count_since;
 static int g_eye_w, g_eye_h, g_eye_tried, g_logged_eye;
+
+/* ---- GPU timing --------------------------------------------------------- */
+
+static double shim_now(void);
+
+/* What a render pass is: its first attachment's format, samples, attachment
+ * count; plus the framebuffer size. Passes of one kind are summed. */
+typedef struct ShimPassDesc {
+	VkRenderPass pass;
+	VkFormat format;
+	VkSampleCountFlagBits samples;
+	uint32_t attachments;
+	int depth_only;
+} ShimPassDesc;
+typedef struct ShimFbDesc {
+	VkFramebuffer fb;
+	VkRenderPass pass;
+	uint32_t w, h;
+} ShimFbDesc;
+typedef struct ShimKind {
+	VkFormat format;
+	VkSampleCountFlagBits samples;
+	uint32_t attachments, w, h;
+	int depth_only, eye;
+	double ns;
+	unsigned count;
+} ShimKind;
+
+#define SHIM_RP_TABLE 1024
+#define SHIM_FB_TABLE 4096
+#define SHIM_KINDS 64
+#define SHIM_QUERIES 4096 /* two per pass */
+#define SHIM_OPEN 16
+
+static struct {
+	int enabled;
+	VkQueryPool pool;
+	float period_ns;
+	uint64_t valid_mask;
+	ShimPassDesc rp[SHIM_RP_TABLE];
+	ShimFbDesc fb[SHIM_FB_TABLE];
+	ShimKind kinds[SHIM_KINDS];
+	int kind_count;
+	/* Ring of query pairs: kind, recording time; -1 = free. */
+	int slot_kind[SHIM_QUERIES / 2];
+	double slot_time[SHIM_QUERIES / 2];
+	uint32_t write, read; /* pair indices */
+	uint64_t last_start;
+	struct {
+		VkCommandBuffer cb;
+		uint32_t pair;
+	} open[SHIM_OPEN];
+	unsigned frames;
+	double since, last_harvest;
+} g_t;
+
+static uint32_t shim_hash(uint64_t h, uint32_t size) {
+	h ^= h >> 33;
+	h *= 0xff51afd7ed558ccdull;
+	h ^= h >> 33;
+	return (uint32_t)(h & (size - 1));
+}
+
+static void rp_put(const ShimPassDesc* d) {
+	uint32_t i = shim_hash((uint64_t)(uintptr_t)d->pass, SHIM_RP_TABLE);
+	for (uint32_t n = 0; n < SHIM_RP_TABLE; ++n, i = (i + 1) & (SHIM_RP_TABLE - 1)) {
+		if (g_t.rp[i].pass == VK_NULL_HANDLE || g_t.rp[i].pass == d->pass) {
+			g_t.rp[i] = *d;
+			return;
+		}
+	}
+}
+
+static const ShimPassDesc* rp_get(VkRenderPass p) {
+	uint32_t i = shim_hash((uint64_t)(uintptr_t)p, SHIM_RP_TABLE);
+	for (uint32_t n = 0; n < SHIM_RP_TABLE; ++n, i = (i + 1) & (SHIM_RP_TABLE - 1)) {
+		if (g_t.rp[i].pass == p) {
+			return &g_t.rp[i];
+		}
+		if (g_t.rp[i].pass == VK_NULL_HANDLE) {
+			return NULL;
+		}
+	}
+	return NULL;
+}
+
+/* Removal by backward-shift keeps the probe chains intact. */
+#define SHIM_TABLE_DEL(table, size, field, key)                                                       \
+	do {                                                                                              \
+		uint32_t i_ = shim_hash((uint64_t)(uintptr_t)(key), (size));                                 \
+		for (uint32_t n_ = 0; n_ < (size); ++n_, i_ = (i_ + 1) & ((size)-1)) {                        \
+			if ((table)[i_].field == VK_NULL_HANDLE) {                                                \
+				break;                                                                                \
+			}                                                                                         \
+			if ((table)[i_].field == (key)) {                                                         \
+				uint32_t j_ = i_;                                                                     \
+				for (;;) {                                                                            \
+					j_ = (j_ + 1) & ((size)-1);                                                       \
+					if ((table)[j_].field == VK_NULL_HANDLE) {                                        \
+						break;                                                                        \
+					}                                                                                 \
+					const uint32_t h_ = shim_hash((uint64_t)(uintptr_t)(table)[j_].field, (size));    \
+					if ((j_ > i_ && (h_ <= i_ || h_ > j_)) || (j_ < i_ && (h_ <= i_ && h_ > j_))) {   \
+						(table)[i_] = (table)[j_];                                                    \
+						i_ = j_;                                                                      \
+					}                                                                                 \
+				}                                                                                     \
+				memset(&(table)[i_], 0, sizeof(table)[i_]);                                           \
+				break;                                                                                \
+			}                                                                                         \
+		}                                                                                             \
+	} while (0)
+
+static void fb_put(const ShimFbDesc* d) {
+	uint32_t i = shim_hash((uint64_t)(uintptr_t)d->fb, SHIM_FB_TABLE);
+	for (uint32_t n = 0; n < SHIM_FB_TABLE; ++n, i = (i + 1) & (SHIM_FB_TABLE - 1)) {
+		if (g_t.fb[i].fb == VK_NULL_HANDLE || g_t.fb[i].fb == d->fb) {
+			g_t.fb[i] = *d;
+			return;
+		}
+	}
+}
+
+static const ShimFbDesc* fb_get(VkFramebuffer f) {
+	uint32_t i = shim_hash((uint64_t)(uintptr_t)f, SHIM_FB_TABLE);
+	for (uint32_t n = 0; n < SHIM_FB_TABLE; ++n, i = (i + 1) & (SHIM_FB_TABLE - 1)) {
+		if (g_t.fb[i].fb == f) {
+			return &g_t.fb[i];
+		}
+		if (g_t.fb[i].fb == VK_NULL_HANDLE) {
+			return NULL;
+		}
+	}
+	return NULL;
+}
+
+static const char* fmt_name(VkFormat f, char* buf, size_t n) {
+	switch (f) {
+	case VK_FORMAT_R8G8B8A8_SRGB: return "rgba8-srgb";
+	case VK_FORMAT_B8G8R8A8_SRGB: return "bgra8-srgb";
+	case VK_FORMAT_R8G8B8A8_UNORM: return "rgba8";
+	case VK_FORMAT_B8G8R8A8_UNORM: return "bgra8";
+	case VK_FORMAT_B10G11R11_UFLOAT_PACK32: return "r11g11b10f";
+	case VK_FORMAT_R16G16B16A16_SFLOAT: return "rgba16f";
+	case VK_FORMAT_R16G16_SFLOAT: return "rg16f";
+	case VK_FORMAT_R8G8_UNORM: return "rg8";
+	case VK_FORMAT_R8_UNORM: return "r8";
+	case VK_FORMAT_D16_UNORM: return "d16";
+	case VK_FORMAT_D24_UNORM_S8_UINT: return "d24s8";
+	case VK_FORMAT_D32_SFLOAT: return "d32f";
+	case VK_FORMAT_D32_SFLOAT_S8_UINT: return "d32fs8";
+	default: snprintf(buf, n, "fmt%d", (int)f); return buf;
+	}
+}
+
+static int t_kind(const ShimPassDesc* rp, const ShimFbDesc* fb, int eye) {
+	for (int k = 0; k < g_t.kind_count; ++k) {
+		const ShimKind* s = &g_t.kinds[k];
+		if (s->format == rp->format && s->samples == rp->samples && s->attachments == rp->attachments &&
+			s->w == fb->w && s->h == fb->h && s->depth_only == rp->depth_only) {
+			return k;
+		}
+	}
+	if (g_t.kind_count >= SHIM_KINDS) {
+		return SHIM_KINDS - 1; /* lumped with the last */
+	}
+	ShimKind* s = &g_t.kinds[g_t.kind_count];
+	memset(s, 0, sizeof *s);
+	s->format = rp->format;
+	s->samples = rp->samples;
+	s->attachments = rp->attachments;
+	s->depth_only = rp->depth_only;
+	s->w = fb->w;
+	s->h = fb->h;
+	s->eye = eye;
+	return g_t.kind_count++;
+}
+
+static void t_setup(VkPhysicalDevice phys) {
+	const char* env = getenv("XWA_XR_GPU_TIMING");
+	memset(&g_t, 0, sizeof g_t);
+	for (int i = 0; i < SHIM_QUERIES / 2; ++i) {
+		g_t.slot_kind[i] = -1;
+	}
+	if ((env && env[0] == '0') || !g_dev.CmdWriteTimestamp || !g_dev.CmdResetQueryPool || !g_dev.CreateQueryPool ||
+		!g_dev.GetQueryPoolResults || !g_dev.CmdEndRenderPass || !g_dev.DestroyQueryPool || !g_dev.GetDeviceQueue ||
+		!g_dev.AllocateCommandBuffers || !g_dev.BeginCommandBuffer || !g_dev.EndCommandBuffer ||
+		!g_dev.QueueSubmit || !g_dev.QueueWaitIdle || !g_dev.DestroyCommandPool) {
+		return;
+	}
+	PFN_vkGetPhysicalDeviceProperties props =
+		(PFN_vkGetPhysicalDeviceProperties)g_real_gipa(g_instance, "vkGetPhysicalDeviceProperties");
+	PFN_vkGetPhysicalDeviceQueueFamilyProperties qprops = (PFN_vkGetPhysicalDeviceQueueFamilyProperties)g_real_gipa(
+		g_instance, "vkGetPhysicalDeviceQueueFamilyProperties");
+	if (!props || !qprops) {
+		return;
+	}
+	VkPhysicalDeviceProperties p;
+	props(phys, &p);
+	uint32_t nq = 0;
+	qprops(phys, &nq, NULL);
+	VkQueueFamilyProperties q[16];
+	nq = nq > 16 ? 16 : nq;
+	qprops(phys, &nq, q);
+	const uint32_t bits = g_dev.queue_family < nq ? q[g_dev.queue_family].timestampValidBits : 0;
+	if (bits == 0 || p.limits.timestampPeriod <= 0.0f) {
+		LOGW("GPU timing: no timestamps on this queue");
+		return;
+	}
+	const VkQueryPoolCreateInfo qci = {
+		.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+		.queryType = VK_QUERY_TYPE_TIMESTAMP,
+		.queryCount = SHIM_QUERIES,
+	};
+	if (g_dev.CreateQueryPool(g_dev.device, &qci, NULL, &g_t.pool) != VK_SUCCESS) {
+		LOGW("GPU timing: no query pool");
+		return;
+	}
+	/* Every query starts reset (read before its first use, it must say "not
+	 * ready", not garbage). */
+	{
+		int reset_ok = 0;
+		VkCommandPool pool = VK_NULL_HANDLE;
+		VkCommandBuffer cb = VK_NULL_HANDLE;
+		const VkCommandPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+											  .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+											  .queueFamilyIndex = g_dev.queue_family };
+		if (g_dev.CreateCommandPool && g_dev.CreateCommandPool(g_dev.device, &pci, NULL, &pool) == VK_SUCCESS) {
+			const VkCommandBufferAllocateInfo cai = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+													  .commandPool = pool,
+													  .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+													  .commandBufferCount = 1 };
+			const VkCommandBufferBeginInfo bi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+												  .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
+			VkQueue queue = VK_NULL_HANDLE;
+			g_dev.GetDeviceQueue(g_dev.device, g_dev.queue_family, 0, &queue);
+			if (queue && g_dev.AllocateCommandBuffers(g_dev.device, &cai, &cb) == VK_SUCCESS &&
+				g_dev.BeginCommandBuffer(cb, &bi) == VK_SUCCESS) {
+				g_dev.CmdResetQueryPool(cb, g_t.pool, 0, SHIM_QUERIES);
+				const VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+										  .commandBufferCount = 1,
+										  .pCommandBuffers = &cb };
+				reset_ok = g_dev.EndCommandBuffer(cb) == VK_SUCCESS &&
+						   g_dev.QueueSubmit(queue, 1, &si, VK_NULL_HANDLE) == VK_SUCCESS &&
+						   g_dev.QueueWaitIdle(queue) == VK_SUCCESS;
+			}
+			g_dev.DestroyCommandPool(g_dev.device, pool, NULL);
+		}
+		if (!reset_ok) {
+			LOGW("GPU timing: could not reset the query pool");
+			g_dev.DestroyQueryPool(g_dev.device, g_t.pool, NULL);
+			g_t.pool = VK_NULL_HANDLE;
+			return;
+		}
+	}
+	g_t.period_ns = p.limits.timestampPeriod;
+	g_t.valid_mask = bits >= 64 ? ~0ull : ((1ull << bits) - 1ull);
+	g_t.enabled = 1;
+	LOGI("GPU timing on (%u-bit timestamps, %.2f ns per tick); per-pass costs every 10 s", bits,
+		 (double)g_t.period_ns);
+}
+
+/* Collects finished pairs in order (call with g_lock held). */
+static void t_harvest(double now) {
+	while (g_t.read != g_t.write) {
+		const uint32_t pair = g_t.read;
+		if (g_t.slot_kind[pair] < 0) {
+			g_t.read = (pair + 1) % (SHIM_QUERIES / 2);
+			continue;
+		}
+		uint64_t data[4];
+		const VkResult r = g_dev.GetQueryPoolResults(g_dev.device, g_t.pool, pair * 2, 2, sizeof data, data,
+													 2 * sizeof(uint64_t),
+													 VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+		const uint64_t start = data[0] & g_t.valid_mask, end = data[2] & g_t.valid_mask;
+		/* An old lap's values look available until the reset runs: they are
+		 * from a lap ago (about half a second), so accept only times that are
+		 * at most 100 ms behind the newest seen (command buffers may run in
+		 * another order than they were recorded). */
+		const uint64_t tol = (uint64_t)(100.0e6 / (double)g_t.period_ns);
+		const int ready = (r == VK_SUCCESS || r == VK_NOT_READY) && data[1] && data[3] && end >= start &&
+						  start + tol >= g_t.last_start;
+		if (!ready) {
+			if (now - g_t.slot_time[pair] < 2.0) {
+				return; /* not done yet */
+			}
+		} else {
+			ShimKind* k = &g_t.kinds[g_t.slot_kind[pair]];
+			k->ns += (double)(end - start) * (double)g_t.period_ns;
+			k->count++;
+			if (start > g_t.last_start) {
+				g_t.last_start = start;
+			}
+		}
+		g_t.slot_kind[pair] = -1;
+		g_t.read = (pair + 1) % (SHIM_QUERIES / 2);
+	}
+}
+
+static void t_report(double now) {
+	if (g_t.since == 0.0) {
+		g_t.since = now;
+		return;
+	}
+	if (now - g_t.since < 10.0) {
+		return;
+	}
+	const unsigned frames = g_t.frames ? g_t.frames : 1;
+	int order[SHIM_KINDS];
+	double total = 0.0;
+	for (int k = 0; k < g_t.kind_count; ++k) {
+		order[k] = k;
+		total += g_t.kinds[k].ns;
+	}
+	for (int a = 1; a < g_t.kind_count; ++a) {
+		for (int b = a; b > 0 && g_t.kinds[order[b]].ns > g_t.kinds[order[b - 1]].ns; --b) {
+			const int t = order[b];
+			order[b] = order[b - 1];
+			order[b - 1] = t;
+		}
+	}
+	LOGI("GPU per frame over %.0f s (%u frames, %.0f fps): %.2f ms in render passes", now - g_t.since, g_t.frames,
+		 g_t.frames / (now - g_t.since), total / 1.0e6 / frames);
+	for (int i = 0; i < g_t.kind_count && i < 10; ++i) {
+		const ShimKind* k = &g_t.kinds[order[i]];
+		if (k->count == 0) {
+			continue;
+		}
+		char buf[16];
+		LOGI("  %5.2f ms  %4.1f passes  %ux%u %s%s msaa%u%s", k->ns / 1.0e6 / frames, (double)k->count / frames, k->w,
+			 k->h, k->depth_only ? "depth" : fmt_name(k->format, buf, sizeof buf),
+			 k->attachments > 1 && !k->depth_only ? "+" : "", (unsigned)k->samples, k->eye ? " (foveated eye)" : "");
+	}
+	for (int k = 0; k < g_t.kind_count; ++k) {
+		g_t.kinds[k].ns = 0.0;
+		g_t.kinds[k].count = 0;
+	}
+	g_t.frames = 0;
+	g_t.since = now;
+}
+
+static void t_begin(VkCommandBuffer cb, const VkRenderPassBeginInfo* info, int eye) {
+	const ShimFbDesc* fb = fb_get(info->framebuffer);
+	const ShimPassDesc* rp = fb ? rp_get(fb->pass) : NULL;
+	if (!rp) {
+		return;
+	}
+	int o = -1;
+	for (int i = 0; i < SHIM_OPEN; ++i) {
+		if (g_t.open[i].cb == cb || (o < 0 && g_t.open[i].cb == VK_NULL_HANDLE)) {
+			o = i;
+			if (g_t.open[i].cb == cb) {
+				break;
+			}
+		}
+	}
+	if (o < 0) {
+		return;
+	}
+	const uint32_t pair = g_t.write;
+	const uint32_t next = (pair + 1) % (SHIM_QUERIES / 2);
+	if (next == g_t.read) {
+		/* Ring full (results not coming back): drop the oldest. */
+		g_t.slot_kind[g_t.read] = -1;
+		g_t.read = (g_t.read + 1) % (SHIM_QUERIES / 2);
+	}
+	g_t.write = next;
+	g_t.slot_kind[pair] = t_kind(rp, fb, eye);
+	g_t.slot_time[pair] = shim_now();
+	g_t.open[o].cb = cb;
+	g_t.open[o].pair = pair;
+	g_dev.CmdResetQueryPool(cb, g_t.pool, pair * 2, 2);
+	g_dev.CmdWriteTimestamp(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, g_t.pool, pair * 2);
+}
+
+static void t_end(VkCommandBuffer cb) {
+	for (int i = 0; i < SHIM_OPEN; ++i) {
+		if (g_t.open[i].cb == cb) {
+			g_dev.CmdWriteTimestamp(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g_t.pool, g_t.open[i].pair * 2 + 1);
+			g_t.open[i].cb = VK_NULL_HANDLE;
+			return;
+		}
+	}
+}
 
 /* ---- Helpers ------------------------------------------------------------ */
 
@@ -493,6 +887,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateInstance(const VkInstanceCreate
 
 #define DEV_LOAD(name) g_dev.name = (PFN_vk##name)g_dev.gdpa(g_dev.device, "vk" #name)
 
+static void dev_load(VkDevice device, VkPhysicalDevice phys, const VkDeviceCreateInfo* ci);
+static VkResult dev_plain(PFN_vkCreateDevice real, VkPhysicalDevice phys, const VkDeviceCreateInfo* ci,
+						  const VkAllocationCallbacks* a, VkDevice* out);
+
 static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateDevice(VkPhysicalDevice phys, const VkDeviceCreateInfo* ci,
 														const VkAllocationCallbacks* a, VkDevice* out) {
 	PFN_vkCreateDevice real = (PFN_vkCreateDevice)g_real_gipa(g_instance, "vkCreateDevice");
@@ -500,8 +898,11 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateDevice(VkPhysicalDevice phys, c
 	if (!real) {
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
-	if (shim_level() == 0 || g_dev.device) {
+	if (g_dev.device) {
 		return real(phys, ci, a, out);
+	}
+	if (shim_level() == 0) {
+		return dev_plain(real, phys, ci, a, out);
 	}
 	/* Does the device have it? */
 	PFN_vkEnumerateDeviceExtensionProperties enum_ext =
@@ -514,7 +915,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateDevice(VkPhysicalDevice phys, c
 		(PFN_vkGetPhysicalDeviceProperties2)g_real_gipa(g_instance, "vkGetPhysicalDeviceProperties2KHR");
 	if (!features2 || !props2) {
 		LOGW("no vkGetPhysicalDevice*2KHR: foveation off");
-		return real(phys, ci, a, out);
+		return dev_plain(real, phys, ci, a, out);
 	}
 	PFN_vkGetPhysicalDeviceMemoryProperties memprops =
 		(PFN_vkGetPhysicalDeviceMemoryProperties)g_real_gipa(g_instance, "vkGetPhysicalDeviceMemoryProperties");
@@ -549,14 +950,14 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateDevice(VkPhysicalDevice phys, c
 	if (!has_ext || already || !feat.fragmentDensityMap || !feat.fragmentDensityMapNonSubsampledImages ||
 		prop.maxFragmentDensityTexelSize.width == 0) {
 		LOGW("foveation unavailable on this device: rendering without it");
-		return real(phys, ci, a, out);
+		return dev_plain(real, phys, ci, a, out);
 	}
 
 	/* The application's request plus the extension and its features. */
 	VkDeviceCreateInfo mine = *ci;
 	const char** names = (const char**)calloc(ci->enabledExtensionCount + 1, sizeof *names);
 	if (!names) {
-		return real(phys, ci, a, out);
+		return dev_plain(real, phys, ci, a, out);
 	}
 	memcpy(names, ci->ppEnabledExtensionNames, ci->enabledExtensionCount * sizeof *names);
 	names[ci->enabledExtensionCount] = VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME;
@@ -573,13 +974,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateDevice(VkPhysicalDevice phys, c
 	free(names);
 	if (r != VK_SUCCESS) {
 		LOGW("device with fragment density map failed (%d): rendering without it", r);
-		return real(phys, ci, a, out);
+		return dev_plain(real, phys, ci, a, out);
 	}
 
-	memset(&g_dev, 0, sizeof g_dev);
-	g_dev.device = *out;
-	g_dev.physical = phys;
-	g_dev.queue_family = ci->queueCreateInfoCount ? ci->pQueueCreateInfos[0].queueFamilyIndex : 0;
+	dev_load(*out, phys, ci);
 	/* Map texel: the GPU derives it from the framebuffer / map size ratio
 	 * (rounded up to a power of two, clamped to [min, max]), so a map built
 	 * for 32 px texels is read at 32 px - fine enough for smooth zones (the
@@ -599,6 +997,19 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateDevice(VkPhysicalDevice phys, c
 		g_dev.texel.height = prop.maxFragmentDensityTexelSize.height;
 	}
 	memprops(phys, &g_dev.memory);
+	g_dev.active = g_dev.CreateRenderPass && g_dev.CreateFramebuffer && g_dev.CreateImage && g_dev.QueueSubmit &&
+				   g_dev.CmdCopyBufferToImage && g_dev.GetDeviceQueue;
+	LOGI("foveation %s (map texel %ux%u)", g_dev.active ? "ready" : "unavailable", g_dev.texel.width,
+		 g_dev.texel.height);
+	return VK_SUCCESS;
+}
+
+/* The device's entry points we call or hook, and the GPU timing. */
+static void dev_load(VkDevice device, VkPhysicalDevice phys, const VkDeviceCreateInfo* ci) {
+	memset(&g_dev, 0, sizeof g_dev);
+	g_dev.device = device;
+	g_dev.physical = phys;
+	g_dev.queue_family = ci->queueCreateInfoCount ? ci->pQueueCreateInfos[0].queueFamilyIndex : 0;
 	g_dev.gdpa = (PFN_vkGetDeviceProcAddr)g_real_gipa(g_instance, "vkGetDeviceProcAddr");
 	DEV_LOAD(CreateRenderPass);
 	DEV_LOAD(DestroyRenderPass);
@@ -630,11 +1041,23 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateDevice(VkPhysicalDevice phys, c
 	DEV_LOAD(QueueWaitIdle);
 	DEV_LOAD(DestroyFramebuffer);
 	DEV_LOAD(CmdBeginRenderPass);
-	g_dev.active = g_dev.CreateRenderPass && g_dev.CreateFramebuffer && g_dev.CreateImage && g_dev.QueueSubmit &&
-				   g_dev.CmdCopyBufferToImage && g_dev.GetDeviceQueue;
-	LOGI("foveation %s (map texel %ux%u)", g_dev.active ? "ready" : "unavailable", g_dev.texel.width,
-		 g_dev.texel.height);
-	return VK_SUCCESS;
+	DEV_LOAD(CmdEndRenderPass);
+	DEV_LOAD(CmdWriteTimestamp);
+	DEV_LOAD(CmdResetQueryPool);
+	DEV_LOAD(CreateQueryPool);
+	DEV_LOAD(DestroyQueryPool);
+	DEV_LOAD(GetQueryPoolResults);
+	t_setup(phys);
+}
+
+/* A device without foveation (still timed). */
+static VkResult dev_plain(PFN_vkCreateDevice real, VkPhysicalDevice phys, const VkDeviceCreateInfo* ci,
+						  const VkAllocationCallbacks* a, VkDevice* out) {
+	const VkResult r = real(phys, ci, a, out);
+	if (r == VK_SUCCESS) {
+		dev_load(*out, phys, ci);
+	}
+	return r;
 }
 
 static VKAPI_ATTR void VKAPI_CALL shim_DestroyDevice(VkDevice device, const VkAllocationCallbacks* a) {
@@ -643,6 +1066,10 @@ static VKAPI_ATTR void VKAPI_CALL shim_DestroyDevice(VkDevice device, const VkAl
 		pthread_mutex_lock(&g_lock);
 		map_destroy(&g_eye);
 		map_destroy(&g_full);
+		if (g_t.pool && g_dev.DestroyQueryPool) {
+			g_dev.DestroyQueryPool(device, g_t.pool, NULL);
+		}
+		memset(&g_t, 0, sizeof g_t);
 		g_pass_count = 0;
 		g_eye_tried = 0;
 		g_eye_fb_count = 0;
@@ -655,8 +1082,42 @@ static VKAPI_ATTR void VKAPI_CALL shim_DestroyDevice(VkDevice device, const VkAl
 	real(device, a);
 }
 
+static VkResult shim_CreateRenderPassFdm(VkDevice device, const VkRenderPassCreateInfo* ci,
+										 const VkAllocationCallbacks* a, VkRenderPass* out);
+
 static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateRenderPass(VkDevice device, const VkRenderPassCreateInfo* ci,
 															const VkAllocationCallbacks* a, VkRenderPass* out) {
+	const VkResult r = shim_CreateRenderPassFdm(device, ci, a, out);
+	if (r == VK_SUCCESS && device == g_dev.device && g_t.enabled && ci->attachmentCount > 0) {
+		ShimPassDesc d;
+		memset(&d, 0, sizeof d);
+		d.pass = *out;
+		d.attachments = ci->attachmentCount;
+		d.depth_only = 1;
+		/* The first colour attachment describes the pass. */
+		for (uint32_t i = 0; i < ci->attachmentCount; ++i) {
+			const VkFormat f = ci->pAttachments[i].format;
+			const int depth = f == VK_FORMAT_D16_UNORM || f == VK_FORMAT_D24_UNORM_S8_UINT ||
+							  f == VK_FORMAT_D32_SFLOAT || f == VK_FORMAT_D32_SFLOAT_S8_UINT ||
+							  f == VK_FORMAT_X8_D24_UNORM_PACK32 || f == VK_FORMAT_D16_UNORM_S8_UINT;
+			if (!depth) {
+				d.format = f;
+				d.samples = ci->pAttachments[i].samples;
+				d.depth_only = 0;
+				break;
+			}
+			d.format = f;
+			d.samples = ci->pAttachments[i].samples;
+		}
+		pthread_mutex_lock(&g_lock);
+		rp_put(&d);
+		pthread_mutex_unlock(&g_lock);
+	}
+	return r;
+}
+
+static VkResult shim_CreateRenderPassFdm(VkDevice device, const VkRenderPassCreateInfo* ci,
+										 const VkAllocationCallbacks* a, VkRenderPass* out) {
 	int msaa = 0;
 	for (uint32_t i = 0; i < ci->attachmentCount; ++i) {
 		msaa |= ci->pAttachments[i].samples != VK_SAMPLE_COUNT_1_BIT;
@@ -717,6 +1178,9 @@ static VKAPI_ATTR void VKAPI_CALL shim_DestroyRenderPass(VkDevice device, VkRend
 			break;
 		}
 	}
+	if (pass != VK_NULL_HANDLE) {
+		SHIM_TABLE_DEL(g_t.rp, SHIM_RP_TABLE, pass, pass);
+	}
 	pthread_mutex_unlock(&g_lock);
 	PFN_vkDestroyRenderPass real = device == g_dev.device && g_dev.DestroyRenderPass
 									   ? g_dev.DestroyRenderPass
@@ -724,8 +1188,23 @@ static VKAPI_ATTR void VKAPI_CALL shim_DestroyRenderPass(VkDevice device, VkRend
 	real(device, pass, a);
 }
 
+static VkResult shim_CreateFramebufferFdm(VkDevice device, const VkFramebufferCreateInfo* ci,
+										  const VkAllocationCallbacks* a, VkFramebuffer* out);
+
 static VKAPI_ATTR VkResult VKAPI_CALL shim_CreateFramebuffer(VkDevice device, const VkFramebufferCreateInfo* ci,
 															 const VkAllocationCallbacks* a, VkFramebuffer* out) {
+	const VkResult r = shim_CreateFramebufferFdm(device, ci, a, out);
+	if (r == VK_SUCCESS && device == g_dev.device && g_t.enabled) {
+		const ShimFbDesc d = { *out, ci->renderPass, ci->width, ci->height };
+		pthread_mutex_lock(&g_lock);
+		fb_put(&d);
+		pthread_mutex_unlock(&g_lock);
+	}
+	return r;
+}
+
+static VkResult shim_CreateFramebufferFdm(VkDevice device, const VkFramebufferCreateInfo* ci,
+										  const VkAllocationCallbacks* a, VkFramebuffer* out) {
 	pthread_mutex_lock(&g_lock);
 	const int ours = device == g_dev.device && g_dev.active && pass_known(ci->renderPass);
 	ShimMap* map = NULL;
@@ -780,6 +1259,9 @@ static VKAPI_ATTR void VKAPI_CALL shim_DestroyFramebuffer(VkDevice device, VkFra
 			break;
 		}
 	}
+	if (fb != VK_NULL_HANDLE) {
+		SHIM_TABLE_DEL(g_t.fb, SHIM_FB_TABLE, fb, fb);
+	}
 	pthread_mutex_unlock(&g_lock);
 	PFN_vkDestroyFramebuffer real = device == g_dev.device && g_dev.DestroyFramebuffer
 										? g_dev.DestroyFramebuffer
@@ -817,8 +1299,25 @@ static VKAPI_ATTR void VKAPI_CALL shim_CmdBeginRenderPass(VkCommandBuffer cb, co
 		g_eye_begins = g_other_begins = 0;
 		g_count_since = now;
 	}
+	if (g_t.enabled) {
+		if (now - g_t.last_harvest > 0.05) {
+			t_harvest(now);
+			t_report(now);
+			g_t.last_harvest = now;
+		}
+		t_begin(cb, info, eye);
+	}
 	pthread_mutex_unlock(&g_lock);
 	g_dev.CmdBeginRenderPass(cb, info, contents);
+}
+
+static VKAPI_ATTR void VKAPI_CALL shim_CmdEndRenderPass(VkCommandBuffer cb) {
+	g_dev.CmdEndRenderPass(cb);
+	if (g_t.enabled) {
+		pthread_mutex_lock(&g_lock);
+		t_end(cb);
+		pthread_mutex_unlock(&g_lock);
+	}
 }
 
 /* ---- Dispatch ----------------------------------------------------------- */
@@ -838,6 +1337,9 @@ static PFN_vkVoidFunction shim_device_hook(const char* name) {
 	}
 	if (strcmp(name, "vkCmdBeginRenderPass") == 0 && g_dev.CmdBeginRenderPass) {
 		return (PFN_vkVoidFunction)shim_CmdBeginRenderPass;
+	}
+	if (strcmp(name, "vkCmdEndRenderPass") == 0 && g_dev.CmdEndRenderPass && g_t.enabled) {
+		return (PFN_vkVoidFunction)shim_CmdEndRenderPass;
 	}
 	if (strcmp(name, "vkDestroyDevice") == 0) {
 		return (PFN_vkVoidFunction)shim_DestroyDevice;
@@ -919,6 +1421,13 @@ SHIM_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateInstance(const VkInstanceCrea
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
 	return shim_CreateInstance(ci, a, out);
+}
+
+/* For the game: one call per frame it renders (the timing's per-frame figures). */
+SHIM_EXPORT void OpenXWA_VkShim_FrameMark(void) {
+	pthread_mutex_lock(&g_lock);
+	g_t.frames++;
+	pthread_mutex_unlock(&g_lock);
 }
 
 /* For the game: 1 when the eye framebuffers are being foveated. */

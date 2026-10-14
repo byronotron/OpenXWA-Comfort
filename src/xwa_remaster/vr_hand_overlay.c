@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "xwa_remaster/vr_env.h"
 #include "xwa_remaster/vr_gloves.h"
 
 /* Mask texels (square); a texel covers at least two eye pixels, so the
@@ -222,6 +223,34 @@ static int hv_eye(AeronCommandBuffer* cmd, int eye, const AeronXrView* view, int
 	return s_hv.ready[eye] && seen;
 }
 
+/* Does a glove cover part of the screen/frame layers in this eye? Only then
+ * is the overlay (a whole extra layer for the compositor) worth it. */
+static int hv_over_layers(const AeronXrView* view, int w, int h) {
+	float gb[4];
+	if (!hv_bounds(view, w, h, gb)) {
+		return 0;
+	}
+	float c[3], size[2];
+	if (!XwaVrEnv_LayerRect(c, size)) {
+		return 1; /* unknown: keep the hands in front */
+	}
+	float lb[4] = { 1e9f, 1e9f, -1e9f, -1e9f };
+	for (int k = 0; k < 4; ++k) {
+		const float p[3] = { c[0] + ((k & 1) ? 0.5f : -0.5f) * size[0], c[1] + ((k & 2) ? 0.5f : -0.5f) * size[1],
+							 c[2] };
+		float x, y;
+		if (!hv_project(view, p, w, h, &x, &y)) {
+			return 1; /* a corner beside or behind the eye: assume overlap */
+		}
+		lb[0] = fminf(lb[0], x);
+		lb[1] = fminf(lb[1], y);
+		lb[2] = fmaxf(lb[2], x);
+		lb[3] = fmaxf(lb[3], y);
+	}
+	const float m = 8.0f; /* pixels */
+	return gb[0] - m < lb[2] && gb[2] + m > lb[0] && gb[1] - m < lb[3] && gb[3] + m > lb[1];
+}
+
 int XwaVrHandOverlay_Prepare(AeronCommandBuffer* cmd, const AeronXrView views[2], int w, int h) {
 	s_hv.ready[0] = s_hv.ready[1] = 0;
 	if (!hv_enabled() || !cmd || !views || w <= 0 || h <= 0) {
@@ -234,7 +263,7 @@ int XwaVrHandOverlay_Prepare(AeronCommandBuffer* cmd, const AeronXrView views[2]
 		int vn, in;
 		shown = XwaVrGloves_Mesh(hand, &v, &n, &vn, &idx, &in);
 	}
-	if (!shown) {
+	if (!shown || (!hv_over_layers(&views[0], w, h) && !hv_over_layers(&views[1], w, h))) {
 		return 0;
 	}
 	int seen = 0;

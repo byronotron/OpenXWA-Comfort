@@ -928,6 +928,32 @@ static void env_submit_frame(AeronScene3D* scene) {
 	env_quad(scene, ENV_TEX_FRAME, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, tint);
 }
 
+int XwaVrEnv_LayerRect(float centre[3], float size[2]) {
+	if (!centre || !size) {
+		return 0;
+	}
+	EnvScreen sc;
+	env_screen(&sc);
+	if (sc.dist <= 0.0f || sc.w <= 0.0f) {
+		return 0;
+	}
+	if (s_env.tex[ENV_TEX_FRAME] && s_env.frame_layer_ok) {
+		float q[3];
+		env_frame_quad(&sc, q, size);
+		centre[0] = q[0];
+		centre[1] = q[1];
+		centre[2] = -q[2];
+		/* The frame always takes in the picture behind it. */
+		return 1;
+	}
+	centre[0] = 0.0f;
+	centre[1] = sc.lift;
+	centre[2] = -sc.dist;
+	size[0] = sc.w;
+	size[1] = sc.h;
+	return 1;
+}
+
 int XwaVrEnv_CommitFrameLayer(AeronCommandBuffer* cmd, float brightness) {
 	if (!cmd || !s_env.tex[ENV_TEX_FRAME] || s_env.tex_w[ENV_TEX_FRAME] > AERON_XR_FRAME_WIDTH ||
 		s_env.tex_h[ENV_TEX_FRAME] > AERON_XR_FRAME_HEIGHT) {
