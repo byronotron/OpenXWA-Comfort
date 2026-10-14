@@ -23,6 +23,7 @@ typedef struct VrSetting {
 	int count;
 	int fallback;               /* index used when the key is unset */
 	int button_id;
+	int page;                   /* 0 main, 1 Performance / GPU */
 } VrSetting;
 
 enum {
@@ -47,6 +48,9 @@ enum {
 	VR_FOVEATION,
 	VR_SHADING,
 	VR_DIRECT,
+	VR_BLOOM,
+	VR_ASTC,
+	VR_GPU_TIMING,
 	VR_COUNT
 };
 
@@ -76,30 +80,41 @@ static const char* const k_refresh_texts[] = { "Headset Setting", "72 Hz", "80 H
 static const char* const k_refresh_values[] = { "0", "72", "80", "90", "120" };
 static const char* const k_shading_texts[] = { "Full", "Lite (faster)" };
 static const char* const k_shading_values[] = { "full", "lite" };
+static const char* const k_bloom_texts[] = { "Shared (both eyes)", "Per Eye", "Off" };
+static const char* const k_bloom_values[] = { "1", "eye", "0" };
 
+/* Page 1 holds what costs or saves GPU time: each night-shift
+ * optimization can be switched off there on its own to find a regression. */
 static const VrSetting k_settings[VR_COUNT] = {
-	{ "XWA_XR_HUD_LAYOUT", "HUD Layout", k_layout_texts, k_layout_values, 3, 0, 80 },
-	{ "XWA_XR_HUD_SCALE", "Helmet HUD Size", k_size_texts, k_size_values, 5, 2, 81 },
-	{ "XWA_XR_DEPTH_BOOST", "Depth Boost", k_boost_texts, k_boost_values, 9, 0, 82 },
-	{ "XWA_XR_WORLD_SCALE", "World Scale", k_scale_texts, k_scale_values, 9, 6, 83 },
-	{ "XWA_POINT_LIGHTS", "Dynamic Lights", k_toggle_texts, k_toggle_values, 2, 0, 84 },
-	{ "XWA_XR_SHADOWS", "Cockpit Shadows", k_toggle_texts, k_toggle_values, 2, 0, 85 },
-	{ "XWA_XR_CONSOLE", "Lap Console", k_toggle_texts, k_toggle_values, 2, 1, 88 },
-	{ "XWA_XR_GLOVES", "Pilot Gloves", k_toggle_texts, k_toggle_values, 2, 1, 89 },
-	{ "XWA_XR_FLIGHT_STICK", "Flight Stick", k_toggle_texts, k_toggle_values, 2, 1, 94 },
-	{ "XWA_XR_STICK_TWIST", "Stick Twist Rolls", k_toggle_texts, k_toggle_values, 2, 0, 96 },
-	{ "AERON_XR_INVERT_PITCH", "Invert Thumbstick Pitch", k_toggle_texts, k_toggle_values, 2, 0, 97 },
+	{ "XWA_XR_HUD_LAYOUT", "HUD Layout", k_layout_texts, k_layout_values, 3, 0, 80, 0 },
+	{ "XWA_XR_HUD_SCALE", "Helmet HUD Size", k_size_texts, k_size_values, 5, 2, 81, 0 },
+	{ "XWA_XR_DEPTH_BOOST", "Depth Boost", k_boost_texts, k_boost_values, 9, 0, 82, 0 },
+	{ "XWA_XR_WORLD_SCALE", "World Scale", k_scale_texts, k_scale_values, 9, 6, 83, 0 },
+	{ "XWA_POINT_LIGHTS", "Dynamic Lights", k_toggle_texts, k_toggle_values, 2, 0, 84, 1 },
+	{ "XWA_XR_SHADOWS", "Cockpit Shadows", k_toggle_texts, k_toggle_values, 2, 0, 85, 1 },
+	{ "XWA_XR_CONSOLE", "Lap Console", k_toggle_texts, k_toggle_values, 2, 1, 88, 0 },
+	{ "XWA_XR_GLOVES", "Pilot Gloves", k_toggle_texts, k_toggle_values, 2, 1, 89, 0 },
+	{ "XWA_XR_FLIGHT_STICK", "Flight Stick", k_toggle_texts, k_toggle_values, 2, 1, 94, 0 },
+	{ "XWA_XR_STICK_TWIST", "Stick Twist Rolls", k_toggle_texts, k_toggle_values, 2, 0, 96, 0 },
+	{ "AERON_XR_INVERT_PITCH", "Invert Thumbstick Pitch", k_toggle_texts, k_toggle_values, 2, 0, 97, 0 },
 	/* Mirrors the controllers' game roles (the flight stick stays right). */
-	{ "AERON_XR_LEFT_HANDED", "Controls", k_hand_texts, k_toggle_values, 2, 0, 75 },
-	{ "XWA_XR_VOICE", "Voice Commands", k_voice_texts, k_voice_values, 3, 1, 98 },
-	{ "XWA_XR_BUTTON_CARD", "Button Card", k_toggle_texts, k_toggle_values, 2, 1, 92 },
-	{ "XWA_XR_ENVIRONMENT", "Menu Scene", k_env_texts, k_env_values, 6, 1, 90 },
-	{ "AERON_XR_RESOLUTION_SCALE", "Resolution (restart)", k_res_texts, k_res_values, 6, 4, 86 },
-	{ "AERON_XR_REFRESH_RATE", "Refresh Rate", k_refresh_texts, k_refresh_values, 5, 0, 99 },
-	{ "XWA_XR_GPU_OPT", "GPU Optimizations", k_toggle_texts, k_toggle_values, 2, 1, 79 },
-	{ "XWA_XR_FOVEATION", "Foveation (restart)", k_fov_texts, k_fov_values, 4, 1, 78 },
-	{ "XWA_XR_SHADING", "Ship Shading (restart)", k_shading_texts, k_shading_values, 2, 1, 77 },
-	{ "XWA_XR_DIRECT_OUTPUT", "Direct Output (no bloom)", k_toggle_texts, k_toggle_values, 2, 0, 76 },
+	{ "AERON_XR_LEFT_HANDED", "Controls", k_hand_texts, k_toggle_values, 2, 0, 75, 0 },
+	{ "XWA_XR_VOICE", "Voice Commands", k_voice_texts, k_voice_values, 3, 1, 98, 0 },
+	{ "XWA_XR_BUTTON_CARD", "Button Card", k_toggle_texts, k_toggle_values, 2, 1, 92, 0 },
+	{ "XWA_XR_ENVIRONMENT", "Menu Scene", k_env_texts, k_env_values, 6, 1, 90, 0 },
+	{ "AERON_XR_RESOLUTION_SCALE", "Resolution (restart)", k_res_texts, k_res_values, 6, 4, 86, 1 },
+	{ "AERON_XR_REFRESH_RATE", "Refresh Rate", k_refresh_texts, k_refresh_values, 5, 0, 99, 1 },
+	/* Near-first draw order and the GPU clock floor. */
+	{ "XWA_XR_GPU_OPT", "GPU Optimizations", k_toggle_texts, k_toggle_values, 2, 1, 79, 1 },
+	{ "XWA_XR_FOVEATION", "Foveation (restart)", k_fov_texts, k_fov_values, 4, 1, 78, 1 },
+	{ "XWA_XR_SHADING", "Ship Shading (restart)", k_shading_texts, k_shading_values, 2, 1, 77, 1 },
+	{ "XWA_XR_DIRECT_OUTPUT", "Direct Output (no bloom)", k_toggle_texts, k_toggle_values, 2, 0, 76, 1 },
+	/* One bloom computed from the left eye for both (fewer passes). */
+	{ "XWA_XR_BLOOM", "Bloom", k_bloom_texts, k_bloom_values, 3, 0, 74, 1 },
+	/* Ship textures as ASTC: read when a ship's textures load. */
+	{ "XWA_XR_ASTC", "Compressed Textures (restart)", k_toggle_texts, k_toggle_values, 2, 1, 73, 1 },
+	/* The shim's per-pass GPU timestamps (the log's "GPU per frame"). */
+	{ "XWA_XR_GPU_TIMING", "GPU Timing in Log (restart)", k_toggle_texts, k_toggle_values, 2, 1, 72, 1 },
 };
 
 static struct {
@@ -116,7 +131,7 @@ static int vr_index_from_env(const VrSetting* setting) {
 		return best;
 	}
 	if (setting->values == k_layout_values || setting->values == k_voice_values || setting->values == k_fov_values ||
-		setting->values == k_env_values || setting->values == k_shading_values) {
+		setting->values == k_env_values || setting->values == k_shading_values || setting->values == k_bloom_values) {
 		for (int i = 0; i < setting->count; i++) {
 			if (SDL_strcasecmp(env, setting->values[i]) == 0) {
 				return i;
@@ -345,24 +360,18 @@ static void vr_reset_hud_layouts(void) {
 	Aeron_LogInfo("xwa.config", "VR HUD panels back at their default spots (%d cockpit layouts cleared)", n);
 }
 
-int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
-	XwaModernOptionsMenu menu;
-	int back;
-
-	if (!cursor_row) {
-		return 0;
-	}
-	vr_load();
-	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 38, cursor_row, VR_COUNT + 4);
-	XwaModernOptionsMenu_DrawTitle(&menu, "OpenXWA VR Options");
-
+/* One cycle row per setting of `page`. */
+static void vr_draw_settings(XwaModernOptionsMenu* menu, int page) {
 	for (int i = 0; i < VR_COUNT; i++) {
 		const VrSetting* setting = &k_settings[i];
+		if (setting->page != page) {
+			continue;
+		}
 		/* The helmet HUD size only applies to the helmet layout. */
 		const int disabled = (i == VR_HUD_SIZE && g_vr.index[VR_HUD_LAYOUT] != 1) ||
 							 (i == VR_STICK_TWIST && g_vr.index[VR_FLIGHT_STICK] == 0);
 		uint8_t value = g_vr.index[i];
-		if (XwaModernOptionsMenu_DrawCycleU8(&menu, &value, setting->label, setting->texts, setting->count,
+		if (XwaModernOptionsMenu_DrawCycleU8(menu, &value, setting->label, setting->texts, setting->count,
 											 setting->button_id, disabled) &&
 			value != g_vr.index[i]) {
 			g_vr.index[i] = value;
@@ -377,8 +386,43 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 			 * before quitting, without backing out of this screen. */
 			XwaModernVrOptions_SaveValue(setting->key, setting->values[value]);
 		}
-		menu.y -= 4; /* 16 px rows: the list has outgrown 20 */
+		menu->y -= 4; /* 16 px rows */
 	}
+}
+
+static int vr_page_rows(int page) {
+	int n = 0;
+	for (int i = 0; i < VR_COUNT; i++) {
+		n += k_settings[i].page == page;
+	}
+	return n;
+}
+
+int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
+	static int page;
+	XwaModernOptionsMenu menu;
+	int back;
+
+	if (!cursor_row) {
+		return 0;
+	}
+	vr_load();
+	if (page == 1) {
+		/* Performance / GPU: every optimization on its own switch. */
+		XwaModernOptionsMenu_Begin(&menu, menu_center_x, 38, cursor_row, vr_page_rows(1) + 1);
+		XwaModernOptionsMenu_DrawTitle(&menu, "VR Performance / GPU");
+		vr_draw_settings(&menu, 1);
+		back = XwaModernOptionsMenu_DrawAction(&menu, FrontendString_Get(STR_BACK), 87, 0);
+		back |= XwaModernOptionsMenu_TakeEscape(&menu);
+		if (back) {
+			page = 0;
+			*cursor_row = vr_page_rows(0) + 3; /* on "Performance / GPU..." */
+		}
+		return 0;
+	}
+	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 38, cursor_row, vr_page_rows(0) + 5);
+	XwaModernOptionsMenu_DrawTitle(&menu, "OpenXWA VR Options");
+	vr_draw_settings(&menu, 0);
 
 	if (XwaModernOptionsMenu_DrawAction(&menu, "Reset HUD Panel Positions", 93, 0)) {
 		vr_reset_hud_layouts();
@@ -394,6 +438,12 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 		SDL_setenv_unsafe("XWA_XR_STICK_POS", "", 1);
 		XwaModernVrOptions_SaveValue("XWA_XR_STICK_POS", "");
 		Aeron_LogInfo("xwa.config", "flight stick back at its default spot");
+	}
+	menu.y -= 4;
+	if (XwaModernOptionsMenu_DrawAction(&menu, "Performance / GPU...", 71, 0)) {
+		page = 1;
+		*cursor_row = 0;
+		return 0;
 	}
 	menu.y -= 4;
 	back = XwaModernOptionsMenu_DrawAction(&menu, FrontendString_Get(STR_BACK), 87, 0);
