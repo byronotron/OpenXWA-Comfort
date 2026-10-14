@@ -1144,9 +1144,8 @@ void XwaVrEnv_View(float pos[3], float rows[9]) {
 	const float r = yaw * 3.14159265358979f / 180.0f;
 	const float f[3] = { sinf(r), cosf(r), 0.0f };
 	/* XWA_XR_ENV_BACK: the viewer sits this far (metres) behind the scene's
-	 * reference point: 0.8 m matched the screen being as much further away
-	 * than its original 2.1 m, and the viewer then stepped back 0.3 m more
-	 * with the screen left at its distance from the viewer. */
+	 * reference point, matching the screen being as much further away than
+	 * its original 2.1 m (the Quest default screen distance includes it). */
 	const float back = env_float("XWA_XR_ENV_BACK", 1.1f) * AERON_OPT_UNITS_PER_METER;
 	pos[0] = x - f[0] * back;
 	pos[1] = y - f[1] * back;

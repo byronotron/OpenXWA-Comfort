@@ -455,7 +455,7 @@ static void android_load_settings(void) {
 				  "#XWA_XR_HUD_SCALE=0.65\n"
 				  "# Screen distance in metres; the menu scene's viewer sits XWA_XR_ENV_BACK\n"
 				  "# metres behind its reference point:\n"
-				  "#AERON_XR_SCREEN_DISTANCE=2.9\n"
+				  "#AERON_XR_SCREEN_DISTANCE=3.2\n"
 				  "#XWA_XR_ENV_BACK=1.1\n"
 				  "#AERON_XR_SCREEN_WIDTH=2.1\n"
 				  "#AERON_XR_THROTTLE_RATE=0.8\n"
@@ -536,9 +536,10 @@ static void android_xr_defaults(void) {
 		SDL_setenv_unsafe("AERON_XR_RESOLUTION_SCALE", "1.1", 1);
 	}
 	if (!SDL_getenv("AERON_XR_SCREEN_DISTANCE")) {
-		/* 0.8 m further than the 2.1 m it was (the menu scene's viewer
-		 * sits behind its reference point: XWA_XR_ENV_BACK). */
-		SDL_setenv_unsafe("AERON_XR_SCREEN_DISTANCE", "2.9", 1);
+		/* 1.1 m further than the 2.1 m it was; the menu scene's viewer sits
+		 * as much behind its reference point (XWA_XR_ENV_BACK), so the
+		 * screen keeps its place in the scene. */
+		SDL_setenv_unsafe("AERON_XR_SCREEN_DISTANCE", "3.2", 1);
 	}
 	if (!SDL_getenv("AERON_XR_SCREEN_PIXELS")) {
 		/* A 4:3 virtual screen: the game's menus, briefings and films fill
