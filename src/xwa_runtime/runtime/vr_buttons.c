@@ -8,7 +8,8 @@
 
 /* VR controller buttons in flight. Each Touch button has a plain and a
  * shifted (left grip held) action; the right stick flicks only exist
- * shifted. Fire, target-in-sights (right grip), steering, roll and the
+ * shifted. Left-handed controls swap the controllers under these
+ * (Aeron_XrLeftHanded), so the table stays as it is. Fire, target-in-sights (right grip), steering, roll and the
  * throttle lever stay on the virtual gamepad. */
 static const XwaVrButtonBinding k_bindings[AERON_XR_BUTTON_COUNT] = {
 	[AERON_XR_BUTTON_A]            = { KEY_R, KEY_O },
@@ -99,10 +100,25 @@ const char* XwaVrButtons_ButtonName(AeronXrButton button, int compact) {
 		[AERON_XR_BUTTON_FLICK_LEFT]   = { "flick left", "flick left" },
 		[AERON_XR_BUTTON_FLICK_RIGHT]  = { "flick right", "flick right" },
 	};
+	/* Left-handed: the control on the other controller (aeron.h). */
+	static const char* const mirrored[AERON_XR_BUTTON_COUNT][2] = {
+		[AERON_XR_BUTTON_A]            = { "X", "X" },
+		[AERON_XR_BUTTON_B]            = { "Y", "Y" },
+		[AERON_XR_BUTTON_X]            = { "A", "A" },
+		[AERON_XR_BUTTON_Y]            = { "B", "B" },
+		[AERON_XR_BUTTON_LEFT_TRIGGER] = { "right trigger", "R-trigger" },
+		[AERON_XR_BUTTON_LEFT_STICK]   = { "right stick click", "R-stick click" },
+		[AERON_XR_BUTTON_RIGHT_STICK]  = { "left stick click", "L-stick click" },
+		[AERON_XR_BUTTON_RIGHT_GRIP]   = { "left grip", "L-grip" },
+		[AERON_XR_BUTTON_FLICK_UP]     = { "flick up", "flick up" },
+		[AERON_XR_BUTTON_FLICK_DOWN]   = { "flick down", "flick down" },
+		[AERON_XR_BUTTON_FLICK_LEFT]   = { "flick left", "flick left" },
+		[AERON_XR_BUTTON_FLICK_RIGHT]  = { "flick right", "flick right" },
+	};
 	if ((int)button < 0 || (int)button >= AERON_XR_BUTTON_COUNT) {
 		return "?";
 	}
-	return names[button][compact ? 1 : 0];
+	return (Aeron_XrLeftHanded() ? mirrored : names)[button][compact ? 1 : 0];
 }
 
 static int console_has_key(uint16_t key) {

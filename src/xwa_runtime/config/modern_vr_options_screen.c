@@ -37,6 +37,7 @@ enum {
 	VR_FLIGHT_STICK,
 	VR_STICK_TWIST,
 	VR_INVERT_PITCH,
+	VR_HANDED,
 	VR_VOICE,
 	VR_BUTTON_CARD,
 	VR_ENVIRONMENT,
@@ -60,6 +61,7 @@ static const char* const k_scale_texts[] = { "0.60 (huge)", "0.70", "0.75", "0.8
 static const char* const k_scale_values[] = { "0.6", "0.7", "0.75", "0.8", "0.85", "0.9", "1.0", "1.1", "1.2" };
 static const char* const k_toggle_texts[] = { "Off", "On" };
 static const char* const k_toggle_values[] = { "0", "1" };
+static const char* const k_hand_texts[] = { "Right-handed", "Left-handed" };
 static const char* const k_voice_texts[] = { "Off", "Double-tap Thumb Rest", "Hold Thumb Rest" };
 static const char* const k_voice_values[] = { "0", "doubletap", "hold" };
 static const char* const k_res_texts[] = { "70%", "80%", "90%", "100%", "110%", "120%" };
@@ -87,6 +89,8 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "XWA_XR_FLIGHT_STICK", "Flight Stick", k_toggle_texts, k_toggle_values, 2, 1, 94 },
 	{ "XWA_XR_STICK_TWIST", "Stick Twist Rolls", k_toggle_texts, k_toggle_values, 2, 0, 96 },
 	{ "AERON_XR_INVERT_PITCH", "Invert Thumbstick Pitch", k_toggle_texts, k_toggle_values, 2, 0, 97 },
+	/* Mirrors the controllers' game roles (the flight stick stays right). */
+	{ "AERON_XR_LEFT_HANDED", "Controls", k_hand_texts, k_toggle_values, 2, 0, 75 },
 	{ "XWA_XR_VOICE", "Voice Commands", k_voice_texts, k_voice_values, 3, 1, 98 },
 	{ "XWA_XR_BUTTON_CARD", "Button Card", k_toggle_texts, k_toggle_values, 2, 1, 92 },
 	{ "XWA_XR_ENVIRONMENT", "Menu Scene", k_env_texts, k_env_values, 6, 1, 90 },
@@ -373,25 +377,25 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 			 * before quitting, without backing out of this screen. */
 			XwaModernVrOptions_SaveValue(setting->key, setting->values[value]);
 		}
-		menu.y -= 3; /* 17 px rows: the list has outgrown 20 */
+		menu.y -= 4; /* 16 px rows: the list has outgrown 20 */
 	}
 
 	if (XwaModernOptionsMenu_DrawAction(&menu, "Reset HUD Panel Positions", 93, 0)) {
 		vr_reset_hud_layouts();
 	}
-	menu.y -= 3;
+	menu.y -= 4;
 	if (XwaModernOptionsMenu_DrawAction(&menu, "Reset Lap Console Position", 91, 0)) {
 		SDL_setenv_unsafe("XWA_XR_CONSOLE_POSE", "", 1);
 		XwaModernVrOptions_SaveValue("XWA_XR_CONSOLE_POSE", "");
 		Aeron_LogInfo("xwa.config", "lap console back at its default spot");
 	}
-	menu.y -= 3;
+	menu.y -= 4;
 	if (XwaModernOptionsMenu_DrawAction(&menu, "Reset Flight Stick Position", 95, 0)) {
 		SDL_setenv_unsafe("XWA_XR_STICK_POS", "", 1);
 		XwaModernVrOptions_SaveValue("XWA_XR_STICK_POS", "");
 		Aeron_LogInfo("xwa.config", "flight stick back at its default spot");
 	}
-	menu.y -= 3;
+	menu.y -= 4;
 	back = XwaModernOptionsMenu_DrawAction(&menu, FrontendString_Get(STR_BACK), 87, 0);
 	back |= XwaModernOptionsMenu_TakeEscape(&menu);
 	if (!back) {

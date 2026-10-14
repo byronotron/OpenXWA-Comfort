@@ -39,11 +39,12 @@ const XwaVrButtonBinding* XwaVrButtons_Binding(AeronXrButton button);
 /* B (plain) leaves the map instead of its flight action. */
 #define XWA_VR_MAP_EXIT_BUTTON AERON_XR_BUTTON_B
 
-/* Hangar menus (Aeron's menu-keys mode). */
+/* Hangar menus (Aeron's menu-keys mode); the face buttons follow the
+ * left-handed swap like every other name here. */
 #define XWA_VR_MENU_MOVE "THUMBSTICK"
-#define XWA_VR_MENU_SELECT "A"  /* Enter (also the right trigger) */
-#define XWA_VR_MENU_BACK "B"    /* Escape */
-#define XWA_VR_MENU_SPACE "X"   /* Space */
+#define XWA_VR_MENU_SELECT XwaVrButtons_ButtonName(AERON_XR_BUTTON_A, 0) /* Enter (also the right trigger) */
+#define XWA_VR_MENU_BACK XwaVrButtons_ButtonName(AERON_XR_BUTTON_B, 0)   /* Escape */
+#define XWA_VR_MENU_SPACE XwaVrButtons_ButtonName(AERON_XR_BUTTON_X, 0)  /* Space */
 /* Both triggers at once: land at a hangar bay, jump at a hyperspace buoy. */
 #define XWA_VR_CHORD_LABEL "both triggers"
 /* The left menu button: pause. */
@@ -57,7 +58,9 @@ uint16_t XwaVrButtons_ConsoleKey(XwaVrConsoleAction action);
 
 /* A button's name: "B", "left trigger", "right stick click", "flick
  * right" (right stick flick). `compact` gives the short form ("L-trigger",
- * "R-stick click") for radio messages. */
+ * "R-stick click") for radio messages. With left-handed controls
+ * (Aeron_XrLeftHanded) it names the physical control that now sends it:
+ * B is "Y", the left trigger "right trigger", and so on. */
 const char* XwaVrButtons_ButtonName(AeronXrButton button, int compact);
 
 /* The control that sends `key` in flight, e.g. "B" or "grip + B" ("grip+B"

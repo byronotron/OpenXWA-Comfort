@@ -23,6 +23,7 @@
 #include "xwa_remaster/vr_hud_occlusion.h"
 #include "xwa_remaster/vr_hand_overlay.h"
 #include "xwa_remaster/vr_env.h"
+#include "xwa/assets/object_type.h"
 #include "xwa_remaster/vr_menu_beam.h"
 #include "xwa_remaster/vr_gloves.h"
 #include "xwa_remaster/vr_flight_stick.h"
@@ -3200,6 +3201,43 @@ static void fl_hyper_build_tunnel_view(const AeronSceneCamera* camera, const flo
 /* Hyperspace uses the same state-derived cockpit transform and articulation
  * as ordinary flight, but mirrors its own classic gate: cockpitVisible alone
  * selects the cockpit inside the special-mode branch. */
+/* VR seat offsets: in some cockpits the pilot's eye point puts a strut or
+ * frame right over the aiming reticle. There the cockpit model moves the
+ * other way, so the player sits that far to the side (metres of real head
+ * movement; x right). Pilot seat only, stereo only. */
+static const struct {
+	uint16_t object_type;
+	float x_m;
+} k_xr_seat_shift[] = {
+	/* YT-1300 (the Sabra of the first mission, "Aeron's Lesson"): 20 cm
+	 * left for a clear view of the reticle. */
+	{ OBJ_CorellianTransport2, -0.20f },
+};
+
+static int fl_xr_stereo_eligible(const XwaFlightCamera* cam);
+static float fl_xr_env(const char* name, float fallback);
+
+static void fl_xr_seat_shift(const XwaSnapshot* snap, float m[16]) {
+	if (!snap || snap->cockpit.seat != 0 || !fl_xr_stereo_eligible(&snap->flight_camera)) {
+		return;
+	}
+	float x = 0.0f;
+	for (size_t i = 0; i < sizeof k_xr_seat_shift / sizeof k_xr_seat_shift[0]; ++i) {
+		if (k_xr_seat_shift[i].object_type == snap->hud.instruments.player_object_type) {
+			x = k_xr_seat_shift[i].x_m;
+		}
+	}
+	if (x == 0.0f) {
+		return;
+	}
+	/* The model moves opposite to the seat, along its own x (the matrix
+	 * already scales metres to world units). */
+	const float d = -x * fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f);
+	m[3] += m[0] * d;
+	m[7] += m[4] * d;
+	m[11] += m[8] * d;
+}
+
 static void fl_submit_hyperspace_cockpit(AeronCommandBuffer* cmd, XwaRemasterAssets* assets,
 										 const XwaSnapshot* snap, const XwaFlightCamera* cam,
 										 const float anchor_bw[9], int anchor_found,
@@ -3251,6 +3289,7 @@ static void fl_submit_hyperspace_cockpit(AeronCommandBuffer* cmd, XwaRemasterAss
 	}
 	float m[16];
 	fl_model_matrix(bw, pw, m);
+	fl_xr_seat_shift(snap, m);
 	AeronSceneMeshInstance inst;
 	memset(&inst, 0, sizeof inst);
 	inst.mesh = cockpit_mesh;
@@ -5002,6 +5041,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		if (cockpit_mesh) {
 			float m[16];
 			fl_cockpit_model_matrix(&snap->cockpit, cockpit_anchor, s.crows, s.camera_local, m);
+			fl_xr_seat_shift(snap, m);
 			AeronSceneMeshInstance inst;
 			memset(&inst, 0, sizeof inst);
 			inst.mesh = cockpit_mesh;
@@ -5012,6 +5052,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 			if (cockpit_history_valid &&
 				fl_cockpit_model_matrix(&prev->cockpit, previous_cockpit_anchor, previous_crows,
 										previous_flight_view.camera.pos, inst.prev_transform)) {
+				fl_xr_seat_shift(prev, inst.prev_transform);
 				inst.zero_velocity = 0;
 			} else {
 				/* A history reset makes the zero-vector fallback correct for the

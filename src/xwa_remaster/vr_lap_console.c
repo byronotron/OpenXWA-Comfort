@@ -37,7 +37,7 @@
 
 /* Grab zones: the left and right ends of the console, GRAB_X metres to
  * either side of each edge, a little above/below and in front/behind. */
-#define VC_GRAB_FORGIVE 1.15f /* zones 15 % larger than the original tuning */
+#define VC_GRAB_FORGIVE (1.15f * 1.10f) /* zones 15 %, then 10 % larger than the original tuning */
 #define VC_GRAB_X_M (0.06f * VC_GRAB_FORGIVE)
 #define VC_GRAB_Y_M (0.05f * VC_GRAB_FORGIVE)
 #define VC_GRAB_FRONT_M (0.09f * VC_GRAB_FORGIVE)
@@ -194,6 +194,8 @@ static struct {
 	 * EndFrame. */
 	int grip_capture[2];
 	float clock; /* seconds, for pulsing */
+	/* The console's colours from the HUD colour (vc_hud_colors). */
+	float hud[3], hud_dark[3], hud_pale[3];
 } s_vc;
 
 /* ---- Small math ------------------------------------------------------- */
@@ -925,8 +927,34 @@ static void vc_text(float x, float y, const char* text, float size_px, int align
 	AeronText_Draw(s_vc.cur_list, &style, x, y, (AeronTextAlign)align, text, -1, NULL);
 }
 
-/* Holo cyan from the console design. */
+/* Holo cyan from the console design: the cards keep it. */
 #define VC_CYAN 0.498f, 0.910f, 1.0f
+/* The console itself wears the HUD colour (vc_hud_colors): the holo tone,
+ * a darker one for the plate and a pale one for the text. */
+#define VC_HUD s_vc.hud[0], s_vc.hud[1], s_vc.hud[2]
+#define VC_HUD_DARK s_vc.hud_dark[0], s_vc.hud_dark[1], s_vc.hud_dark[2]
+#define VC_HUD_PALE s_vc.hud_pale[0], s_vc.hud_pale[1], s_vc.hud_pale[2]
+
+static void vc_hud_colors(void) {
+	static const float cyan[3] = { VC_CYAN };
+	const uint32_t argb = s_vc.state.hud_argb;
+	float c[3];
+	float peak = 0.0f;
+	for (int i = 0; i < 3; ++i) {
+		c[i] = (float)((argb >> (16 - 8 * i)) & 255u) / 255.0f;
+		peak = fmaxf(peak, c[i]);
+	}
+	/* The HUD's frame art is pure white, so the HUD shows exactly this
+	 * colour (0x7020C0 for the default option): the console uses it as is,
+	 * only the darker options lifted to the default's brightness. */
+	const float lift = peak > 0.05f && peak < 0.753f ? 0.753f / peak : 1.0f;
+	for (int i = 0; i < 3; ++i) {
+		const float h = (argb >> 24) != 0 && peak > 0.05f ? c[i] * lift : cyan[i];
+		s_vc.hud[i] = h;
+		s_vc.hud_dark[i] = h * 0.75f;                  /* was 0.157, 0.549, 0.745 */
+		s_vc.hud_pale[i] = 0.55f * h + 0.45f * 0.92f;  /* was 0.62, 0.85, 0.92 */
+	}
+}
 #define VC_AMBER 1.0f, 0.710f, 0.278f
 /* Hyperspace ready: orange-red. */
 #define VC_HYPER 1.0f, 0.42f, 0.16f
@@ -958,8 +986,12 @@ static void vc_draw_button(int i) {
 		vc_pma(border, VC_AMBER, 0.85f);
 	} else {
 		const float on = b->lit ? 0.30f : b->level ? 0.16f : 0.08f;
-		vc_pma(fill, VC_CYAN, on + 0.22f * hover + 0.25f * (pressed || flash));
-		vc_pma(border, hover ? 1.0f : 0.498f, hover ? 1.0f : 0.910f, 1.0f, b->lit || hover ? 1.0f : 0.62f);
+		vc_pma(fill, VC_HUD, on + 0.22f * hover + 0.25f * (pressed || flash));
+		if (hover) {
+			vc_pma(border, 1.0f, 1.0f, 1.0f, 1.0f);
+		} else {
+			vc_pma(border, VC_HUD, b->lit ? 1.0f : 0.62f);
+		}
 	}
 	if (hyper_ready) {
 		float glow[4];
@@ -969,7 +1001,7 @@ static void vc_draw_button(int i) {
 	} else if (b->enabled && (b->lit || hover || pressed)) {
 		float glow[4];
 		const float transparent[4] = { 0, 0, 0, 0 };
-		vc_pma(glow, VC_CYAN, b->lit ? 0.45f : hover ? 0.55f : 0.3f);
+		vc_pma(glow, VC_HUD, b->lit ? 0.45f : hover ? 0.55f : 0.3f);
 		vc_rrect(b->x - 6.0f, b->y - 6.0f, b->w + 12.0f, b->h + 12.0f, 12.0f, 6.0f, 10.0f, transparent, glow);
 	}
 	vc_rrect(b->x, b->y, b->w, b->h, 7.0f, 2.0f, 1.0f, fill, border);
@@ -1094,8 +1126,8 @@ static void vc_draw_handles(const VcPlace* pl) {
 		const float bar_w = 16.0f;
 		const float x = side < 0 ? 9.0f : W - 9.0f - bar_w;
 		float bar[4], rim[4];
-		vc_pma(bar, VC_CYAN, pl->grab_side == side ? 0.85f : hot ? 0.6f : 0.32f);
-		vc_pma(rim, VC_CYAN, hot ? 1.0f : 0.75f);
+		vc_pma(bar, VC_HUD, pl->grab_side == side ? 0.85f : hot ? 0.6f : 0.32f);
+		vc_pma(rim, VC_HUD, hot ? 1.0f : 0.75f);
 		vc_rrect(x, 52.0f, bar_w, H - 104.0f, 8.0f, 2.0f, 1.0f, bar, rim);
 		for (int r = -2; r <= 2; ++r) {
 			float ridge[4];
@@ -1428,25 +1460,26 @@ static void vc_draw_energy(float x, float y, float w) {
 
 static void vc_draw(void) {
 	const float transparent[4] = { 0, 0, 0, 0 };
+	vc_hud_colors();
 	float fill[4], border[4], glow[4];
 	/* Plate: faint tint, bright rim, soft halo. */
-	vc_pma(glow, VC_CYAN, 0.25f);
+	vc_pma(glow, VC_HUD, 0.25f);
 	vc_rrect(4.0f, 4.0f, VC_W - 8.0f, VC_H - 8.0f, 30.0f, 8.0f, 14.0f, transparent, glow);
-	vc_pma(fill, 0.157f, 0.549f, 0.745f, 0.10f);
-	vc_pma(border, VC_CYAN, 0.6f);
+	vc_pma(fill, VC_HUD_DARK, 0.10f);
+	vc_pma(border, VC_HUD, 0.6f);
 	vc_rrect(10.0f, 10.0f, VC_W - 20.0f, VC_H - 20.0f, 26.0f, 2.0f, 1.0f, fill, border);
 	vc_draw_handles(&s_vc.lap);
 	vc_draw_energy(34.0f, 406.0f, 470.0f);
 	/* Scan lines, fixed to the panel. */
 	for (float y = 14.0f; y < VC_H - 14.0f; y += 6.0f) {
 		float line[4];
-		vc_pma(line, VC_CYAN, 0.025f);
+		vc_pma(line, VC_HUD, 0.025f);
 		AeronDrawList_AddFill(s_vc.cur_list, 14.0f, y, VC_W - 28.0f, 2.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
 	}
 	/* Column dividers. */
 	for (int i = 0; i < 2; ++i) {
 		float line[4];
-		vc_pma(line, VC_CYAN, 0.35f);
+		vc_pma(line, VC_HUD, 0.35f);
 		const float x = i == 0 ? 520.0f : 1015.0f;
 		AeronDrawList_AddFill(s_vc.cur_list, x, 40.0f, 2.0f, VC_H - 80.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
 	}
@@ -1454,18 +1487,18 @@ static void vc_draw(void) {
 	 * ship). */
 	{
 		float line[4];
-		vc_pma(line, VC_CYAN, 0.35f);
+		vc_pma(line, VC_HUD, 0.35f);
 		AeronDrawList_AddFill(s_vc.cur_list, 538.0f, s_vc.divider_y, 460.0f, 2.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
 		AeronDrawList_AddFill(s_vc.cur_list, 1032.0f, 274.0f, 470.0f, 2.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
 	}
 	for (int i = 0; i < s_vc.label_count; ++i) {
 		const VcLabel* l = &s_vc.labels[i];
 		if (l->section) {
-			vc_text(l->x, l->y, l->text, (float)l->size, l->align, VC_CYAN, 1.0f);
+			vc_text(l->x, l->y, l->text, (float)l->size, l->align, VC_HUD, 1.0f);
 		} else if (l->dim) {
 			vc_text(l->x, l->y, l->text, (float)l->size, l->align, 0.42f, 0.48f, 0.50f, 0.8f);
 		} else {
-			vc_text(l->x, l->y, l->text, (float)l->size, l->align, 0.62f, 0.85f, 0.92f, 0.95f);
+			vc_text(l->x, l->y, l->text, (float)l->size, l->align, VC_HUD_PALE, 0.95f);
 		}
 	}
 	for (int i = 0; i < s_vc.button_count; ++i) {
@@ -1476,6 +1509,7 @@ static void vc_draw(void) {
 /* Per-eye overlay of the lap console: the glove cut-outs, then the cursors. */
 static void vc_cut_gloves(void);
 static void vc_console_overlay(void) {
+	vc_hud_colors();
 	vc_cut_gloves();
 	/* Cursors: a ring that closes in as the tip nears the surface, or a
 	 * dot where the ray lands. */
@@ -1489,7 +1523,7 @@ static void vc_console_overlay(void) {
 		} else {
 			float c[4], ring[4];
 			vc_pma(c, 1.0f, 1.0f, 1.0f, 0.95f);
-			vc_pma(ring, VC_CYAN, 0.9f);
+			vc_pma(ring, VC_HUD, 0.9f);
 			vc_rrect(hand->cx - 9.0f, hand->cy - 9.0f, 18.0f, 18.0f, 9.0f, 3.0f, 1.5f, c, ring);
 		}
 	}
@@ -1880,6 +1914,28 @@ static const VcCardLabel k_card_right[] = {
 	{ CTL_TRIGGER, -1, "Fire", XWA_VR_CHORD_LABEL ": land / hyperspace", 452.0f },
 };
 
+/* Left-handed controls (Aeron_XrLeftHanded): the controllers trade their
+ * game roles; the menu buttons and what a grip does on a panel or the
+ * flight stick stay with the hand. The face buttons name themselves
+ * (B on the left controller shows as "Y"). */
+static const VcCardLabel k_card_left_lh[] = {
+	{ CTL_STICK, AERON_XR_BUTTON_RIGHT_STICK, "Yaw / pitch", NULL, 96.0f },
+	{ CTL_UPPER, AERON_XR_BUTTON_B, NULL, NULL, 168.0f },
+	{ CTL_LOWER, AERON_XR_BUTTON_A, NULL, NULL, 232.0f },
+	{ CTL_MENU, -1, "Pause / menu", NULL, 296.0f },
+	{ CTL_GRIP, -1, XWA_VR_RIGHT_GRIP_ACTION, "on a panel or the stick: move it", 380.0f },
+	{ CTL_TRIGGER, -1, "Fire", XWA_VR_CHORD_LABEL ": land / hyperspace", 452.0f },
+};
+
+static const VcCardLabel k_card_right_lh[] = {
+	{ CTL_STICK, AERON_XR_BUTTON_LEFT_STICK, "Throttle (fwd/back) - roll", NULL, 96.0f },
+	{ CTL_UPPER, AERON_XR_BUTTON_Y, NULL, NULL, 168.0f },
+	{ CTL_LOWER, AERON_XR_BUTTON_X, NULL, NULL, 232.0f },
+	{ CTL_MENU, -1, "Meta: system menu", NULL, 296.0f },
+	{ CTL_GRIP, -1, "Hold: grip+ layer", "on the flight stick: fly with it", 380.0f },
+	{ CTL_TRIGGER, AERON_XR_BUTTON_LEFT_TRIGGER, NULL, NULL, 452.0f },
+};
+
 /* "next target (T)" / "(A)": what a key does, with its keyboard key. */
 static void vc_card_key_text(char* out, size_t size, uint16_t key, int with_key) {
 	const char* action = XwaVrButtons_KeyAction(key);
@@ -2059,12 +2115,18 @@ static void vc_card_draw(void) {
 		AeronDrawList_AddFill(s_vc.cur_list, 14.0f, y, W - 28.0f, 2.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
 	}
 	vc_text(44.0f, 30.0f, "CONTROLS", 30.0f, 0, VC_CYAN, 1.0f);
-	vc_text(W - 44.0f, 38.0f, "grip+ = while holding the LEFT grip", 18.0f, 2, 0.62f, 0.85f, 0.92f, 0.9f);
+	const int lh = Aeron_XrLeftHanded();
+	vc_text(W - 44.0f, 38.0f, lh ? "grip+ = while holding the RIGHT grip" : "grip+ = while holding the LEFT grip", 18.0f,
+			2, 0.62f, 0.85f, 0.92f, 0.9f);
 	const float cy = 222.0f;
-	vc_card_controller(W * 0.5f - 148.0f, cy, 1.0f, k_card_left, (int)(sizeof k_card_left / sizeof k_card_left[0]),
-					   236.0f, W * 0.5f);
-	vc_card_controller(W * 0.5f + 148.0f, cy, -1.0f, k_card_right, (int)(sizeof k_card_right / sizeof k_card_right[0]),
-					   W - 236.0f, W * 0.5f);
+	const VcCardLabel* left = lh ? k_card_left_lh : k_card_left;
+	const VcCardLabel* right = lh ? k_card_right_lh : k_card_right;
+	const int left_n = lh ? (int)(sizeof k_card_left_lh / sizeof k_card_left_lh[0])
+						  : (int)(sizeof k_card_left / sizeof k_card_left[0]);
+	const int right_n = lh ? (int)(sizeof k_card_right_lh / sizeof k_card_right_lh[0])
+						   : (int)(sizeof k_card_right / sizeof k_card_right[0]);
+	vc_card_controller(W * 0.5f - 148.0f, cy, 1.0f, left, left_n, 236.0f, W * 0.5f);
+	vc_card_controller(W * 0.5f + 148.0f, cy, -1.0f, right, right_n, W - 236.0f, W * 0.5f);
 	vc_text(W * 0.5f - 148.0f - 80.0f, cy + 318.0f, "LEFT", 22.0f, 1, VC_CYAN, 0.9f);
 	vc_text(W * 0.5f + 148.0f + 80.0f, cy + 318.0f, "RIGHT", 22.0f, 1, VC_CYAN, 0.9f);
 	vc_text(W * 0.5f, H - 158.0f, "Flight stick (between your knees): right grip on it = fly, left grip = move it", 17.0f,
@@ -2084,7 +2146,8 @@ static void vc_card_draw(void) {
 				snprintf(f[i], sizeof f[i], "-");
 			}
 		}
-		snprintf(line[0], sizeof line[0], "Right stick flicks, grip+:  up  %s    down  %s", f[0], f[1]);
+		snprintf(line[0], sizeof line[0], "%s stick flicks, grip+:  up  %s    down  %s", lh ? "Left" : "Right", f[0],
+				 f[1]);
 		snprintf(line[1], sizeof line[1], "left  %s    right  %s", f[2], f[3]);
 		vc_text(W * 0.5f, H - 104.0f, line[0], 17.0f, 1, 0.62f, 0.85f, 0.92f, 0.9f);
 		vc_text(W * 0.5f, H - 78.0f, line[1], 17.0f, 1, 0.62f, 0.85f, 0.92f, 0.9f);

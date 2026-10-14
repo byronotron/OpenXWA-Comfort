@@ -8,6 +8,8 @@
  * no dependencies; the host passes it across each frame.
  */
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -82,6 +84,9 @@ typedef struct XwaVrConsoleState {
 	/* Changes when a new mission starts (the button card returns to its
 	 * spot on the right). */
 	unsigned int mission_serial;
+	/* The HUD colour (0xAARRGGBB, the in-game option): the console wears
+	 * it; 0 keeps its own holo cyan. */
+	uint32_t hud_argb;
 } XwaVrConsoleState;
 
 #ifdef __cplusplus

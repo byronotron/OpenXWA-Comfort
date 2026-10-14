@@ -137,8 +137,9 @@ static const char* const k_ids[CK_COUNT] = {
 	[CK_CMD] = "cmd",			[CK_MFD_LEFT] = "mfd_l",  [CK_MFD_RIGHT] = "mfd_r",
 };
 
-#define CK_GRAB_MARGIN_M (0.02f * 1.15f) /* 15 % more forgiving */
-#define CK_GRAB_DEPTH_M (0.05f * 1.15f)
+#define CK_GRAB_FORGIVE (1.15f * 1.10f) /* 15 %, then 10 % more forgiving */
+#define CK_GRAB_MARGIN_M (0.02f * CK_GRAB_FORGIVE)
+#define CK_GRAB_DEPTH_M (0.05f * CK_GRAB_FORGIVE)
 #define CK_GRIP_ON 0.6f
 #define CK_GRIP_OFF 0.35f
 

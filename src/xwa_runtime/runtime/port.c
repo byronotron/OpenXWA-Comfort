@@ -272,7 +272,8 @@ static void XwaPort_UpdateVrChord(int enabled) {
 			g_vrChord.down_ms[h] = now;
 		} else if (g_vrChord.down[h] && t < VR_CHORD_RELEASE) {
 			g_vrChord.down[h] = 0;
-			if (h == 0 && g_vrChord.warhead_pending) {
+			/* The warhead trigger is the left one, the right one left-handed. */
+			if (h == (Aeron_XrLeftHanded() ? 1 : 0) && g_vrChord.warhead_pending) {
 				/* A plain left-trigger pull after all. */
 				if (!g_vrChord.fired) {
 					XwaPort_QueueFlightActionKey(XwaVrButtons_Binding(AERON_XR_BUTTON_LEFT_TRIGGER)->plain);
@@ -377,6 +378,7 @@ void XwaPort_GetVrConsoleState(XwaVrConsoleState* out) {
 	flight_was_active = flight_active;
 	memset(out, 0, sizeof *out);
 	out->mission_serial = mission_serial;
+	out->hud_argb = g_hudColors[0];
 	if (!craft) {
 		return;
 	}
@@ -536,11 +538,15 @@ static char* XwaPort_VrHint(const char* fmt, const char* label) {
 }
 
 static void XwaPort_ApplyVrStringHints(void) {
-	static int applied;
-	if (applied) {
+	/* Written again when the hand setting changes (the hints name the
+	 * controls); the same calls refill the same buffers. */
+	static int applied = -1;
+	const int left_handed = Aeron_XrLeftHanded();
+	if (applied == left_handed) {
 		return;
 	}
-	applied = 1;
+	applied = left_handed;
+	g_vrHintCount = 0;
 	char space[48], space_cap[48], attacker[48], objective[48], exit_map[16], centre[48];
 	snprintf(space, sizeof space, "%s", XwaVrButtons_KeyLabel(KEY_SPACE, 0));
 	snprintf(space_cap, sizeof space_cap, "%s", space);
