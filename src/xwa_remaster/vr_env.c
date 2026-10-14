@@ -1771,7 +1771,7 @@ static void env_submit_xvtart_sprites(AeronScene3D* scene) {
 		static const struct {
 			int slot;
 			float yaw, h;
-		} pilots[] = { { ENV_TEX_TIE_PILOT, -31.0f, 41.4f }, { ENV_TEX_REBEL_PILOT, 35.0f, 35.7f } };
+		} pilots[] = { { ENV_TEX_TIE_PILOT, -31.0f, 37.3f }, { ENV_TEX_REBEL_PILOT, 35.0f, 29.6f } };
 		for (size_t i = 0; i < sizeof pilots / sizeof pilots[0]; ++i) {
 			const int slot = pilots[i].slot;
 			if (s_env.tex[slot] && s_env.tex_h[slot] > 0) {
