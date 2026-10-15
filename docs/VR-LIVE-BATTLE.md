@@ -29,17 +29,17 @@ gently for small corrections and at most 23 to 46 degrees a second by size,
 and bank by how hard they actually turn. They chase with lead and fire in
 bursts when lined up, break off past their target in a long sweep, and jump
 in from hyperspace on their side's flank when they rejoin. The fight spreads
-over about 150 m to 1.7 km (mean about 600 m). Hits flash; shot-down craft
+over about 110 m to 1.3 km (mean about 430 m). Hits flash; shot-down craft
 burst (Explosions.dat group 2005, animated) and return 4 to 9 s later.
 About five fighters go down a minute. Capital ships, 2.6 km and more out,
 creep forward and trade turbolaser fire about once a second each.
 
 Seven asteroids (three of the game's AsteroidHR models, named in the craft
-lists) tumble slowly 300 m to 1.5 km out, 25 to 160 m across; fighters steer
-round them and bolts strike them.
+lists) tumble slowly 220 m to 1.1 km out, 25 to 160 m across; fighters steer
+round them (jump-ins are aimed clear of them) and bolts strike them.
 
 Comfort: you never move. Courses that would pass within 60 m of you are
-turned away (closest seen in tests: about 55 m), jump-ins are aimed well
+turned away (closest seen in tests: about 40 m), jump-ins are aimed well
 clear of you, and craft are pushed out of the cone the screen covers (they
 spend about 15 % of the time there).
 
