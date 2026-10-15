@@ -1720,10 +1720,14 @@ static void env_submit_tieart_sprites(AeronScene3D* scene) {
 	 * blue-violet; XWA_XR_VADER_BRIGHTNESS scales it. */
 	if (s_env.tex[ENV_TEX_VADER]) {
 		const float b = env_float("XWA_XR_VADER_BRIGHTNESS", 1.0f);
-		const float tint[4] = { 0.18f * b, 0.17f * b, 0.42f * b, 1.0f };
-		const float h = 46.8f; /* 35 %, then 20 % smaller than the cover's */
+		/* 15 % darker than it was and slightly see-through (premultiplied:
+		 * the colour carries the opacity too). */
+		const float dark = 0.85f, opacity = 0.8f;
+		const float tint[4] = { 0.18f * b * dark * opacity, 0.17f * b * dark * opacity, 0.42f * b * dark * opacity,
+								opacity };
+		const float h = 39.8f; /* 35 %, 20 %, then 15 % smaller than the cover's */
 		const float w = h * (float)s_env.tex_w[ENV_TEX_VADER] / (float)s_env.tex_h[ENV_TEX_VADER];
-		const float pitch = env_float("XWA_XR_VADER_PITCH", 30.0f); /* the eyes above the screen and logo */
+		const float pitch = env_float("XWA_XR_VADER_PITCH", 31.0f); /* the eyes above the screen and logo */
 		env_sky_rect(scene, ENV_TEX_VADER, 0.0f, pitch, w, h, 0.0f, tint);
 	}
 	/* Purple clouds below. */
@@ -1771,7 +1775,7 @@ static void env_submit_xvtart_sprites(AeronScene3D* scene) {
 		static const struct {
 			int slot;
 			float yaw, h;
-		} pilots[] = { { ENV_TEX_TIE_PILOT, -31.0f, 37.3f }, { ENV_TEX_REBEL_PILOT, 35.0f, 29.6f } };
+		} pilots[] = { { ENV_TEX_TIE_PILOT, -28.0f, 37.3f }, { ENV_TEX_REBEL_PILOT, 32.0f, 29.6f } };
 		for (size_t i = 0; i < sizeof pilots / sizeof pilots[0]; ++i) {
 			const int slot = pilots[i].slot;
 			if (s_env.tex[slot] && s_env.tex_h[slot] > 0) {
