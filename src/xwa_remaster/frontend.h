@@ -23,9 +23,9 @@ extern "C" {
 AeronTexture* XwaRemasterFrontend_Render(AeronCommandBuffer* cmd, const XwaSnapshot* snap,
 										 XwaRemasterAssets* assets, int target_width, int target_height);
 
-/* The right eye's frame of the last reconstruction when the VR menus have
- * depth (XWA_XR_MENU_DEPTH), else NULL: the returned texture of
- * XwaRemasterFrontend_Render is then the left eye's. */
+/* The right eye's frame of the last reconstruction while the screen shows
+ * 3D ship previews in VR (XWA_XR_SHIP_3D), else NULL: the returned texture
+ * of XwaRemasterFrontend_Render is then the left eye's. */
 AeronTexture* XwaRemasterFrontend_RightEyeTexture(void);
 
 /* Submit retained cursor artwork at the current host-frame pointer position. */

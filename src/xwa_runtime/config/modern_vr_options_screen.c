@@ -42,7 +42,7 @@ enum {
 	VR_VOICE,
 	VR_BUTTON_CARD,
 	VR_ENVIRONMENT,
-	VR_MENU_DEPTH,
+	VR_SHIP_3D,
 	VR_RESOLUTION,
 	VR_REFRESH,
 	VR_GPU_OPT,
@@ -105,8 +105,8 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "XWA_XR_VOICE", "Voice Commands", k_voice_texts, k_voice_values, 3, 1, 98, 0 },
 	{ "XWA_XR_BUTTON_CARD", "Button Card", k_toggle_texts, k_toggle_values, 2, 1, 92, 0 },
 	{ "XWA_XR_ENVIRONMENT", "Menu Scene", k_env_texts, k_env_values, 6, 1, 90, 0 },
-	/* Rooms and maps behind the menu screen, text and buttons on it. */
-	{ "XWA_XR_MENU_DEPTH", "Menu 3D Depth", k_depth_texts, k_depth_values, 4, 2, 68, 0 },
+	/* Ship previews (mission setup, tech room) in stereo on the menu screen. */
+	{ "XWA_XR_SHIP_3D", "3D Ship Previews", k_depth_texts, k_depth_values, 4, 2, 68, 0 },
 	{ "AERON_XR_RESOLUTION_SCALE", "Resolution (restart)", k_res_texts, k_res_values, 6, 4, 86, 1 },
 	{ "AERON_XR_REFRESH_RATE", "Refresh Rate", k_refresh_texts, k_refresh_values, 5, 0, 99, 1 },
 	/* Near-first draw order and the GPU clock floor. */
