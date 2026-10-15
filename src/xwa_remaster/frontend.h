@@ -23,6 +23,11 @@ extern "C" {
 AeronTexture* XwaRemasterFrontend_Render(AeronCommandBuffer* cmd, const XwaSnapshot* snap,
 										 XwaRemasterAssets* assets, int target_width, int target_height);
 
+/* The right eye's frame of the last reconstruction when the VR menus have
+ * depth (XWA_XR_MENU_DEPTH), else NULL: the returned texture of
+ * XwaRemasterFrontend_Render is then the left eye's. */
+AeronTexture* XwaRemasterFrontend_RightEyeTexture(void);
+
 /* Submit retained cursor artwork at the current host-frame pointer position. */
 void XwaRemasterFrontend_PresentCursor(float opacity, int split_view);
 void XwaRemasterFrontend_Shutdown(void);

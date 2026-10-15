@@ -44,8 +44,8 @@
 #define PREVIEW_NEAR_Z 64.0f /* reversed-Z near (engine world units) */
 
 static struct {
-	AeronScene3D* scene; /* shared; color/depth transient per record */
-	AeronRenderTarget* present[PREVIEW_SLOTS];
+	AeronScene3D* scene;                          /* shared; color/depth transient per record */
+	AeronRenderTarget* present[2][PREVIEW_SLOTS]; /* [eye][slot] */
 	AeronSceneBloom* bloom;
 	AeronScenePresentChain* chain;
 	AeronSampler* chain_sampler;
@@ -115,21 +115,28 @@ static AeronSceneMesh* preview_mesh(const char* opt_name) {
 AeronTexture* XwaRemasterPreview_Render(AeronCommandBuffer* cmd, const XwaModelPreview* p, int slot,
 										const XwaDirLight* lights, uint32_t light_count,
 										const XwaAssetRef* glow_tex) {
-	if (!cmd || !p || slot < 0 || slot >= PREVIEW_SLOTS || p->dst_w <= 0 || p->dst_h <= 0) {
+	return XwaRemasterPreview_RenderEye(cmd, p, slot, 0, 0.0f, lights, light_count, glow_tex);
+}
+
+AeronTexture* XwaRemasterPreview_RenderEye(AeronCommandBuffer* cmd, const XwaModelPreview* p, int slot,
+										   int eye, float camera_x, const XwaDirLight* lights,
+										   uint32_t light_count, const XwaAssetRef* glow_tex) {
+	if (!cmd || !p || slot < 0 || slot >= PREVIEW_SLOTS || eye < 0 || eye > 1 || p->dst_w <= 0 ||
+		p->dst_h <= 0) {
 		return NULL;
 	}
 	if (!preview_ensure()) {
 		Aeron_CommandBufferSetFailure(cmd, "Model-preview resource preparation failed");
 		return NULL;
 	}
-	if (!s.present[slot]) {
-		s.present[slot] =
+	if (!s.present[eye][slot]) {
+		s.present[eye][slot] =
 			Aeron_CreateRenderTarget(&(AeronRenderTargetDesc) { .width = PREVIEW_RT_W,
 																.height = PREVIEW_RT_H,
 																.format = AERON_TEXTURE_FORMAT_RGBA16_FLOAT,
 																.debug_name = "xwa.preview.present" });
 	}
-	if (!s.present[slot]) {
+	if (!s.present[eye][slot]) {
 		Aeron_CommandBufferSetFailure(cmd, "Model-preview render-target creation failed");
 		return NULL;
 	}
@@ -199,7 +206,7 @@ AeronTexture* XwaRemasterPreview_Render(AeronCommandBuffer* cmd, const XwaModelP
 		m[0] = k * p->obj_basis[0];
 		m[1] = k * p->obj_basis[3];
 		m[2] = k * p->obj_basis[6];
-		m[3] = p->eye_delta[0];
+		m[3] = p->eye_delta[0] - camera_x; /* the stereo eye's camera sits camera_x to the side */
 		m[4] = k * p->obj_basis[1];
 		m[5] = k * p->obj_basis[4];
 		m[6] = k * p->obj_basis[7];
@@ -229,9 +236,11 @@ AeronTexture* XwaRemasterPreview_Render(AeronCommandBuffer* cmd, const XwaModelP
 		 * instance transform IS the eye placement). */
 		if (glow_tex) {
 			static uint32_t flick = 0x2545F491u;
-			flick ^= flick << 13;
-			flick ^= flick >> 17;
-			flick ^= flick << 5;
+			if (eye == 0) { /* both eyes of a stereo pair flicker together */
+				flick ^= flick << 13;
+				flick ^= flick >> 17;
+				flick ^= flick << 5;
+			}
 			const float scale = (float)(0.60000002 - (double)(flick & 0xf) * 0.0024999999);
 			XwaRemasterShip_SubmitEngineGlows(s.scene, mesh, inst.transform, k,
 											  /*table=*/NULL, /*knockout_mask=*/0, scale,
@@ -266,7 +275,7 @@ AeronTexture* XwaRemasterPreview_Render(AeronCommandBuffer* cmd, const XwaModelP
 		}
 	}
 	AeronRenderPass* pp = Aeron_BeginRenderPass(&(AeronRenderPassDesc) {
-		.color_target = s.present[slot],
+		.color_target = s.present[eye][slot],
 		.clear_color = 1,
 		.clear_color_rgba = { 0.0f, 0.0f, 0.0f, 0.0f },
 		.command_buffer = cmd,
@@ -280,14 +289,14 @@ AeronTexture* XwaRemasterPreview_Render(AeronCommandBuffer* cmd, const XwaModelP
 								PREVIEW_RT_W, PREVIEW_RT_H, /*bar_y_uv=*/1.0f, tint,
 								/*src_coverage=*/1);
 	Aeron_EndRenderPass(pp);
-	return Aeron_RenderTargetGetTexture(s.present[slot]);
+	return Aeron_RenderTargetGetTexture(s.present[eye][slot]);
 }
 
 void XwaRemasterPreview_Shutdown(void) {
 	/* Meshes follow the classic processed-OPT lifetime in XwaRemasterShip. */
-	for (int i = 0; i < PREVIEW_SLOTS; i++) {
-		if (s.present[i]) {
-			Aeron_DestroyRenderTarget(s.present[i]);
+	for (int eye = 0; eye < 2; eye++) {
+		for (int i = 0; i < PREVIEW_SLOTS; i++) {
+			Aeron_DestroyRenderTarget(s.present[eye][i]);
 		}
 	}
 	if (s.chain_sampler) {

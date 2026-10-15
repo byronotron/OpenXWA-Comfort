@@ -42,6 +42,7 @@ enum {
 	VR_VOICE,
 	VR_BUTTON_CARD,
 	VR_ENVIRONMENT,
+	VR_MENU_DEPTH,
 	VR_RESOLUTION,
 	VR_REFRESH,
 	VR_GPU_OPT,
@@ -76,6 +77,8 @@ static const char* const k_env_texts[] = { "Off",           "Random",
 											"XW: Alliance Box Art", "X-Wing Box Art",
 											"TIE Fighter Box Art", "X-Wing vs. TIE Box Art" };
 static const char* const k_env_values[] = { "0", "random", "endor", "xwing", "tiefighter", "xvt" };
+static const char* const k_depth_texts[] = { "Off (flat)", "Subtle", "Normal", "Strong" };
+static const char* const k_depth_values[] = { "0", "0.5", "1", "1.6" };
 static const char* const k_refresh_texts[] = { "Headset Setting", "72 Hz", "80 Hz", "90 Hz", "120 Hz" };
 static const char* const k_refresh_values[] = { "0", "72", "80", "90", "120" };
 static const char* const k_shading_texts[] = { "Full", "Lite (faster)" };
@@ -102,6 +105,8 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "XWA_XR_VOICE", "Voice Commands", k_voice_texts, k_voice_values, 3, 1, 98, 0 },
 	{ "XWA_XR_BUTTON_CARD", "Button Card", k_toggle_texts, k_toggle_values, 2, 1, 92, 0 },
 	{ "XWA_XR_ENVIRONMENT", "Menu Scene", k_env_texts, k_env_values, 6, 1, 90, 0 },
+	/* Rooms and maps behind the menu screen, text and buttons on it. */
+	{ "XWA_XR_MENU_DEPTH", "Menu 3D Depth", k_depth_texts, k_depth_values, 4, 2, 68, 0 },
 	{ "AERON_XR_RESOLUTION_SCALE", "Resolution (restart)", k_res_texts, k_res_values, 6, 4, 86, 1 },
 	{ "AERON_XR_REFRESH_RATE", "Refresh Rate", k_refresh_texts, k_refresh_values, 5, 0, 99, 1 },
 	/* Near-first draw order and the GPU clock floor. */

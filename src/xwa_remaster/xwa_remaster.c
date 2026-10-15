@@ -893,6 +893,11 @@ void XwaRemaster_Frame(int32_t delta_us) {
 	if (g.mode == RM_VIEW_SPLIT) {
 		layer.scissor = (AeronRectI) { pr.x + pr.width / 2, pr.y, pr.width / 2, pr.height };
 	}
+	if (g.scene_kind == XWA_SCENE_FRONTEND || g.scene_kind == XWA_SCENE_FRONTEND_MODAL ||
+		g.scene_kind == XWA_SCENE_LOADING) {
+		/* VR menus with depth: the right eye's reconstruction. */
+		layer.right_eye_texture = XwaRemasterFrontend_RightEyeTexture();
+	}
 	if (!Aeron_SubmitTextureLayer(&layer)) {
 		XwaRemaster_FatalGpu("HD texture-layer presentation");
 	}

@@ -31,6 +31,12 @@ AeronTexture* XwaRemasterPreview_Render(AeronCommandBuffer* cmd, const XwaModelP
 										int slot, const XwaDirLight* lights,
 										uint32_t light_count, const XwaAssetRef* glow_tex);
 
+/* Stereo variant: `eye` picks the RT set (0 left / mono, 1 right) and the
+ * camera moves `camera_x` engine units sideways (positive = right). */
+AeronTexture* XwaRemasterPreview_RenderEye(AeronCommandBuffer* cmd, const XwaModelPreview* p, int slot, int eye,
+										   float camera_x, const XwaDirLight* lights, uint32_t light_count,
+										   const XwaAssetRef* glow_tex);
+
 void XwaRemasterPreview_Shutdown(void);
 
 #ifdef __cplusplus
