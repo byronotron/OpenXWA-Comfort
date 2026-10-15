@@ -75,8 +75,8 @@ static const char* const k_fov_texts[] = { "Off", "Low", "Medium", "High" };
 static const char* const k_fov_values[] = { "0", "low", "medium", "high" };
 static const char* const k_env_texts[] = { "Off",           "Random",
 											"XW: Alliance Box Art", "X-Wing Box Art",
-											"TIE Fighter Box Art", "X-Wing vs. TIE Box Art" };
-static const char* const k_env_values[] = { "0", "random", "endor", "xwing", "tiefighter", "xvt" };
+											"TIE Fighter Box Art", "X-Wing vs. TIE Box Art", "Live Battle" };
+static const char* const k_env_values[] = { "0", "random", "endor", "xwing", "tiefighter", "xvt", "battle" };
 static const char* const k_depth_texts[] = { "Off (flat)", "Subtle", "Normal", "Strong" };
 static const char* const k_depth_values[] = { "0", "0.5", "1", "1.6" };
 static const char* const k_refresh_texts[] = { "Headset Setting", "72 Hz", "80 Hz", "90 Hz", "120 Hz" };
@@ -104,7 +104,7 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "AERON_XR_LEFT_HANDED", "Controls", k_hand_texts, k_toggle_values, 2, 0, 75, 0 },
 	{ "XWA_XR_VOICE", "Voice Commands", k_voice_texts, k_voice_values, 3, 1, 98, 0 },
 	{ "XWA_XR_BUTTON_CARD", "Button Card", k_toggle_texts, k_toggle_values, 2, 1, 92, 0 },
-	{ "XWA_XR_ENVIRONMENT", "Menu Scene", k_env_texts, k_env_values, 6, 1, 90, 0 },
+	{ "XWA_XR_ENVIRONMENT", "Menu Scene", k_env_texts, k_env_values, 7, 1, 90, 0 },
 	/* Ship previews (mission setup, tech room) in stereo on the menu screen. */
 	{ "XWA_XR_SHIP_3D", "3D Ship Previews", k_depth_texts, k_depth_values, 4, 2, 68, 0 },
 	{ "AERON_XR_RESOLUTION_SCALE", "Resolution (restart)", k_res_texts, k_res_values, 6, 4, 86, 1 },

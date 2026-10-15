@@ -5,7 +5,16 @@
  * VR environment for the 2D screens (concourse, briefings, menus, films),
  * built from the installed game data and drawn in stereo around the flat
  * virtual screen. XWA_XR_ENVIRONMENT selects it:
- *   random (default) — endor, xwing, tiefighter or xvt, picked at each start;
+ *   random (default) — endor, xwing, tiefighter, xvt or battle, picked at
+ *                     each start;
+ *   battle          — a live battle cast from the last mission flown (its
+ *                     player craft and wingman, fighters, capital ships,
+ *                     station, planets and sun), or rebels against the
+ *                     Empire before any: fighters dogfight round the screen,
+ *                     jump in from hyperspace and burst when shot down,
+ *                     capital ships trade turbolaser fire on the flanks
+ *                     (the mission is remembered in vr_last_mission.txt;
+ *                     XWA_XR_BATTLE_MISSION names one instead);
  *   endor           — a still of the Battle of Endor after the box art:
  *                     game craft, the Death Star II and Endor sprites, the
  *                     logo above the screen (vr/logo.rgba, shipped in the

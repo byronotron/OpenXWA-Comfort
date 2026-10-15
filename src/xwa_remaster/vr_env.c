@@ -8,6 +8,10 @@
 #include "aeron/scene/mesh.h"
 #include "aeron/vfs.h"
 #include "aeron/xr.h"
+#include "xwa/assets/model_type.h"
+#include "xwa/assets/object_type.h"
+#include "xwa/flight/fediskio.h"
+#include "xwa/frontend/frontend_mission.h"
 #include "xwa_2d.h"
 #include "xwa_remaster/ship.h"
 
@@ -322,8 +326,15 @@ enum {
 	ENV_TEX_VADER,  /* vr/vader.rgba: the helmet behind the TIE Fighter scene */
 	ENV_TEX_TIE_PILOT,   /* vr/xvt_tie_pilot.rgba: X-Wing vs. TIE backdrop, left */
 	ENV_TEX_REBEL_PILOT, /* vr/xvt_rebel_pilot.rgba: X-Wing vs. TIE backdrop, right */
+	ENV_TEX_GLOW,        /* generated: a soft round glow (engines, flashes) */
+	ENV_TEX_BOOM,        /* the explosion's animation frames (ENV_BOOM_FRAMES slots) */
+	ENV_TEX_BOOM_LAST = ENV_TEX_BOOM + 11,
+	ENV_TEX_BACKDROP,    /* the last mission's planets, nebulae and suns */
+	ENV_TEX_BACKDROP_LAST = ENV_TEX_BACKDROP + 5,
 	ENV_TEX_COUNT
 };
+#define ENV_BOOM_FRAMES (ENV_TEX_BOOM_LAST - ENV_TEX_BOOM + 1)
+#define ENV_BACKDROPS (ENV_TEX_BACKDROP_LAST - ENV_TEX_BACKDROP + 1)
 
 typedef struct EnvTexSource {
 	const char* dat; /* under Resdata/ */
@@ -342,9 +353,12 @@ static const EnvTexSource k_tex_sources[ENV_TEX_COUNT] = {
 	{ NULL, 0, 0 },            /* vr/vader.rgba */
 	{ NULL, 0, 0 },            /* vr/xvt_tie_pilot.rgba */
 	{ NULL, 0, 0 },            /* vr/xvt_rebel_pilot.rgba */
+	{ NULL, 0, 0 },            /* generated */
+	[ENV_TEX_BOOM] = { "Explosions", 2005, 1 }, /* frames 1..12 of the fighter explosion */
+	/* the backdrops: chosen per mission (s_bt.backdrops) */
 };
 
-typedef enum EnvMode { ENV_OFF = 0, ENV_ENDOR, ENV_HANGAR, ENV_BOXART, ENV_TIEART, ENV_XVTART } EnvMode;
+typedef enum EnvMode { ENV_OFF = 0, ENV_ENDOR, ENV_HANGAR, ENV_BOXART, ENV_TIEART, ENV_XVTART, ENV_BATTLE } EnvMode;
 
 #define ENV_MAX_MESHES 24
 #define ENV_MAX_INSTANCES 40
@@ -358,6 +372,7 @@ typedef struct EnvMesh {
 	char opt[64]; /* as the scene names it (alternatives with '|') */
 	AeronSceneMesh* mesh;
 	float size_z; /* world units */
+	float len_m, wid_m, hgt_m; /* the model's extents in metres (y, x, z) */
 	int tried;
 } EnvMesh;
 
@@ -410,17 +425,21 @@ static EnvMode env_mode(void) {
 	if (v && SDL_strcasecmp(v, "endor") == 0) {
 		return ENV_ENDOR;
 	}
+	if (v && SDL_strcasecmp(v, "battle") == 0) {
+		return ENV_BATTLE;
+	}
 	/* "random" (and the default): one of the space scenes, picked once per
 	 * start. */
 	static EnvMode picked = ENV_OFF;
 	if (picked == ENV_OFF) {
-		static const EnvMode scenes[] = { ENV_ENDOR, ENV_BOXART, ENV_TIEART, ENV_XVTART };
+		static const EnvMode scenes[] = { ENV_ENDOR, ENV_BOXART, ENV_TIEART, ENV_XVTART, ENV_BATTLE };
 		const uint64_t seed = SDL_GetPerformanceCounter() ^ ((uint64_t)time(NULL) * 2654435761u);
 		picked = scenes[(seed ^ (seed >> 17) ^ (seed >> 31)) % (sizeof scenes / sizeof scenes[0])];
 		Aeron_LogInfo("xwa.remaster", "VR environment: random pick %s",
 					  picked == ENV_ENDOR	 ? "endor"
 					  : picked == ENV_BOXART ? "xwing"
 					  : picked == ENV_TIEART ? "tiefighter"
+					  : picked == ENV_BATTLE ? "battle"
 											 : "xvt");
 	}
 	return picked;
@@ -444,10 +463,17 @@ static const EnvSpaceScene* env_space(void) {
 
 int XwaVrEnv_Enabled(void) { return env_mode() != ENV_OFF; }
 
-int XwaVrEnv_IsSpace(void) {
-	const EnvMode m = env_mode();
-	return m == ENV_ENDOR || m == ENV_BOXART || m == ENV_TIEART || m == ENV_XVTART;
+/* The live battle (defined below). */
+static void bt_lighting(XwaVrEnvLighting* out, float sun);
+static void bt_cast(void);
+static int bt_load_texture(AeronCommandBuffer* cmd, int slot);
+static int bt_tex_needed(int slot);
+
+static int env_is_space(EnvMode m) {
+	return m == ENV_ENDOR || m == ENV_BOXART || m == ENV_TIEART || m == ENV_XVTART || m == ENV_BATTLE;
 }
+
+int XwaVrEnv_IsSpace(void) { return env_is_space(env_mode()); }
 
 static void env_set3(float out[3], float x, float y, float z) {
 	out[0] = x;
@@ -457,12 +483,14 @@ static void env_set3(float out[3], float x, float y, float z) {
 
 int XwaVrEnv_SpaceLighting(XwaVrEnvLighting* out) {
 	const EnvMode m = env_mode();
-	if (!out || (m != ENV_ENDOR && m != ENV_BOXART && m != ENV_TIEART && m != ENV_XVTART)) {
+	if (!out || !env_is_space(m)) {
 		return 0;
 	}
 	memset(out, 0, sizeof *out);
 	const float sun = env_float("XWA_XR_ENDOR_SUN", 1.6f);
-	if (m == ENV_ENDOR) {
+	if (m == ENV_BATTLE) {
+		bt_lighting(out, sun);
+	} else if (m == ENV_ENDOR) {
 		/* A warm sun from the upper left behind the viewer, a faint green
 		 * bounce off the moon below right, deep-space ambient. */
 		env_set3(out->key_dir, -0.55f, 0.35f, 0.75f);
@@ -543,6 +571,10 @@ static void env_list(void) {
 		}
 		return;
 	}
+	if (s_env.mode == ENV_BATTLE) {
+		bt_cast();
+		return;
+	}
 	env_list_add("Hangar");
 	s_env.hangar = 0;
 	if (env_craft()) {
@@ -581,6 +613,9 @@ static void env_load(AeronCommandBuffer* cmd, int index) {
 		return;
 	}
 	m->size_z = (model.bounds.max.z - model.bounds.min.z) * AERON_OPT_UNITS_PER_METER;
+	m->len_m = model.bounds.max.y - model.bounds.min.y;
+	m->wid_m = model.bounds.max.x - model.bounds.min.x;
+	m->hgt_m = model.bounds.max.z - model.bounds.min.z;
 	if (index == s_env.hangar) {
 		int found = 0;
 		for (uint32_t c = 0; c < model.component_count && !found; ++c) {
@@ -733,6 +768,9 @@ static void env_ship_basis(int i, float n[3], float r[3], float u[3]) {
 
 static void env_layout(void) {
 	s_env.count = 0;
+	if (s_env.mode == ENV_BATTLE) {
+		return; /* placed every frame by the battle */
+	}
 	const EnvSpaceScene* space = env_space();
 	if (space) {
 		for (int i = 0; i < space->count && s_env.count < ENV_MAX_INSTANCES; ++i) {
@@ -1046,16 +1084,18 @@ static int env_tex_needed(int slot) {
 	switch (s_env.mode) {
 		case ENV_ENDOR:
 			return slot != ENV_TEX_NEBULA && slot != ENV_TEX_VADER && slot != ENV_TEX_TIE_PILOT &&
-				   slot != ENV_TEX_REBEL_PILOT;
+				   slot != ENV_TEX_REBEL_PILOT && slot < ENV_TEX_GLOW;
 		case ENV_BOXART:
 			return slot != ENV_TEX_DEATHSTAR && slot != ENV_TEX_ENDOR && slot != ENV_TEX_VADER &&
-				   slot != ENV_TEX_TIE_PILOT && slot != ENV_TEX_REBEL_PILOT;
+				   slot != ENV_TEX_TIE_PILOT && slot != ENV_TEX_REBEL_PILOT && slot < ENV_TEX_GLOW;
 		case ENV_TIEART:
 			return slot != ENV_TEX_DEATHSTAR && slot != ENV_TEX_ENDOR && slot != ENV_TEX_TIE_PILOT &&
-				   slot != ENV_TEX_REBEL_PILOT;
+				   slot != ENV_TEX_REBEL_PILOT && slot < ENV_TEX_GLOW;
 		case ENV_XVTART:
 			return slot != ENV_TEX_DEATHSTAR && slot != ENV_TEX_ENDOR && slot != ENV_TEX_NEBULA &&
-				   slot != ENV_TEX_VADER;
+				   slot != ENV_TEX_VADER && slot < ENV_TEX_GLOW;
+		case ENV_BATTLE:
+			return bt_tex_needed(slot);
 		default:
 			return slot == ENV_TEX_FRAME;
 	}
@@ -1068,7 +1108,9 @@ static int env_load_sprites(AeronCommandBuffer* cmd) {
 			continue;
 		}
 		s_env.tex_tried[i] = 1;
-		if (i == ENV_TEX_BEAM) {
+		if (s_env.mode == ENV_BATTLE && bt_load_texture(cmd, i)) {
+			/* the battle's own (glow, explosion frames, backdrops) */
+		} else if (i == ENV_TEX_BEAM) {
 			env_make_beam(cmd);
 		} else if (i == ENV_TEX_NEBULA) {
 			env_make_nebula(cmd);
@@ -1136,7 +1178,7 @@ void XwaVrEnv_View(float pos[3], float rows[9]) {
 	 * is laid out around the viewer at the origin. */
 	float x = -500.0f, y = -1150.0f, yaw = 0.0f, eye = 1.7f;
 	const char* v = getenv("XWA_XR_ENV_VIEW");
-	if (env_space()) {
+	if (env_is_space(s_env.mode)) {
 		x = y = 0.0f;
 	} else if (v && v[0]) {
 		sscanf(v, "%f,%f,%f,%f", &x, &y, &yaw, &eye);
@@ -1149,7 +1191,7 @@ void XwaVrEnv_View(float pos[3], float rows[9]) {
 	const float back = env_float("XWA_XR_ENV_BACK", 1.1f) * AERON_OPT_UNITS_PER_METER;
 	pos[0] = x - f[0] * back;
 	pos[1] = y - f[1] * back;
-	pos[2] = env_space() ? 0.0f : s_env.floor_z + eye * AERON_OPT_UNITS_PER_METER;
+	pos[2] = env_is_space(s_env.mode) ? 0.0f : s_env.floor_z + eye * AERON_OPT_UNITS_PER_METER;
 	memcpy(s_env.view_pos, pos, sizeof s_env.view_pos);
 	rows[0] = f[1];
 	rows[1] = -f[0];
@@ -1277,9 +1319,10 @@ typedef struct EnvScreen {
 	 * exactly). The opening is the frame's clear 4:3 area enlarged 2 %: the
 	 * bezel overlaps under 1 % of the picture's edges (no menu text), dark
 	 * backing fills any gap. The
-	 * frame sits XWA_XR_FRAME_DEPTH (3 cm) in front of the picture for a
-	 * little depth, scaled so its opening lines up from the viewer (leaning
-	 * 20 cm shifts the two by under 4 mm, about a game pixel). */
+	 * frame sits XWA_XR_FRAME_DEPTH (12 cm) in front of the picture, so the
+	 * whole picture is set back in it, scaled so its opening lines up from
+	 * the viewer (leaning 20 cm shifts the two by under 8 mm, which the
+	 * bezel's overlap still covers). */
 	float pic_w, pic_h;
 	float frame_dist, frame_scale;
 } EnvScreen;
@@ -1300,7 +1343,7 @@ static void env_screen(EnvScreen* out) {
 	const float overscan = fmaxf(env_float("XWA_XR_FRAME_OVERSCAN", 1.0f), 0.5f);
 	out->pic_w = out->w / overscan;
 	out->pic_h = out->h / overscan;
-	out->frame_dist = fmaxf(dist - env_float("XWA_XR_FRAME_DEPTH", 0.03f), 0.2f);
+	out->frame_dist = fmaxf(dist - env_float("XWA_XR_FRAME_DEPTH", 0.12f), 0.2f);
 	out->frame_scale = dist > 0.01f ? out->frame_dist / dist : 1.0f;
 }
 
@@ -1813,7 +1856,1562 @@ static void env_submit_xvtart_sprites(AeronScene3D* scene) {
 	env_submit_logo(scene);
 }
 
+/* ---- "Live Battle": a running battle cast from the last mission ---------
+ * The craft of the mission flown last (or, before any, a generic rebel /
+ * Imperial clash) fight on around the screen: fighters dogfight in front and
+ * to the sides, jumping in from hyperspace and bursting when shot down; the
+ * mission's capital ships and station hold the flanks a few kilometres out
+ * trading turbolaser fire, its biggest hostile ship burning; the mission's
+ * planets, nebulae and suns hang in the sky, the suns lighting the scene.
+ * The player's craft flies with its wingmen and is never shot down.
+ *
+ * A light steering director, not the flight engine: craft turn at a limited
+ * rate and bank into their turns, chase with lead and fire in bursts when
+ * lined up, break off to evade, and stay out of the cone the screen covers
+ * and away from the viewer. Units here are metres (viewer at the origin, x
+ * right, y forward, z up); the scene takes world units (k per metre). */
+
+#define BT_MAX_TYPES 12
+#define BT_MAX_FIGHTERS 16
+#define BT_MAX_BIG 5
+#define BT_MAX_BOLTS 128
+#define BT_MAX_BOOMS 24
+#define BT_MAX_FG 192
+#define BT_FIGHTERS_PER_SIDE 6
+#define BT_PI 3.14159265358979f
+
+enum { BT_FRIEND = 0, BT_FOE = 1 };
+enum { BT_HUNT = 0, BT_EVADE, BT_RETURN };
+enum { BT_CLASS_FIGHTER = 0, BT_CLASS_BIG, BT_CLASS_STATION };
+
+typedef struct BtType {
+	char opt[64];
+	int side, cls;
+	float weight;
+	int green; /* Imperial: green fire, blue-white engines */
+	int hero;  /* the player's craft */
+	int count; /* craft of this type in the battle */
+} BtType;
+
+typedef struct BtShip {
+	int type, side, cls, alive, hero;
+	float p[3], f[3], u[3];
+	float speed, cruise, turn;
+	float hp, hp_max;
+	int target, mode;
+	float timer, cooldown, respawn, arrive;
+	float goal[3];
+	float drift, spin; /* capital ships: metres moved; stations: yaw rate */
+	float burn;        /* a burning capital ship: time to its next hull fire */
+} BtShip;
+
+typedef struct BtBolt {
+	float p[3], d[3];
+	float speed, travelled, range, len, width;
+	int side, big, alive;
+	float color[3];
+} BtBolt;
+
+typedef struct BtBoom {
+	float p[3], size, t, dur;
+	int kind; /* 0 explosion, 1 hit spark, 2 hull fire */
+	int alive;
+	float roll;
+} BtBoom;
+
+typedef struct BtBackdrop {
+	int group, sprite;
+	float dir[3]; /* toward it (before the yaw turn) */
+	float scale;
+	float color[3];
+	int sun, has_color;
+	float yaw, pitch, size_deg; /* where it is drawn */
+} BtBackdrop;
+
+static struct {
+	int cast;
+	char mission[128];
+	BtType types[BT_MAX_TYPES];
+	int type_count;
+	BtShip ships[BT_MAX_FIGHTERS + BT_MAX_BIG];
+	int ship_count;
+	BtBolt bolts[BT_MAX_BOLTS];
+	BtBoom booms[BT_MAX_BOOMS];
+	BtBackdrop backdrops[ENV_BACKDROPS];
+	int backdrop_count;
+	int sun; /* index of the sun lighting the scene, -1 none */
+	uint32_t rng;
+	uint64_t last_counter;
+	float time;
+	int started;
+	int burning; /* the burning hostile capital ship, -1 none */
+	/* statistics (self-test, log) */
+	int kills, shots, hits;
+} s_bt;
+
+static uint32_t bt_rand(void) {
+	uint32_t x = s_bt.rng ? s_bt.rng : 0x9e3779b9u;
+	x ^= x << 13;
+	x ^= x >> 17;
+	x ^= x << 5;
+	s_bt.rng = x;
+	return x;
+}
+
+static float bt_rnd(float lo, float hi) { return lo + (hi - lo) * (float)(bt_rand() & 0xffffffu) / 16777215.0f; }
+
+static float bt_dot(const float a[3], const float b[3]) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+
+static float bt_len(const float a[3]) { return sqrtf(bt_dot(a, a)); }
+
+static int bt_norm(float v[3]) {
+	const float l = bt_len(v);
+	if (!(l > 1e-6f)) {
+		return 0;
+	}
+	v[0] /= l;
+	v[1] /= l;
+	v[2] /= l;
+	return 1;
+}
+
+/* Direction toward yaw / pitch degrees from the viewer, times `dist`. */
+static void bt_at(float yaw, float pitch, float dist, float out[3]) {
+	env_dir(yaw, pitch, out);
+	for (int a = 0; a < 3; ++a) {
+		out[a] *= dist;
+	}
+}
+
+/* Rotate v about the unit axis by `angle` radians (Rodrigues). */
+static void bt_rotate(float v[3], const float axis[3], float angle) {
+	const float c = cosf(angle), s = sinf(angle), d = bt_dot(axis, v);
+	float x[3];
+	env_cross(axis, v, x);
+	for (int a = 0; a < 3; ++a) {
+		v[a] = v[a] * c + x[a] * s + axis[a] * d * (1.0f - c);
+	}
+}
+
+/* ---- casting ------------------------------------------------------------ */
+
+typedef struct BtFg {
+	uint8_t craft_type, count, waves, team, iff, player, region;
+	int backdrop;
+	int16_t mp[3];
+	char name[21], special[21];
+} BtFg;
+
+static int bt_is_green(const char* opt) {
+	char low[64];
+	size_t i = 0;
+	for (; opt[i] && i + 1 < sizeof low; ++i) {
+		low[i] = (char)SDL_tolower((unsigned char)opt[i]);
+	}
+	low[i] = 0;
+	return strncmp(low, "tie", 3) == 0 || strstr(low, "imperial") || strstr(low, "stardestroyer") ||
+		   strstr(low, "gunboat") || strstr(low, "missileboat") || strstr(low, "assault") ||
+		   strstr(low, "skipray") || strstr(low, "lambda");
+}
+
+/* The OPT base name of a mission craft type ("FlightModels\\XWING.OPT" ->
+ * "XWING"); 0 when the type has none. */
+static int bt_craft_opt(int craft_type, char out[64]) {
+	const char* path = FeDiskIo_GetCraftModelName((unsigned int)craft_type);
+	if (!path || !path[0]) {
+		return 0;
+	}
+	const char* base = path;
+	for (const char* c = path; *c; ++c) {
+		if (*c == '\\' || *c == '/') {
+			base = c + 1;
+		}
+	}
+	size_t n = 0;
+	while (base[n] && base[n] != '.' && n + 1 < 64) {
+		out[n] = base[n];
+		n++;
+	}
+	out[n] = 0;
+	return n > 0;
+}
+
+static int bt_genus(int craft_type) {
+	if (craft_type <= 0 || craft_type >= XWA_CRAFT_TYPE_TO_OBJECT_TYPE_COUNT) {
+		return -1;
+	}
+	const unsigned obj = g_objectTypeTables.craftTypeToObjectType[craft_type];
+	return obj > 0 && obj < OBJ_Count ? (int)g_modelTypeTable[obj].genusId : -1;
+}
+
+static int bt_add_type(const char* opt, int side, int cls, float weight, int hero) {
+	for (int i = 0; i < s_bt.type_count; ++i) {
+		BtType* t = &s_bt.types[i];
+		if (SDL_strcasecmp(t->opt, opt) == 0 && t->side == side && t->cls == cls) {
+			t->weight += weight;
+			t->hero |= hero;
+			return i;
+		}
+	}
+	if (s_bt.type_count >= BT_MAX_TYPES) {
+		return -1;
+	}
+	BtType* t = &s_bt.types[s_bt.type_count];
+	memset(t, 0, sizeof *t);
+	snprintf(t->opt, sizeof t->opt, "%s", opt);
+	t->side = side;
+	t->cls = cls;
+	t->weight = weight;
+	t->hero = hero;
+	t->green = bt_is_green(opt);
+	return s_bt.type_count++;
+}
+
+/* Reads the mission's flight groups and the player team's allegiances. */
+static int bt_read_mission(const char* path, BtFg* fgs, int* fg_count, uint8_t allies[10][10]) {
+	AeronVfs* vfs = Aeron_GetVfs();
+	uint8_t* data = NULL;
+	size_t size = 0;
+	if (!vfs || !path[0] || !AeronVfs_ReadAll(vfs, AERON_VFS_ROOT_ASSET, path, 16u << 20, &data, &size)) {
+		return 0;
+	}
+	int ok = 0;
+	size_t at = 2 + sizeof(XwaMissionHeader);
+	if (size >= at) {
+		XwaMissionHeader header;
+		memcpy(&header, data + 2, sizeof header);
+		const int n = header.numFlightGroups;
+		if (n > 0 && n <= BT_MAX_FG && size >= at + (size_t)n * sizeof(XwaFlightGroup)) {
+			for (int i = 0; i < n; ++i) {
+				XwaFlightGroup fg;
+				memcpy(&fg, data + at + (size_t)i * sizeof fg, sizeof fg);
+				BtFg* o = &fgs[i];
+				memset(o, 0, sizeof *o);
+				o->craft_type = fg.craftType;
+				o->count = fg.numberOfCraft;
+				o->waves = fg.numberOfWaves;
+				o->team = fg.team;
+				o->iff = fg.iff;
+				o->player = fg.playerNumber;
+				o->region = fg.missionPointRegions[XWA_FG_POINT_START_1];
+				o->backdrop = fg.backdrop;
+				for (int a = 0; a < 3; ++a) {
+					o->mp[a] = (&fg.missionPoints[XWA_FG_POINT_START_1].x)[a];
+				}
+				memcpy(o->name, fg.name, 20);
+				memcpy(o->special, fg.specialCargo, 20);
+			}
+			*fg_count = n;
+			ok = 1;
+			/* Messages, global goals, then the teams. */
+			at += (size_t)n * sizeof(XwaFlightGroup);
+			at += (size_t)header.numMessages * (2 + sizeof(XwaMessage));
+			for (int t = 0; t < 10 && ok && at + 2 <= size; ++t) {
+				int16_t goals;
+				memcpy(&goals, data + at, 2);
+				at += 2 + (size_t)(goals > 0 && goals <= 7 ? goals : 0) * sizeof(XwaGlobalGoal);
+			}
+			for (int t = 0; t < 10 && at + 2 <= size; ++t) {
+				int16_t present;
+				memcpy(&present, data + at, 2);
+				at += 2;
+				if (present && at + sizeof(XwaTeam) <= size) {
+					XwaTeam team;
+					memcpy(&team, data + at, sizeof team);
+					memcpy(allies[t], team.allies, 10);
+					at += sizeof team;
+				}
+			}
+		}
+	}
+	free(data);
+	return ok;
+}
+
+/* The mission flown last: this session's, else the one remembered from the
+ * last session (vr_last_mission.txt in the user folder). */
+static void bt_last_mission(char out[128]) {
+	extern char g_currentMissionFile[128];
+	AeronVfs* vfs = Aeron_GetVfs();
+	out[0] = 0;
+	const char* force = getenv("XWA_XR_BATTLE_MISSION");
+	if (force && force[0]) {
+		snprintf(out, 128, "%s", force);
+		return;
+	}
+	if (g_currentMissionFile[0]) {
+		snprintf(out, 128, "%s", g_currentMissionFile);
+		if (vfs) {
+			uint8_t* old = NULL;
+			size_t old_size = 0;
+			const int same = AeronVfs_ReadAll(vfs, AERON_VFS_ROOT_USER, "vr_last_mission.txt", 256, &old, &old_size) &&
+							 old_size == strlen(out) && memcmp(old, out, old_size) == 0;
+			free(old);
+			if (!same) {
+				(void)AeronVfs_WriteAllAtomic(vfs, AERON_VFS_ROOT_USER, "vr_last_mission.txt", out, strlen(out));
+			}
+		}
+		return;
+	}
+	uint8_t* saved = NULL;
+	size_t saved_size = 0;
+	if (vfs && AeronVfs_ReadAll(vfs, AERON_VFS_ROOT_USER, "vr_last_mission.txt", 256, &saved, &saved_size)) {
+		const size_t n = saved_size < 127 ? saved_size : 127;
+		memcpy(out, saved, n);
+		out[n] = 0;
+		for (size_t i = 0; i < n; ++i) {
+			if (out[i] == '\r' || out[i] == '\n') {
+				out[i] = 0;
+			}
+		}
+	}
+	free(saved);
+}
+
+static void bt_add_backdrop(const BtFg* fg) {
+	if (s_bt.backdrop_count >= ENV_BACKDROPS || fg->backdrop <= 0 ||
+		fg->backdrop >= XWA_MISSION_BACKDROP_DESCRIPTOR_COUNT) {
+		return;
+	}
+	const unsigned type = g_objectTypeTables.missionBackdropDescriptors[fg->backdrop].modelType;
+	if (type == 0 || type >= OBJ_Count) {
+		return;
+	}
+	const ModelTypeInfo* info = &g_modelTypeTable[type];
+	if (info->textureGroup < 6000 || info->textureGroup >= 10000 || info->textureGroup == 6250) {
+		return; /* not a planet, nebula, galaxy or sun (the Death Star's fire) */
+	}
+	BtBackdrop* b = &s_bt.backdrops[s_bt.backdrop_count];
+	memset(b, 0, sizeof *b);
+	b->group = info->textureGroup;
+	b->sprite = info->textureGroup >= 7000 ? info->frameCount : 0;
+	/* Flight: the start point's direction, y mirrored. */
+	b->dir[0] = (float)fg->mp[0];
+	b->dir[1] = -(float)fg->mp[1];
+	b->dir[2] = (float)fg->mp[2];
+	if (!bt_norm(b->dir)) {
+		b->dir[1] = 1.0f;
+	}
+	b->scale = 1.0f;
+	if (fg->special[0]) {
+		const float v = (float)SDL_atof(fg->special);
+		if (v > 0.05f && v < 10.0f && v != 15.5f) {
+			b->scale = v;
+		}
+	}
+	/* Suns (Backdrop.dat): the name holds their light colour. */
+	b->sun = info->textureGroup >= 9000;
+	float r, g, bl;
+	if (sscanf(fg->name, "%f %f %f", &r, &g, &bl) == 3 && r >= 0.0f && g >= 0.0f && bl >= 0.0f) {
+		b->color[0] = r;
+		b->color[1] = g;
+		b->color[2] = bl;
+		b->has_color = 1;
+	}
+	s_bt.backdrop_count++;
+}
+
+/* Picks the craft: up to three fighter types a side (the player's first),
+ * two capital ships a side and one station, weighted by numbers. */
+static void bt_cast_mission(const BtFg* fgs, int n, uint8_t allies[10][10], int have_allies) {
+	int player = -1;
+	for (int i = 0; i < n && player < 0; ++i) {
+		if (fgs[i].player == 1) {
+			player = i;
+		}
+	}
+	for (int i = 0; i < n && player < 0; ++i) {
+		if (fgs[i].player) {
+			player = i;
+		}
+	}
+	const int team = player >= 0 ? fgs[player].team : 0;
+	const int region = player >= 0 ? fgs[player].region : 0;
+	char opt[64];
+	if (player >= 0) {
+		const int genus = bt_genus(fgs[player].craft_type);
+		if ((genus == GENUS_Fighter || genus == GENUS_Transport) && bt_craft_opt(fgs[player].craft_type, opt)) {
+			bt_add_type(opt, BT_FRIEND, BT_CLASS_FIGHTER, 1000.0f, 1);
+		}
+	}
+	/* The backdrops where the player starts, then those of the other regions
+	 * while there is room. */
+	for (int pass = 0; pass < 2; ++pass) {
+		for (int i = 0; i < n; ++i) {
+			if (fgs[i].craft_type == 0xb7 && (fgs[i].region == region) == (pass == 0)) {
+				bt_add_backdrop(&fgs[i]);
+			}
+		}
+	}
+	for (int i = 0; i < n; ++i) {
+		const BtFg* fg = &fgs[i];
+		if (fg->craft_type == 0xb7) {
+			continue;
+		}
+		if (i == player || fg->count == 0) {
+			continue;
+		}
+		const int genus = bt_genus(fg->craft_type);
+		int cls;
+		float weight = (float)fg->count * (1.0f + (float)fg->waves);
+		if (genus == GENUS_Fighter) {
+			cls = BT_CLASS_FIGHTER;
+		} else if (genus == GENUS_Transport) {
+			cls = BT_CLASS_FIGHTER;
+			weight *= 0.5f;
+		} else if (genus == GENUS_Starship || genus == GENUS_Freighter) {
+			cls = BT_CLASS_BIG;
+			weight *= genus == GENUS_Starship ? 3.0f : 1.0f;
+		} else if (genus == GENUS_Platform) {
+			cls = BT_CLASS_STATION;
+		} else {
+			continue; /* mines, buoys, containers, ... */
+		}
+		/* Hostile: another team that is not allied (allies: 0 hostile, 1 ally). */
+		int side;
+		if (fg->team == team) {
+			side = BT_FRIEND;
+		} else if (have_allies && team < 10 && fg->team < 10 && allies[team][fg->team] == 1) {
+			side = BT_FRIEND;
+		} else if (have_allies && team < 10 && fg->team < 10 && allies[team][fg->team] != 0) {
+			continue; /* neutral */
+		} else {
+			side = BT_FOE;
+		}
+		if (fg->region != region) {
+			weight *= 0.3f; /* elsewhere in the mission */
+		}
+		if (bt_craft_opt(fg->craft_type, opt)) {
+			bt_add_type(opt, side, cls, weight, 0);
+		}
+	}
+}
+
+/* No mission yet: rebels against the Empire over a random world. */
+static void bt_cast_generic(void) {
+	bt_add_type("Xwing", BT_FRIEND, BT_CLASS_FIGHTER, 3.0f, 0);
+	bt_add_type("Awing", BT_FRIEND, BT_CLASS_FIGHTER, 2.0f, 0);
+	bt_add_type("Ywing", BT_FRIEND, BT_CLASS_FIGHTER, 1.0f, 0);
+	bt_add_type("TieFighter", BT_FOE, BT_CLASS_FIGHTER, 3.0f, 0);
+	bt_add_type("TieInterceptor", BT_FOE, BT_CLASS_FIGHTER, 2.0f, 0);
+	bt_add_type("CalamariCruiserNew", BT_FRIEND, BT_CLASS_BIG, 2.0f, 0);
+	bt_add_type("Corvette2", BT_FRIEND, BT_CLASS_BIG, 1.0f, 0);
+	bt_add_type("ImperialStarDestroyer2", BT_FOE, BT_CLASS_BIG, 2.0f, 0);
+	bt_add_type("Frigate2", BT_FOE, BT_CLASS_BIG, 1.0f, 0);
+	static const int planets[] = { 6010, 6012, 6020, 6023, 6026, 6030, 6033 };
+	BtBackdrop* b = &s_bt.backdrops[0];
+	memset(b, 0, sizeof *b);
+	b->group = planets[bt_rand() % (sizeof planets / sizeof planets[0])];
+	env_dir(40.0f, 18.0f, b->dir);
+	b->scale = 1.4f;
+	s_bt.backdrop_count = 1;
+}
+
+/* Keeps the strongest types: fighters 3 a side, capital ships 2 a side,
+ * one station; numbers of fighters by weight. */
+static void bt_trim(void) {
+	BtType kept[BT_MAX_TYPES];
+	int kept_count = 0;
+	static const int limits[3] = { 3, 2, 1 };
+	for (int cls = 0; cls < 3; ++cls) {
+		for (int side = 0; side < 2; ++side) {
+			int used[BT_MAX_TYPES] = { 0 };
+			const int limit = cls == BT_CLASS_STATION ? (side == 0 ? 1 : 0) : limits[cls];
+			for (int k = 0; k < limit; ++k) {
+				int best = -1;
+				for (int i = 0; i < s_bt.type_count; ++i) {
+					const BtType* t = &s_bt.types[i];
+					const int match = t->cls == cls && (cls == BT_CLASS_STATION || t->side == side);
+					if (match && !used[i] && (best < 0 || t->weight > s_bt.types[best].weight)) {
+						best = i;
+					}
+				}
+				if (best < 0) {
+					break;
+				}
+				used[best] = 1;
+				kept[kept_count++] = s_bt.types[best];
+			}
+		}
+	}
+	memcpy(s_bt.types, kept, sizeof(BtType) * (size_t)kept_count);
+	s_bt.type_count = kept_count;
+	/* A side with no fighters borrows the generic ones of its colour. */
+	for (int side = 0; side < 2; ++side) {
+		int have = 0;
+		for (int i = 0; i < s_bt.type_count; ++i) {
+			have |= s_bt.types[i].cls == BT_CLASS_FIGHTER && s_bt.types[i].side == side;
+		}
+		if (!have) {
+			bt_add_type(side == BT_FRIEND ? "Xwing" : "TieFighter", side, BT_CLASS_FIGHTER, 1.0f, 0);
+		}
+	}
+	/* Fighters per type by weight, the hero type at least two (its wingman). */
+	for (int side = 0; side < 2; ++side) {
+		float total = 0.0f;
+		for (int i = 0; i < s_bt.type_count; ++i) {
+			const BtType* t = &s_bt.types[i];
+			if (t->cls == BT_CLASS_FIGHTER && t->side == side) {
+				total += t->hero ? 0.0f : t->weight;
+			}
+		}
+		int left = BT_FIGHTERS_PER_SIDE;
+		for (int i = 0; i < s_bt.type_count; ++i) {
+			BtType* t = &s_bt.types[i];
+			if (t->cls == BT_CLASS_FIGHTER && t->side == side && t->hero) {
+				t->count = 2;
+				left -= 2;
+			}
+		}
+		const int share = left;
+		for (int pass = 0; pass < 2 && left > 0; ++pass) {
+			for (int i = 0; i < s_bt.type_count && left > 0; ++i) {
+				BtType* t = &s_bt.types[i];
+				if (t->cls != BT_CLASS_FIGHTER || t->side != side || t->hero) {
+					continue;
+				}
+				int want = pass == 0 && total > 0.0f ? (int)floorf((float)share * t->weight / total + 0.5f) : 1;
+				want = want < 1 ? 1 : want;
+				want = want > left ? left : want;
+				t->count += want;
+				left -= want;
+			}
+			if (total <= 0.0f) {
+				break;
+			}
+		}
+		/* No non-hero fighters: more wingmen. */
+		for (int i = 0; i < s_bt.type_count && left > 0; ++i) {
+			BtType* t = &s_bt.types[i];
+			if (t->cls == BT_CLASS_FIGHTER && t->side == side) {
+				t->count += left;
+				left = 0;
+			}
+		}
+	}
+	for (int i = 0; i < s_bt.type_count; ++i) {
+		if (s_bt.types[i].cls != BT_CLASS_FIGHTER) {
+			s_bt.types[i].count = 1;
+		}
+	}
+}
+
+/* The backdrops turned so the biggest sits off to the side above the
+ * horizon, the rest keeping their places around it. */
+static void bt_place_backdrops(void) {
+	int main = -1;
+	for (int i = 0; i < s_bt.backdrop_count; ++i) {
+		const BtBackdrop* b = &s_bt.backdrops[i];
+		if (!b->sun && b->group < 7000 && (main < 0 || b->scale > s_bt.backdrops[main].scale)) {
+			main = i;
+		}
+	}
+	float turn = 0.0f;
+	if (main >= 0) {
+		const float* d = s_bt.backdrops[main].dir;
+		const float yaw = atan2f(d[0], d[1]) * 180.0f / BT_PI;
+		const float a = 42.0f - yaw, b = -42.0f - yaw;
+		turn = fabsf(remainderf(a, 360.0f)) < fabsf(remainderf(b, 360.0f)) ? a : b;
+	}
+	s_bt.sun = -1;
+	for (int i = 0; i < s_bt.backdrop_count; ++i) {
+		BtBackdrop* b = &s_bt.backdrops[i];
+		const float yaw = atan2f(b->dir[0], b->dir[1]) * 180.0f / BT_PI + turn;
+		float pitch = asinf(fmaxf(-1.0f, fminf(1.0f, b->dir[2]))) * 180.0f / BT_PI;
+		if (i == main) {
+			pitch = fminf(fmaxf(pitch, 8.0f), 30.0f);
+		}
+		b->yaw = remainderf(yaw, 360.0f);
+		b->pitch = fminf(fmaxf(pitch, -60.0f), 70.0f);
+		if (b->sun) {
+			/* Suns over the viewer's shoulder, away from the main world: the
+			 * craft in front are lit on the sides we see. */
+			const float away = main >= 0 && remainderf(turn + atan2f(s_bt.backdrops[main].dir[0],
+																	   s_bt.backdrops[main].dir[1]) * 180.0f / BT_PI,
+														360.0f) > 0.0f
+								   ? -1.0f
+								   : 1.0f;
+			b->yaw = away * (128.0f + 14.0f * (float)i);
+			b->pitch = 32.0f + 6.0f * (float)i;
+		}
+		/* Flight: half extent scale * 1.5 * width at 2048 units. */
+		const float half = atanf(1.5f * 256.0f * b->scale / 2048.0f) * 180.0f / BT_PI;
+		b->size_deg = 2.0f * half * (b->group >= 7000 && b->group < 9000 ? 2.0f : 1.0f);
+		/* A menu backdrop, not a mission: the main world large, the rest
+		 * smaller. */
+		b->size_deg = fminf(b->size_deg, b->sun ? 12.0f : i == main ? 34.0f : 20.0f);
+		if (b->sun && (s_bt.sun < 0 || b->scale > s_bt.backdrops[s_bt.sun].scale)) {
+			s_bt.sun = i;
+		}
+	}
+	/* Overlapping ones move apart (round the sky, away from the screen). */
+	for (int i = 0; i < s_bt.backdrop_count; ++i) {
+		BtBackdrop* b = &s_bt.backdrops[i];
+		for (int tries = 0; tries < 12; ++tries) {
+			int clash = 0;
+			for (int j = 0; j < i && !clash; ++j) {
+				const BtBackdrop* o = &s_bt.backdrops[j];
+				float d0[3], d1[3];
+				env_dir(b->yaw, b->pitch, d0);
+				env_dir(o->yaw, o->pitch, d1);
+				const float apart = acosf(fminf(1.0f, bt_dot(d0, d1))) * 180.0f / BT_PI;
+				clash = apart < 0.55f * (b->size_deg + o->size_deg) + 4.0f;
+			}
+			if (!clash) {
+				break;
+			}
+			b->yaw = remainderf(b->yaw + (b->yaw >= 0.0f ? 27.0f : -27.0f), 360.0f);
+			if (fabsf(b->yaw) > 150.0f) {
+				b->pitch = fminf(b->pitch + 20.0f, 60.0f);
+			}
+		}
+		/* Nothing large right behind the screen. */
+		if (fabsf(b->yaw) < 26.0f && b->pitch < 34.0f && !b->sun) {
+			b->yaw = b->yaw >= 0.0f ? 30.0f : -30.0f;
+		}
+	}
+}
+
+static void bt_cast(void) {
+	if (s_bt.cast) {
+		return;
+	}
+	const uint32_t rng = s_bt.rng;
+	memset(&s_bt, 0, sizeof s_bt);
+	s_bt.rng = rng ? rng : (uint32_t)(SDL_GetPerformanceCounter() ^ ((uint64_t)time(NULL) * 2654435761u)) | 1u;
+	s_bt.cast = 1;
+	s_bt.sun = -1;
+	s_bt.burning = -1;
+	bt_last_mission(s_bt.mission);
+	static BtFg fgs[BT_MAX_FG];
+	uint8_t allies[10][10];
+	int n = 0;
+	memset(allies, 0, sizeof allies);
+	const int have = s_bt.mission[0] && bt_read_mission(s_bt.mission, fgs, &n, allies);
+	if (have) {
+		bt_cast_mission(fgs, n, allies, 1);
+	}
+	int fighters = 0;
+	for (int i = 0; i < s_bt.type_count; ++i) {
+		fighters += s_bt.types[i].cls == BT_CLASS_FIGHTER;
+	}
+	if (!have || !fighters) {
+		s_bt.type_count = 0;
+		s_bt.backdrop_count = 0;
+		bt_cast_generic();
+	}
+	bt_trim();
+	bt_place_backdrops();
+	for (int i = 0; i < s_bt.type_count; ++i) {
+		env_list_add(s_bt.types[i].opt);
+	}
+	Aeron_LogInfo("xwa.remaster", "VR battle: %s, %d craft types, %d backdrops", have ? s_bt.mission : "generic",
+				  s_bt.type_count, s_bt.backdrop_count);
+	for (int i = 0; i < s_bt.type_count; ++i) {
+		const BtType* t = &s_bt.types[i];
+		Aeron_LogInfo("xwa.remaster", "VR battle:   %s %s %s x%d%s", t->side == BT_FRIEND ? "friend" : "foe",
+					  t->cls == BT_CLASS_FIGHTER ? "fighter" : t->cls == BT_CLASS_BIG ? "capital" : "station", t->opt,
+					  t->count, t->hero ? " (player)" : "");
+	}
+}
+
+/* ---- textures ------------------------------------------------------------ */
+
+static int bt_tex_needed(int slot) {
+	if (slot == ENV_TEX_FRAME || slot == ENV_TEX_LOGO || slot == ENV_TEX_BEAM || slot == ENV_TEX_GLOW ||
+		slot == ENV_TEX_BLAST) {
+		return 1;
+	}
+	if (slot >= ENV_TEX_BOOM && slot <= ENV_TEX_BOOM_LAST) {
+		return 1;
+	}
+	return slot >= ENV_TEX_BACKDROP && slot < ENV_TEX_BACKDROP + s_bt.backdrop_count;
+}
+
+/* A soft round glow (additive; colour from the tint). */
+static int bt_make_glow(AeronCommandBuffer* cmd) {
+	enum { G = 64 };
+	uint8_t px[G * G * 4];
+	for (int y = 0; y < G; ++y) {
+		for (int x = 0; x < G; ++x) {
+			const float dx = ((float)x + 0.5f) / (float)G * 2.0f - 1.0f, dy = ((float)y + 0.5f) / (float)G * 2.0f - 1.0f;
+			const float r2 = dx * dx + dy * dy;
+			const float a = r2 >= 1.0f ? 0.0f : fminf(1.0f, expf(-r2 * 9.0f) + 0.35f * expf(-r2 * 2.5f)) * (1.0f - r2);
+			uint8_t* p = &px[(y * G + x) * 4];
+			p[0] = p[1] = p[2] = (uint8_t)(a * 255.0f + 0.5f);
+			p[3] = 255;
+		}
+	}
+	AeronTexture* t = Aeron_CreateTexture(&(AeronTextureDesc) {
+		.width = G,
+		.height = G,
+		.mip_count = 1,
+		.format = AERON_TEXTURE_FORMAT_RGBA8_UNORM,
+		.usage = AERON_TEXTURE_USAGE_SAMPLED | AERON_TEXTURE_USAGE_TRANSFER_DST,
+		.debug_name = "xwa.vr_env.glow",
+	});
+	if (!t || !Aeron_UploadTextureDataCmd(cmd, &(AeronTextureUploadDesc) {
+			.texture = t,
+			.width = G,
+			.height = G,
+			.raw_data = px,
+			.raw_size = sizeof px,
+		})) {
+		if (t) {
+			Aeron_DestroyTexture(t);
+		}
+		return 0;
+	}
+	s_env.tex[ENV_TEX_GLOW] = t;
+	s_env.tex_w[ENV_TEX_GLOW] = G;
+	s_env.tex_h[ENV_TEX_GLOW] = G;
+	return 1;
+}
+
+/* Reads one DAT group; frames sorted by sprite id. */
+static int bt_read_group(int group, Xwa2dFrameSet* set) {
+	const char* dat = group < 3000 ? "Explosions"
+					  : group < 7000 ? "Planet"
+					  : group < 8000 ? "Nebula"
+					  : group < 9000 ? "Galaxy"
+									 : "Backdrop";
+	char path[2][64];
+	snprintf(path[0], sizeof path[0], "Resdata/%s.dat", dat);
+	snprintf(path[1], sizeof path[1], "RESDATA/%s.DAT", dat);
+	for (char* c = path[1]; *c; ++c) {
+		*c = (char)SDL_toupper((unsigned char)*c);
+	}
+	AeronVfs* vfs = Aeron_GetVfs();
+	uint8_t* bytes = NULL;
+	size_t size = 0;
+	for (int i = 0; i < 2 && !bytes; ++i) {
+		if (vfs && AeronVfs_Exists(vfs, AERON_VFS_ROOT_ASSET, path[i]) &&
+			!AeronVfs_ReadAll(vfs, AERON_VFS_ROOT_ASSET, path[i], 64u << 20, &bytes, &size)) {
+			bytes = NULL;
+		}
+	}
+	if (!bytes) {
+		Aeron_LogWarn("xwa.remaster", "VR battle: %s unavailable", path[0]);
+		return 0;
+	}
+	memset(set, 0, sizeof *set);
+	char error[256];
+	error[0] = 0;
+	const int ok = Xwa2d_DatAppendGroup(bytes, size, (uint16_t)group, set, error, sizeof error) && set->count > 0;
+	free(bytes);
+	if (!ok) {
+		Aeron_LogWarn("xwa.remaster", "VR battle: DAT group %d unavailable: %s", group, error);
+		Xwa2dFrameSet_Free(set);
+	}
+	return ok;
+}
+
+/* The battle's own textures; returns 1 when `slot` is one of them. */
+static int bt_load_texture(AeronCommandBuffer* cmd, int slot) {
+	if (slot == ENV_TEX_GLOW) {
+		bt_make_glow(cmd);
+		return 1;
+	}
+	if (slot == ENV_TEX_BOOM) {
+		/* The whole animation at once (frames 1..12 of group 2005). */
+		Xwa2dFrameSet set;
+		if (bt_read_group(2005, &set)) {
+			for (int f = 0; f < ENV_BOOM_FRAMES; ++f) {
+				for (int i = 0; i < set.count; ++i) {
+					if (set.frames[i].sprite_id == f + 1 && set.frames[i].rgba) {
+						env_make_texture(cmd, ENV_TEX_BOOM + f, set.frames[i].rgba, set.frames[i].width,
+										 set.frames[i].height);
+					}
+				}
+				s_env.tex_tried[ENV_TEX_BOOM + f] = 1;
+			}
+			Xwa2dFrameSet_Free(&set);
+		}
+		return 1;
+	}
+	if (slot > ENV_TEX_BOOM && slot <= ENV_TEX_BOOM_LAST) {
+		return 1; /* loaded with the first */
+	}
+	if (slot >= ENV_TEX_BACKDROP && slot <= ENV_TEX_BACKDROP_LAST) {
+		const BtBackdrop* b = &s_bt.backdrops[slot - ENV_TEX_BACKDROP];
+		Xwa2dFrameSet set;
+		if (bt_read_group(b->group, &set)) {
+			/* Its sprite when named (nebulae, suns), else the first (a planet's
+			 * fully lit face). */
+			const Xwa2dFrame* pick = NULL;
+			for (int i = 0; i < set.count; ++i) {
+				const Xwa2dFrame* f = &set.frames[i];
+				if (!f->rgba) {
+					continue;
+				}
+				if (b->sprite ? f->sprite_id == b->sprite : (!pick || f->sprite_id < pick->sprite_id)) {
+					pick = f;
+				}
+			}
+			for (int i = 0; i < set.count && !pick; ++i) {
+				pick = set.frames[i].rgba ? &set.frames[i] : NULL;
+			}
+			if (pick && pick->rgba) {
+				env_make_texture(cmd, slot, pick->rgba, pick->width, pick->height);
+			}
+			Xwa2dFrameSet_Free(&set);
+		}
+		return 1;
+	}
+	return 0;
+}
+
+/* ---- the director --------------------------------------------------------- */
+
+/* The screen's cone (degrees): craft in it are hidden behind the screen. */
+static int bt_behind_screen(const float p[3]) {
+	const float yaw = atan2f(p[0], p[1]) * 180.0f / BT_PI;
+	const float pitch = atan2f(p[2], sqrtf(p[0] * p[0] + p[1] * p[1])) * 180.0f / BT_PI;
+	return p[1] > 0.0f && fabsf(yaw) < 23.0f && pitch > -21.0f && pitch < 30.0f;
+}
+
+/* A point the fighters fly through: around the screen, not behind it; a
+ * quarter of them close by for a pass near the viewer. */
+static void bt_pick_goal(float out[3], int side) {
+	for (int tries = 0; tries < 12; ++tries) {
+		const int close = (bt_rand() & 3) == 0;
+		/* Either side; a side's craft favour their own flank a little. */
+		const float own = side == BT_FRIEND ? -1.0f : 1.0f;
+		const float yaw = (bt_rnd(0.0f, 1.0f) < 0.6f ? own : -own) * bt_rnd(15.0f, 75.0f);
+		const float pitch = bt_rnd(-35.0f, 45.0f);
+		const float dist = close ? bt_rnd(65.0f, 120.0f) : bt_rnd(130.0f, 380.0f);
+		bt_at(yaw, pitch, dist, out);
+		if (!bt_behind_screen(out)) {
+			return;
+		}
+	}
+	bt_at(side == BT_FRIEND ? -45.0f : 45.0f, 10.0f, 300.0f, out);
+}
+
+static const EnvMesh* bt_mesh(const BtShip* sh) {
+	const int m = env_find(s_bt.types[sh->type].opt);
+	return m >= 0 ? &s_env.meshes[m] : NULL;
+}
+
+static float bt_radius(const BtShip* sh) {
+	const EnvMesh* m = bt_mesh(sh);
+	const float r = m ? 0.5f * fmaxf(m->len_m, fmaxf(m->wid_m, m->hgt_m)) : 0.0f;
+	return r > 0.5f ? r : (sh->cls == BT_CLASS_FIGHTER ? 6.0f : 300.0f);
+}
+
+/* A fighter (re)joining: from hyperspace on its side's flank. */
+static void bt_spawn_fighter(BtShip* sh, float delay) {
+	float to[3];
+	for (int tries = 0; tries < 16; ++tries) {
+		const float yaw = (sh->side == BT_FRIEND ? -1.0f : 1.0f) * bt_rnd(30.0f, 75.0f);
+		bt_at(yaw, bt_rnd(-15.0f, 35.0f), bt_rnd(340.0f, 520.0f), sh->p);
+		bt_pick_goal(to, sh->side);
+		if (bt_len(to) < 130.0f) {
+			continue; /* arrive further out */
+		}
+		for (int a = 0; a < 3; ++a) {
+			sh->f[a] = to[a] - sh->p[a];
+		}
+		if (!bt_norm(sh->f)) {
+			continue;
+		}
+		/* The jump's run-out (about 200 m) passes well clear of the viewer. */
+		const float t = fminf(fmaxf(-bt_dot(sh->p, sh->f), 0.0f), 260.0f);
+		float c[3];
+		for (int a = 0; a < 3; ++a) {
+			c[a] = sh->p[a] + sh->f[a] * t;
+		}
+		if (bt_len(c) > 140.0f) {
+			break;
+		}
+	}
+	if (!(bt_len(sh->f) > 0.5f)) {
+		sh->f[0] = sh->f[2] = 0.0f;
+		sh->f[1] = -1.0f;
+	}
+	static const float z[3] = { 0.0f, 0.0f, 1.0f };
+	float r[3];
+	env_cross(sh->f, z, r);
+	if (!bt_norm(r)) {
+		r[0] = 1.0f;
+	}
+	env_cross(r, sh->f, sh->u);
+	bt_norm(sh->u);
+	memcpy(sh->goal, to, sizeof to);
+	sh->alive = 0;
+	sh->respawn = delay;
+	sh->hp = sh->hp_max;
+	sh->mode = BT_RETURN;
+	sh->timer = bt_rnd(2.0f, 4.0f);
+	sh->target = -1;
+	sh->cooldown = bt_rnd(0.5f, 1.5f);
+}
+
+static void bt_start(void) {
+	s_bt.ship_count = 0;
+	s_bt.burning = -1;
+	int big_index[2] = { 0, 0 };
+	for (int i = 0; i < s_bt.type_count; ++i) {
+		const BtType* t = &s_bt.types[i];
+		for (int c = 0; c < t->count && s_bt.ship_count < BT_MAX_FIGHTERS + BT_MAX_BIG; ++c) {
+			BtShip* sh = &s_bt.ships[s_bt.ship_count++];
+			memset(sh, 0, sizeof *sh);
+			sh->type = i;
+			sh->side = t->side;
+			sh->cls = t->cls;
+			sh->hero = t->hero && c == 0;
+			sh->target = -1;
+			const EnvMesh* m = bt_mesh(sh);
+			const float len = m && m->len_m > 0.5f ? m->len_m : 12.0f;
+			if (t->cls == BT_CLASS_FIGHTER) {
+				/* Smaller is quicker; Interceptor-like light craft quickest. */
+				sh->cruise = fminf(fmaxf(78.0f - len * 1.6f, 38.0f), 72.0f);
+				sh->turn = fminf(fmaxf(1.5f - len * 0.025f, 0.6f), 1.35f);
+				sh->hp_max = sh->hero ? 1e9f : 6.0f + floorf(len / 5.0f);
+				bt_spawn_fighter(sh, 0.4f + bt_rnd(0.0f, 5.0f) + (float)c * 0.6f);
+			} else {
+				/* Capital ships hold the flanks a few kilometres out, broadside
+				 * on, the station further back; they creep forward. */
+				const float sgn = t->side == BT_FRIEND ? -1.0f : 1.0f;
+				const int k = big_index[t->side]++;
+				float yaw, pitch, dist;
+				if (t->cls == BT_CLASS_STATION) {
+					yaw = sgn * 62.0f;
+					pitch = 14.0f;
+					dist = fmaxf(3200.0f, len * 4.0f);
+					sh->spin = bt_rnd(-1.0f, 1.0f) > 0.0f ? 0.6f : -0.6f;
+				} else {
+					yaw = sgn * (40.0f + 18.0f * (float)k);
+					pitch = 6.0f + 10.0f * (float)k;
+					dist = fmaxf(1400.0f + 900.0f * (float)k, len * 2.6f);
+				}
+				bt_at(yaw, pitch, dist, sh->p);
+				/* Nose across the line of sight, toward the other fleet. */
+				float los[3] = { sh->p[0], sh->p[1], 0.0f }, side_dir[3];
+				static const float z[3] = { 0.0f, 0.0f, 1.0f };
+				bt_norm(los);
+				env_cross(los, z, side_dir); /* right of the line of sight */
+				const float toward = -sgn; /* friends (left) head right */
+				for (int a = 0; a < 3; ++a) {
+					sh->f[a] = side_dir[a] * toward * 0.9f + los[a] * 0.3f;
+				}
+				bt_norm(sh->f);
+				memcpy(sh->u, z, sizeof sh->u);
+				sh->cruise = t->cls == BT_CLASS_STATION ? 0.0f : bt_rnd(1.5f, 3.0f);
+				sh->speed = sh->cruise;
+				sh->hp_max = sh->hp = 1e9f;
+				sh->alive = 1;
+				sh->cooldown = bt_rnd(1.0f, 3.0f);
+				if (t->side == BT_FOE && t->cls == BT_CLASS_BIG && s_bt.burning < 0) {
+					s_bt.burning = s_bt.ship_count - 1; /* the mission's big hostile, burning */
+					sh->burn = bt_rnd(0.5f, 2.0f);
+				}
+			}
+		}
+	}
+	s_bt.started = 1;
+}
+
+static void bt_boom(const float p[3], float size, float dur, int kind) {
+	BtBoom* slot = NULL;
+	for (int i = 0; i < BT_MAX_BOOMS && !slot; ++i) {
+		if (!s_bt.booms[i].alive) {
+			slot = &s_bt.booms[i];
+		}
+	}
+	if (!slot) {
+		/* Replace the oldest spark first. */
+		float best = -1.0f;
+		for (int i = 0; i < BT_MAX_BOOMS; ++i) {
+			const float age = s_bt.booms[i].t / s_bt.booms[i].dur + (s_bt.booms[i].kind == 1 ? 1.0f : 0.0f);
+			if (age > best) {
+				best = age;
+				slot = &s_bt.booms[i];
+			}
+		}
+	}
+	memset(slot, 0, sizeof *slot);
+	memcpy(slot->p, p, sizeof slot->p);
+	slot->size = size;
+	slot->dur = dur;
+	slot->kind = kind;
+	slot->alive = 1;
+	slot->roll = bt_rnd(0.0f, 360.0f);
+}
+
+static void bt_fire(const float from[3], const float dir[3], int side, int big, int green) {
+	BtBolt* b = NULL;
+	for (int i = 0; i < BT_MAX_BOLTS && !b; ++i) {
+		if (!s_bt.bolts[i].alive) {
+			b = &s_bt.bolts[i];
+		}
+	}
+	if (!b) {
+		return;
+	}
+	memset(b, 0, sizeof *b);
+	memcpy(b->p, from, sizeof b->p);
+	memcpy(b->d, dir, sizeof b->d);
+	bt_norm(b->d);
+	b->side = side;
+	b->big = big;
+	b->alive = 1;
+	b->speed = big ? 700.0f : 330.0f;
+	b->range = big ? 5200.0f : 650.0f;
+	b->len = big ? 70.0f : 7.0f;
+	b->width = big ? 3.0f : 0.45f;
+	if (green) {
+		b->color[0] = 0.35f, b->color[1] = 2.4f, b->color[2] = 0.45f;
+	} else {
+		b->color[0] = 2.4f, b->color[1] = 0.35f, b->color[2] = 0.25f;
+	}
+	s_bt.shots++;
+}
+
+/* Choose whom to chase: the nearest of the few closest foes, spread so no
+ * one draws every attacker. */
+static int bt_pick_target(int self) {
+	const BtShip* me = &s_bt.ships[self];
+	int best = -1;
+	float best_score = 1e30f;
+	for (int i = 0; i < s_bt.ship_count; ++i) {
+		const BtShip* o = &s_bt.ships[i];
+		if (!o->alive || o->side == me->side || o->cls != BT_CLASS_FIGHTER || o->arrive > 0.2f) {
+			continue;
+		}
+		int chasers = 0;
+		for (int j = 0; j < s_bt.ship_count; ++j) {
+			chasers += s_bt.ships[j].alive && s_bt.ships[j].target == i;
+		}
+		float d[3] = { o->p[0] - me->p[0], o->p[1] - me->p[1], o->p[2] - me->p[2] };
+		const float score = bt_len(d) * (1.0f + 0.8f * (float)chasers) * bt_rnd(0.8f, 1.25f);
+		if (score < best_score) {
+			best_score = score;
+			best = i;
+		}
+	}
+	return best;
+}
+
+/* Turn toward `want` at the craft's turn rate, banking into the turn. */
+static void bt_steer(BtShip* sh, const float want_in[3], float dt) {
+	float want[3] = { want_in[0], want_in[1], want_in[2] };
+	if (!bt_norm(want)) {
+		return;
+	}
+	const float c = fminf(1.0f, fmaxf(-1.0f, bt_dot(sh->f, want)));
+	const float angle = acosf(c);
+	float axis[3];
+	env_cross(sh->f, want, axis);
+	if (!bt_norm(axis)) {
+		/* Straight ahead: nothing to do; straight behind: pull up. */
+		env_cross(sh->u, sh->f, axis);
+		if (angle < 0.5f || !bt_norm(axis)) {
+			axis[0] = axis[1] = axis[2] = 0.0f;
+		}
+	}
+	const float step = fminf(angle, sh->turn * dt);
+	if (step > 1e-5f && bt_len(axis) > 0.5f) {
+		bt_rotate(sh->f, axis, step);
+		bt_rotate(sh->u, axis, step);
+	}
+	/* Bank: up leans toward the turn (lift pulls round the corner), back to
+	 * the sky when flying straight. */
+	float lateral[3];
+	const float along = bt_dot(want, sh->f);
+	for (int a = 0; a < 3; ++a) {
+		lateral[a] = want[a] - sh->f[a] * along;
+	}
+	const float hard = fminf(1.0f, angle / 0.6f);
+	float up_want[3];
+	static const float z[3] = { 0.0f, 0.0f, 1.0f };
+	bt_norm(lateral);
+	for (int a = 0; a < 3; ++a) {
+		up_want[a] = lateral[a] * 1.6f * hard + z[a] * (1.0f - hard) * 0.8f + sh->u[a] * 0.2f;
+	}
+	const float uf = bt_dot(up_want, sh->f);
+	for (int a = 0; a < 3; ++a) {
+		up_want[a] -= sh->f[a] * uf;
+	}
+	if (bt_norm(up_want)) {
+		const float roll_c = fminf(1.0f, fmaxf(-1.0f, bt_dot(sh->u, up_want)));
+		float roll_axis[3];
+		env_cross(sh->u, up_want, roll_axis);
+		const float sgn = bt_dot(roll_axis, sh->f) >= 0.0f ? 1.0f : -1.0f;
+		const float roll = fminf(acosf(roll_c), 2.2f * dt);
+		bt_rotate(sh->u, sh->f, sgn * roll);
+	}
+	/* Re-orthonormalise. */
+	const float uf2 = bt_dot(sh->u, sh->f);
+	for (int a = 0; a < 3; ++a) {
+		sh->u[a] -= sh->f[a] * uf2;
+	}
+	bt_norm(sh->u);
+	bt_norm(sh->f);
+}
+
+static void bt_kill(BtShip* sh) {
+	const float r = bt_radius(sh);
+	bt_boom(sh->p, 3.2f * r + 14.0f, 1.5f, 0);
+	s_bt.kills++;
+	bt_spawn_fighter(sh, bt_rnd(4.0f, 9.0f));
+}
+
+static void bt_step_fighter(int index, float dt) {
+	BtShip* sh = &s_bt.ships[index];
+	if (!sh->alive) {
+		sh->respawn -= dt;
+		if (sh->respawn <= 0.0f) {
+			sh->alive = 1;
+			sh->arrive = 1.0f; /* out of hyperspace */
+			float flash[3];
+			for (int a = 0; a < 3; ++a) {
+				flash[a] = sh->p[a] + sh->f[a] * 6.0f;
+			}
+			bt_boom(flash, 3.0f * bt_radius(sh) + 8.0f, 0.35f, 3);
+		}
+		return;
+	}
+	sh->timer -= dt;
+	sh->cooldown -= dt;
+	if (sh->arrive > 0.0f) {
+		sh->arrive = fmaxf(0.0f, sh->arrive - dt * 1.5f);
+	}
+	float want[3] = { sh->f[0], sh->f[1], sh->f[2] };
+	BtShip* target = sh->target >= 0 ? &s_bt.ships[sh->target] : NULL;
+	if (target && (!target->alive || target->side == sh->side)) {
+		target = NULL;
+		sh->target = -1;
+	}
+	if (sh->mode == BT_HUNT) {
+		if (!target || sh->timer <= 0.0f) {
+			sh->target = bt_pick_target(index);
+			target = sh->target >= 0 ? &s_bt.ships[sh->target] : NULL;
+			sh->timer = bt_rnd(5.0f, 10.0f);
+		}
+		if (!target) {
+			sh->mode = BT_RETURN;
+			bt_pick_goal(sh->goal, sh->side);
+			sh->timer = bt_rnd(2.0f, 4.0f);
+		} else {
+			/* Lead: where the target will be when the bolts get there. */
+			float to[3] = { target->p[0] - sh->p[0], target->p[1] - sh->p[1], target->p[2] - sh->p[2] };
+			const float dist = bt_len(to);
+			const float t_hit = dist / 330.0f;
+			float lead[3];
+			for (int a = 0; a < 3; ++a) {
+				lead[a] = to[a] + target->f[a] * target->speed * t_hit;
+			}
+			memcpy(want, lead, sizeof want);
+			float aim[3] = { lead[0], lead[1], lead[2] };
+			bt_norm(aim);
+			const float lined_up = bt_dot(aim, sh->f);
+			if (lined_up > 0.992f && dist < 300.0f && sh->cooldown <= 0.0f) {
+				const EnvMesh* m = bt_mesh(sh);
+				const BtType* t = &s_bt.types[sh->type];
+				const float w = m && m->wid_m > 0.5f ? m->wid_m : 8.0f;
+				const float l = m && m->len_m > 0.5f ? m->len_m : 10.0f;
+				float r[3];
+				env_cross(sh->f, sh->u, r);
+				const float spread = t->green ? 0.12f : 0.42f;
+				for (int g = -1; g <= 1; g += 2) {
+					float from[3], dir[3];
+					for (int a = 0; a < 3; ++a) {
+						from[a] = sh->p[a] + sh->f[a] * 0.45f * l + r[a] * (float)g * spread * w -
+								  sh->u[a] * (t->green ? 0.12f * w : 0.0f);
+						dir[a] = sh->f[a] + bt_rnd(-0.045f, 0.045f);
+					}
+					bt_fire(from, dir, sh->side, 0, t->green);
+				}
+				sh->cooldown = bt_rnd(0.5f, 1.0f);
+			}
+			/* Overshoot or too close: break away. */
+			if (dist < 45.0f || (dist < 120.0f && lined_up < 0.0f)) {
+				sh->mode = BT_EVADE;
+				bt_pick_goal(sh->goal, sh->side);
+				sh->timer = bt_rnd(2.5f, 5.0f);
+			}
+		}
+	} else {
+		/* Evade / return: fly to the goal with a little weave. */
+		for (int a = 0; a < 3; ++a) {
+			want[a] = sh->goal[a] - sh->p[a];
+		}
+		const float d = bt_len(want);
+		float r[3];
+		env_cross(sh->f, sh->u, r);
+		const float weave = sh->mode == BT_EVADE ? 0.35f * sinf(s_bt.time * 2.3f + (float)index) : 0.0f;
+		bt_norm(want);
+		for (int a = 0; a < 3; ++a) {
+			want[a] += r[a] * weave;
+		}
+		if (d < 40.0f || sh->timer <= 0.0f) {
+			sh->mode = BT_HUNT;
+			sh->timer = 0.0f;
+		}
+	}
+	/* Keep clear of the viewer and of the space behind the screen, and in
+	 * the arena. */
+	const float view_d = bt_len(sh->p);
+	bt_norm(want);
+	{
+		/* Where the present course passes the viewer in the next 3 s: steer
+		 * out from that point while it is closer than 60 m. */
+		const float t = fminf(fmaxf(-bt_dot(sh->p, sh->f), 0.0f), sh->speed * 3.0f);
+		float c[3];
+		for (int a = 0; a < 3; ++a) {
+			c[a] = sh->p[a] + sh->f[a] * t;
+		}
+		const float miss = bt_len(c);
+		if (miss < 60.0f) {
+			if (!bt_norm(c)) {
+				memcpy(c, sh->u, sizeof c);
+			}
+			const float k = 3.0f * (60.0f - miss) / 60.0f + (view_d < 40.0f ? 2.0f : 0.0f);
+			for (int a = 0; a < 3; ++a) {
+				want[a] += c[a] * k;
+			}
+		}
+	}
+	if (bt_behind_screen(sh->p) && sh->arrive <= 0.0f) {
+		/* Sideways out of the cone, the nearer way. */
+		const float sgn = sh->p[0] >= 0.0f ? 1.0f : -1.0f;
+		want[0] += sgn * 1.3f;
+	}
+	if (view_d > 560.0f) {
+		float home[3];
+		bt_at(sh->side == BT_FRIEND ? -35.0f : 35.0f, 10.0f, 220.0f, home);
+		for (int a = 0; a < 3; ++a) {
+			home[a] -= sh->p[a];
+		}
+		bt_norm(home);
+		const float k = fminf((view_d - 560.0f) / 120.0f, 2.0f);
+		for (int a = 0; a < 3; ++a) {
+			want[a] += home[a] * k;
+		}
+	}
+	if (sh->arrive <= 0.0f) {
+		bt_steer(sh, want, dt);
+	}
+	const float target_speed = sh->cruise * (sh->mode == BT_EVADE ? 1.2f : 1.0f);
+	sh->speed += (target_speed - sh->speed) * fminf(1.0f, dt * 1.5f);
+	const float speed = sh->speed + 900.0f * sh->arrive * sh->arrive;
+	for (int a = 0; a < 3; ++a) {
+		sh->p[a] += sh->f[a] * speed * dt;
+	}
+}
+
+static void bt_step_big(int index, float dt) {
+	BtShip* sh = &s_bt.ships[index];
+	if (sh->spin != 0.0f) {
+		static const float z[3] = { 0.0f, 0.0f, 1.0f };
+		bt_rotate(sh->f, z, sh->spin * BT_PI / 180.0f * dt);
+	}
+	if (sh->drift < 350.0f) {
+		for (int a = 0; a < 3; ++a) {
+			sh->p[a] += sh->f[a] * sh->speed * dt;
+		}
+		sh->drift += sh->speed * dt;
+	}
+	const EnvMesh* m = bt_mesh(sh);
+	const float len = m && m->len_m > 1.0f ? m->len_m : 600.0f;
+	const float wid = m && m->wid_m > 1.0f ? m->wid_m : 300.0f;
+	const float hgt = m && m->hgt_m > 1.0f ? m->hgt_m : 150.0f;
+	float r[3];
+	env_cross(sh->f, sh->u, r);
+	/* Turbolasers: at the enemy fleet mostly, sometimes into the fight. */
+	sh->cooldown -= dt;
+	if (sh->cooldown <= 0.0f && sh->cls == BT_CLASS_BIG) {
+		int target = -1;
+		const int at_big = (bt_rand() % 100) < 65;
+		for (int tries = 0; tries < 8 && target < 0; ++tries) {
+			const int i = (int)(bt_rand() % (uint32_t)s_bt.ship_count);
+			const BtShip* o = &s_bt.ships[i];
+			if (o->alive && o->side != sh->side && (o->cls != BT_CLASS_FIGHTER) == at_big && o->arrive <= 0.0f) {
+				target = i;
+			}
+		}
+		if (target >= 0) {
+			const BtShip* o = &s_bt.ships[target];
+			float from[3], dir[3];
+			for (int a = 0; a < 3; ++a) {
+				from[a] = sh->p[a] + sh->f[a] * bt_rnd(-0.35f, 0.35f) * len + r[a] * bt_rnd(-0.2f, 0.2f) * wid +
+						  sh->u[a] * 0.25f * hgt;
+			}
+			const float spread = o->cls == BT_CLASS_FIGHTER ? 25.0f : 0.25f * bt_radius(o);
+			for (int a = 0; a < 3; ++a) {
+				dir[a] = o->p[a] + bt_rnd(-spread, spread) - from[a];
+			}
+			bt_fire(from, dir, sh->side, 1, s_bt.types[sh->type].green);
+		}
+		sh->cooldown = bt_rnd(0.8f, 2.2f);
+	}
+	/* The burning one: fires breaking out along its hull. */
+	if (index == s_bt.burning) {
+		sh->burn -= dt;
+		if (sh->burn <= 0.0f) {
+			float p[3];
+			for (int a = 0; a < 3; ++a) {
+				p[a] = sh->p[a] + sh->f[a] * bt_rnd(-0.4f, 0.4f) * len + r[a] * bt_rnd(-0.25f, 0.25f) * wid +
+					   sh->u[a] * bt_rnd(0.0f, 0.3f) * hgt;
+			}
+			bt_boom(p, bt_rnd(0.06f, 0.12f) * len, bt_rnd(1.2f, 2.2f), 0);
+			sh->burn = bt_rnd(1.5f, 4.0f);
+		}
+	}
+}
+
+static void bt_step_bolts(float dt) {
+	for (int i = 0; i < BT_MAX_BOLTS; ++i) {
+		BtBolt* b = &s_bt.bolts[i];
+		if (!b->alive) {
+			continue;
+		}
+		const float step = b->speed * dt;
+		float from[3];
+		memcpy(from, b->p, sizeof from);
+		for (int a = 0; a < 3; ++a) {
+			b->p[a] += b->d[a] * step;
+		}
+		b->travelled += step;
+		if (b->travelled > b->range) {
+			b->alive = 0;
+			continue;
+		}
+		/* Hits: the closest approach of this step to each enemy. */
+		for (int s = 0; s < s_bt.ship_count && b->alive; ++s) {
+			BtShip* sh = &s_bt.ships[s];
+			if (!sh->alive || sh->side == b->side || sh->arrive > 0.3f) {
+				continue;
+			}
+			if (!b->big && sh->cls != BT_CLASS_FIGHTER) {
+				continue; /* fighters do not shoot at capital ships */
+			}
+			const float rad = sh->cls == BT_CLASS_FIGHTER ? bt_radius(sh) * 0.6f : bt_radius(sh) * 0.45f;
+			float rel[3] = { sh->p[0] - from[0], sh->p[1] - from[1], sh->p[2] - from[2] };
+			const float t = fminf(fmaxf(bt_dot(rel, b->d), 0.0f), step);
+			float c[3];
+			for (int a = 0; a < 3; ++a) {
+				c[a] = from[a] + b->d[a] * t - sh->p[a];
+			}
+			if (bt_dot(c, c) > rad * rad) {
+				continue;
+			}
+			b->alive = 0;
+			s_bt.hits++;
+			float at[3];
+			for (int a = 0; a < 3; ++a) {
+				at[a] = from[a] + b->d[a] * t;
+			}
+			if (sh->cls != BT_CLASS_FIGHTER) {
+				bt_boom(at, fmaxf(12.0f, 0.04f * bt_radius(sh) * 2.0f), 0.9f, 1);
+			} else {
+				bt_boom(at, fmaxf(2.0f, 0.5f * bt_radius(sh)), 0.35f, 1);
+				sh->hp -= b->big ? 4.0f : 1.0f;
+				if (sh->hp <= 0.0f) {
+					bt_kill(sh);
+				}
+			}
+		}
+	}
+}
+
+/* The craft start once every model has been tried (their sizes set the
+ * speeds and the capital ships' distances). */
+static int bt_ready(void) {
+	for (int i = 0; i < s_env.mesh_count; ++i) {
+		if (!s_env.meshes[i].tried) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+static void bt_step(float dt) {
+	if (!s_bt.started) {
+		if (!bt_ready()) {
+			return;
+		}
+		bt_start();
+	}
+	s_bt.time += dt;
+	for (int i = 0; i < s_bt.ship_count; ++i) {
+		if (s_bt.ships[i].cls == BT_CLASS_FIGHTER) {
+			bt_step_fighter(i, dt);
+		} else {
+			bt_step_big(i, dt);
+		}
+	}
+	bt_step_bolts(dt);
+	for (int i = 0; i < BT_MAX_BOOMS; ++i) {
+		BtBoom* b = &s_bt.booms[i];
+		if (b->alive) {
+			b->t += dt;
+			b->alive = b->t < b->dur;
+		}
+	}
+}
+
+/* Advances the battle by the real time since the last frame (sub-stepped,
+ * capped so a stall does not jump the craft). */
+static void bt_advance(void) {
+	const uint64_t now = SDL_GetPerformanceCounter();
+	float dt = s_bt.last_counter ? (float)((double)(now - s_bt.last_counter) / (double)SDL_GetPerformanceFrequency())
+								 : 0.0f;
+	s_bt.last_counter = now;
+	dt = fminf(fmaxf(dt, 0.0f), 0.1f);
+	while (dt > 0.0f) {
+		const float h = fminf(dt, 1.0f / 60.0f);
+		bt_step(h);
+		dt -= h;
+	}
+}
+
+/* ---- drawing ---------------------------------------------------------------- */
+
+static void bt_lighting(XwaVrEnvLighting* out, float sun) {
+	/* The mission's sun when it has one, else a white star upper left. */
+	float dir[3] = { -0.55f, -0.45f, 0.7f }; /* over the left shoulder */
+	float col[3] = { 1.0f, 0.96f, 0.9f };
+	if (s_bt.sun >= 0) {
+		const BtBackdrop* b = &s_bt.backdrops[s_bt.sun];
+		env_dir(b->yaw, b->pitch, dir);
+		if (b->has_color) {
+			const float peak = fmaxf(b->color[0], fmaxf(b->color[1], b->color[2]));
+			for (int a = 0; a < 3 && peak > 0.0f; ++a) {
+				col[a] = b->color[a] / peak;
+			}
+		}
+	}
+	for (int a = 0; a < 3; ++a) {
+		out->key_dir[a] = dir[a];
+		out->key_color[a] = col[a] * sun;
+	}
+	/* A cool fill from the viewer's side, so craft read against space. */
+	env_set3(out->fill_dir, 0.15f, -0.85f, 0.35f);
+	env_set3(out->fill_color, 0.30f * 0.9f, 0.34f * 0.9f, 0.45f * 0.9f);
+	env_set3(out->ambient_sides, 0.10f, 0.10f, 0.115f);
+	env_set3(out->ambient_top, 0.11f, 0.11f, 0.12f);
+	env_set3(out->ambient_bottom, 0.075f, 0.075f, 0.09f);
+}
+
+static void bt_glow(AeronScene3D* scene, const float p[3], float size, const float tint[4]) {
+	float c[4][3];
+	env_facing(p, size, 0.0f, c);
+	env_quad(scene, ENV_TEX_GLOW, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_ADDITIVE, c, tint);
+}
+
+static void bt_submit(AeronScene3D* scene) {
+	const float k = AERON_OPT_UNITS_PER_METER;
+	/* The mission's sky. */
+	for (int i = 0; i < s_bt.backdrop_count; ++i) {
+		const BtBackdrop* b = &s_bt.backdrops[i];
+		const int slot = ENV_TEX_BACKDROP + i;
+		if (!s_env.tex[slot]) {
+			continue;
+		}
+		float tint[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+		if (b->sun && b->has_color) {
+			for (int a = 0; a < 3; ++a) {
+				tint[a] = fminf(b->color[a] * 1.2f, 2.0f);
+			}
+		}
+		float c[4][3];
+		env_sky_sprite(scene, slot, b->yaw, b->pitch, b->size_deg, 0.0f, tint, c);
+	}
+	/* The craft. */
+	for (int i = 0; i < s_bt.ship_count; ++i) {
+		const BtShip* sh = &s_bt.ships[i];
+		const int m = env_find(s_bt.types[sh->type].opt);
+		if (!sh->alive || m < 0 || s_env.count >= ENV_MAX_INSTANCES) {
+			continue;
+		}
+		float pos[3];
+		for (int a = 0; a < 3; ++a) {
+			pos[a] = sh->p[a] * k;
+		}
+		const int n = s_env.count++;
+		s_env.mesh_of[n] = m;
+		s_env.far[n] = 1; /* no shadows from the battle */
+		env_pose_matrix(sh->f, sh->u, pos, s_env.transform[n]);
+		const EnvMesh* em = &s_env.meshes[m];
+		const BtType* t = &s_bt.types[sh->type];
+		if (sh->cls == BT_CLASS_FIGHTER) {
+			/* Engine glow at the tail; the hyperspace streak behind. */
+			float tail[3];
+			for (int a = 0; a < 3; ++a) {
+				tail[a] = (sh->p[a] - sh->f[a] * 0.5f * em->len_m) * k;
+			}
+			const float glow_size = fmaxf(1.5f, 0.35f * fminf(em->wid_m, em->hgt_m)) * k;
+			const float warm[4] = { 1.6f, 0.65f, 0.3f, 1.0f }, cool[4] = { 0.55f, 0.75f, 1.6f, 1.0f };
+			bt_glow(scene, tail, glow_size, t->green ? cool : warm);
+			if (sh->arrive > 0.0f) {
+				float from[3];
+				for (int a = 0; a < 3; ++a) {
+					from[a] = (sh->p[a] - sh->f[a] * 420.0f * sh->arrive) * k;
+				}
+				const float streak[4] = { 1.6f * sh->arrive, 1.8f * sh->arrive, 2.2f * sh->arrive, 1.0f };
+				env_beam(scene, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, from, pos, fmaxf(em->wid_m, 3.0f) * 0.6f * k,
+						 streak);
+			}
+		}
+	}
+	/* Laser bolts: wide enough to read at their distance. */
+	for (int i = 0; i < BT_MAX_BOLTS; ++i) {
+		const BtBolt* b = &s_bt.bolts[i];
+		if (!b->alive) {
+			continue;
+		}
+		float a0[3], a1[3];
+		const float shown = fminf(b->len, b->travelled);
+		for (int a = 0; a < 3; ++a) {
+			a0[a] = (b->p[a] - b->d[a] * shown) * k;
+			a1[a] = b->p[a] * k;
+		}
+		const float width = fmaxf(b->width, bt_len(b->p) * 0.0035f) * k;
+		const float tint[4] = { b->color[0], b->color[1], b->color[2], 1.0f };
+		env_beam(scene, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, a0, a1, width, tint);
+	}
+	/* Explosions, sparks and hyperspace flashes. */
+	for (int i = 0; i < BT_MAX_BOOMS; ++i) {
+		const BtBoom* b = &s_bt.booms[i];
+		if (!b->alive) {
+			continue;
+		}
+		const float u = b->t / b->dur;
+		float p[3], c[4][3];
+		for (int a = 0; a < 3; ++a) {
+			p[a] = b->p[a] * k;
+		}
+		if (b->kind == 3) {
+			const float g = 2.5f * (1.0f - u);
+			const float tint[4] = { 0.8f * g, 0.9f * g, 1.2f * g, 1.0f };
+			bt_glow(scene, p, b->size * (0.4f + u) * k, tint);
+			continue;
+		}
+		int frame = (int)(u * (float)ENV_BOOM_FRAMES);
+		frame = frame < 0 ? 0 : frame >= ENV_BOOM_FRAMES ? ENV_BOOM_FRAMES - 1 : frame;
+		const int slot = s_env.tex[ENV_TEX_BOOM + frame] ? ENV_TEX_BOOM + frame : ENV_TEX_BLAST;
+		const float grow = b->kind == 1 ? 0.6f + 0.6f * u : 0.75f + 0.45f * u;
+		static const float white[4] = { 1.5f, 1.4f, 1.3f, 1.0f };
+		env_facing(p, b->size * grow * k, b->roll, c);
+		env_quad(scene, slot, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
+		if (b->kind == 0 && u < 0.25f) {
+			const float g = 3.0f * (1.0f - u / 0.25f);
+			const float flash[4] = { 1.0f * g, 0.8f * g, 0.5f * g, 1.0f };
+			bt_glow(scene, p, b->size * 1.6f * k, flash);
+		}
+	}
+	env_submit_logo(scene);
+}
+
 void XwaVrEnv_Submit(AeronScene3D* scene) {
+	if (s_env.mode == ENV_BATTLE) {
+		/* The battle moves: its craft are placed again every frame. */
+		bt_advance();
+		s_env.count = 0;
+		bt_submit(scene);
+	}
 	for (int i = 0; i < s_env.count; ++i) {
 		AeronSceneMeshInstance inst;
 		memset(&inst, 0, sizeof inst);
@@ -1857,4 +3455,8 @@ void XwaVrEnv_Release(void) {
 		AeronDrawList_Destroy(s_env.frame_list);
 	}
 	memset(&s_env, 0, sizeof s_env);
+	/* Cast again (the next mission may differ); keep the random stream. */
+	const uint32_t rng = s_bt.rng;
+	memset(&s_bt, 0, sizeof s_bt);
+	s_bt.rng = rng;
 }
