@@ -8,6 +8,10 @@
 #include "xwa/net/directplay_private.h"
 #include "xwa/util/byte_order.h"
 #include "xwa/util/time.h"
+#ifdef XWA_MODERN
+#include "xwa_runtime/net/netplay.h"
+#include "xwa_runtime/net/netplay_game.h"
+#endif
 
 #include <stdio.h>
 #include <string.h>
@@ -18,7 +22,9 @@ void Net_ShutdownDirectPlaySessionEx(int suppressRestart, int allowJoinAbortExit
 
 // GLOBAL: XWA 0xA21449
 void* g_netDirectPlayInterface;
-#ifndef XWA_MODERN
+#ifdef XWA_MODERN
+static int g_netActiveTransportType;
+#else
 // GLOBAL: XWA 0xA21445
 XwaDirectPlay4* g_netTempDirectPlayInterface;
 // GLOBAL: XWA 0xA2144D
@@ -111,14 +117,15 @@ HRESULT AERON_DXAPI DirectPlayCreate(const XwaGuid* providerGuid, XwaDirectPlay4
 int Net_PumpIncomingPackets(void) {
 	/*
 	 * Original 0x52C130 pumps IDirectPlay4::Receive, decodes the compact
-	 * reliable-packet stream, and queues packets into g_netSessionRecvQueue.
-	 * DirectPlay is a legacy platform boundary in the port; local delivery is
-	 * handled by NetSession_SendPacket and related helpers instead.
-	 *
-	 * TODO: Replace this boundary stub with Aeron-backed network ingress when
-	 * multiplayer transport is implemented.
+	 * reliable-packet stream, and queues the packets for the frontend or the
+	 * flight session. The port's NetPlay transport does the same through
+	 * XwaNet_Pump.
 	 */
+#ifdef XWA_MODERN
+	return XwaNet_Pump();
+#else
 	return 0;
+#endif
 }
 
 // FUNCTION: XWA 0x531670
@@ -139,37 +146,49 @@ int Net_StartNetworkSession(XwaGuid appGuid, const char* localPlayerInfo, const 
 							int hostFlag, const char* sessionName, int networkType, int waitForPlayerCount,
 							int unusedA11, const char* connectionAddress,
 							const void* joinSessionInstanceGuid) {
+	/* Port: DirectPlay is replaced by NetPlay (UDP); see xwa_runtime/net. */
+	char error[128];
+	char displaySessionName[32];
+
+	(void)appGuid;
 	(void)unusedA11;
-	{
-		char displaySessionName[32];
-
-		(void)appGuid;
-		(void)joinSessionInstanceGuid;
-		if (networkType == NET_TRANSPORT_TCPIP) {
-			strcpy(displaySessionName, "TCPIP game.");
-		} else if (networkType == NET_TRANSPORT_MODEM) {
-			strcpy(displaySessionName, "Dial a New Number.");
-		} else if (networkType == NET_TRANSPORT_SERIAL) {
-			strcpy(displaySessionName, "Direct serial game.");
-		} else if (sessionName[0] != '\0') {
-			strncpy(displaySessionName, sessionName, sizeof(displaySessionName));
-			displaySessionName[sizeof(displaySessionName) - 1] = '\0';
-		} else {
-			snprintf(displaySessionName, sizeof(displaySessionName), "%s's Game.", localPlayerName);
-		}
-
-		g_netIsHost = hostFlag;
-		if (!NetSession_InitGameSession(displaySessionName, localPlayerName, 1, sessionName,
-										connectionAddress, waitForPlayerCount > 0 ? waitForPlayerCount : 1,
-										0)) {
+	(void)joinSessionInstanceGuid;
+	(void)networkType;
+	(void)waitForPlayerCount;
+	if (sessionName != NULL && sessionName[0] != '\0') {
+		snprintf(displaySessionName, sizeof(displaySessionName), "%s", sessionName);
+	} else {
+		snprintf(displaySessionName, sizeof(displaySessionName), "%s's Game.", localPlayerName);
+	}
+	error[0] = '\0';
+	if (hostFlag) {
+		if (!NetPlay_Host(displaySessionName, localPlayerName, localPlayerInfo, g_networkPort, error,
+						  (int)sizeof(error))) {
+			FrontendDisplay_ShowGameMessageBox(error);
 			return 0;
 		}
-		strncpy(g_netPlayers[0].playerName, localPlayerInfo, sizeof(g_netPlayers[0].playerName));
-		g_netPlayers[0].playerName[sizeof(g_netPlayers[0].playerName) - 1] = '\0';
-		strncpy(g_netPlayers[0].sessionName, localPlayerName, sizeof(g_netPlayers[0].sessionName));
-		g_netPlayers[0].sessionName[sizeof(g_netPlayers[0].sessionName) - 1] = '\0';
-		return 1;
+	} else {
+		uint32_t startMs;
+
+		if (!NetPlay_JoinBegin(connectionAddress, g_networkPort, localPlayerName, localPlayerInfo)) {
+			NetPlay_JoinPoll(error, (int)sizeof(error));
+			FrontendDisplay_ShowGameMessageBox(error);
+			return 0;
+		}
+		startMs = timeGetTime();
+		while (NetPlay_JoinPoll(error, (int)sizeof(error)) == NETPLAY_JOIN_PENDING &&
+			   timeGetTime() - startMs < 10000u) {
+			NetPlay_SleepMs(5);
+		}
+		if (NetPlay_JoinPoll(error, (int)sizeof(error)) != NETPLAY_JOIN_DONE) {
+			NetPlay_Shutdown();
+			FrontendDisplay_ShowGameMessageBox(error[0] ? error : "Could not join the game.");
+			return 0;
+		}
 	}
+	XwaNet_AttachSession();
+	g_netActiveTransportType = NET_TRANSPORT_TCPIP;
+	return 1;
 }
 #else
 // FUNCTION: XWA 0x52B3A0
@@ -833,7 +852,11 @@ void Net_ShutdownDirectPlaySessionEx(int suppressRestart, int allowJoinAbortExit
 // FUNCTION: XWA 0x52BBE0
 void Net_ShutdownDirectPlaySession(void) {
 #ifdef XWA_MODERN
-	NetSession_Shutdown();
+	if (XwaNet_IsAttached()) {
+		XwaNet_DetachSession();
+	} else {
+		NetSession_Shutdown();
+	}
 #else
 	Net_ShutdownDirectPlaySessionEx(0, 1);
 #endif
@@ -950,12 +973,19 @@ int Net_HasQueuedJoinRequestOrBacklog(void) {
 
 // FUNCTION: XWA 0x52CEE0
 int Net_SendPacketAndFlush(int toPlayerId, const void* packet, unsigned int packetSize) {
+	/*
+	 * Original 0x52CEE0 compacts a frontend packet, sends it through
+	 * DirectPlay and flushes the pending piggyback. NetPlay delivers every
+	 * packet reliably and in order, so the port sends the packet as it is.
+	 */
+#ifdef XWA_MODERN
+	return XwaNet_SendFrontend(toPlayerId, packet, packetSize);
+#else
 	(void)toPlayerId;
 	(void)packet;
 	(void)packetSize;
-
-	/* TODO: Reimplement Net_SendPacketAndFlush @ 0x52CEE0. */
 	return 1;
+#endif
 }
 
 // FUNCTION: XWA 0x52D6F0
@@ -1002,7 +1032,15 @@ int Net_SendDirectPlayPacket(int destPlayerId, const void* packet, int packetSiz
 		return 1;
 	}
 
+#ifdef XWA_MODERN
+	{
+		XwaDirectPlay4* dplay = (XwaDirectPlay4*)g_netSessionState.dplayInterface;
+		return dplay->lpVtbl->Send(dplay, g_netSessionState.localDplayId, destPlayerId, 0, compactPacket,
+								   (uint32_t)compactSize) == 0;
+	}
+#else
 	return Net_SendPacketAndFlush(destPlayerId, compactPacket, (unsigned int)compactSize) == 1;
+#endif
 }
 
 // FUNCTION: XWA 0x52D840
@@ -1093,21 +1131,31 @@ int Net_SendSequencedDirectPlayPacket(int destPlayerId, int sequenceMode, int se
 
 // FUNCTION: XWA 0x52EFE0
 int Net_GetHostPlayerId(void) {
-	/* TODO: Reimplement Net_GetHostPlayerId @ 0x52EFE0. */
+#ifdef XWA_MODERN
+	if (XwaNet_IsAttached()) {
+		return NetPlay_HostId();
+	}
+#endif
 	return g_mpRoster[0].playerId;
 }
 
 // FUNCTION: XWA 0x52F170
 int Net_ClearPlayerReadyFlagWithLockGuard(int playerId) {
-	(void)playerId;
+	int playerIndex;
 
-	/* TODO: Reimplement Net_ClearPlayerReadyFlagWithLockGuard @ 0x52F170. */
-	return 1;
+	for (playerIndex = 0; playerIndex < g_netPlayerCount; ++playerIndex) {
+		if (g_netPlayers[playerIndex].playerId == playerId) {
+			g_netPlayers[playerIndex].readyFlag = 0;
+			return 1;
+		}
+	}
+	return 0;
 }
 
 // FUNCTION: XWA 0x52F550
 int NetSession_CompactReliablePeerSlotsForRoster(void) {
-	/* TODO: Reimplement NetSession_CompactReliablePeerSlotsForRoster @ 0x52F550. */
+	/* Original 0x52F550 drops the reliable-sequence slots of players who left;
+	 * NetPlay keeps its own per-connection state, so nothing to do here. */
 	return 1;
 }
 
@@ -1212,6 +1260,14 @@ int Net_SetPlayerNameWithLockGuard(int playerId, const char* longName, const cha
 
 // FUNCTION: XWA 0x52FBD0
 int Net_ResetRosterToLocalPlayerWithLockGuard(void) {
-	/* TODO: Reimplement Net_ResetRosterToLocalPlayerWithLockGuard @ 0x52FBD0. */
+	/* Outside a network session only the local player is left in the roster. */
+#ifdef XWA_MODERN
+	if (XwaNet_IsAttached()) {
+		return 1;
+	}
+#endif
+	if (g_netPlayerCount > 1) {
+		g_netPlayerCount = 1;
+	}
 	return 1;
 }

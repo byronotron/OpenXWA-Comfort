@@ -7,6 +7,10 @@
 #include "xwa/util/byte_order.h"
 #include "xwa/util/string.h"
 #include "xwa/util/time.h"
+#ifdef XWA_MODERN
+#include "xwa/frontend/frontend_mission_session.h"
+#include "xwa_runtime/net/netplay_game.h"
+#endif
 
 #include <string.h>
 
@@ -303,7 +307,11 @@ int NetSession_SendPacket(int directPlayId, const uint32_t* payload, int payload
 		return 1;
 	}
 
-	return Net_SendPacketAndFlush(directPlayId, compactPacket, (unsigned int)compactSize) == 1;
+	{
+		XwaDirectPlay4* dplay = (XwaDirectPlay4*)g_netSessionState.dplayInterface;
+		return dplay->lpVtbl->Send(dplay, g_netSessionState.localDplayId, directPlayId, 0, compactPacket,
+								   (uint32_t)compactSize) == 0;
+	}
 }
 
 // FUNCTION: XWA 0x49C0B0
@@ -1157,7 +1165,13 @@ int NetSession_InitGameSession(const char* sessionName, const char* pilotName, i
 	(void)mpGameName;
 	(void)inProgressLaunch;
 
-	/* TODO: Reimplement NetSession_InitGameSession @ 0x49AFC0. */
+#ifdef XWA_MODERN
+	/* Port: a network game takes its players from the NetPlay session. */
+	if (XwaNet_IsAttached() && g_frontendMissionSessionMode != FRONTEND_MISSION_SESSION_SINGLEPLAYER) {
+		return XwaNet_BeginFlightSession(localId != 0);
+	}
+#endif
+	/* Single player: a session with the local player only. */
 	g_netPlayerCount = numHumanPlayers > 0 ? numHumanPlayers : 1;
 	if (g_netPlayerCount > 32) {
 		g_netPlayerCount = 32;
@@ -1216,7 +1230,13 @@ int NetSession_InitGameSession(const char* sessionName, const char* pilotName, i
 
 // FUNCTION: XWA 0x49B9D0
 void NetSession_Shutdown(void) {
-	/* TODO: Reimplement NetSession_Shutdown @ 0x49B9D0. */
+#ifdef XWA_MODERN
+	if (XwaNet_IsAttached()) {
+		XwaNet_EndFlightSession();
+		g_netSessionState.playerCount = 0;
+		return;
+	}
+#endif
 	g_netPlayerCount = 0;
 	g_netSessionState.playerCount = 0;
 }

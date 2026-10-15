@@ -41,6 +41,9 @@
 #include "xwa/util/memory.h"
 #include "xwa/util/time.h"
 #include "xwa/xwa_options.h"
+#ifdef XWA_MODERN
+#include "xwa_runtime/net/netplay.h"
+#endif
 
 #include <ctype.h>
 #ifndef XWA_MODERN
@@ -7579,6 +7582,10 @@ int MissionSetup_Update(int frameCounter) {
 		g_frontendMissionInitClearedDword = 0;
 
 		if (g_frontendMissionSessionMode != FRONTEND_MISSION_SESSION_SINGLEPLAYER) {
+#ifdef XWA_MODERN
+			/* Port: NetPlay takes new players only while the host is in this screen. */
+			NetPlay_SetLobbyOpen(g_frontendMissionSessionMode == FRONTEND_MISSION_SESSION_NET_HOST);
+#endif
 			g_pilotData.team = g_pilotData.factionStatistics[2].team;
 			g_pilotData.currentFactionId = 2;
 			g_missionSetupUseCombatSimPilotState = 1;

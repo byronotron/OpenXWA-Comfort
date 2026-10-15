@@ -44,13 +44,20 @@ endif()
 # Aeron engine (window, GPU HAL, input, audio, VFS) — shared git submodule.
 option(XWA_BUILD_TOOLS "Build OpenXWA and Aeron asset/developer tools" ON)
 set(AERON_BUILD_TOOLS ${XWA_BUILD_TOOLS})
-set(AERON_ENABLE_VIDEO ON)
+# Films need FFmpeg; OFF builds a stand-in that skips them (headless tests).
+option(XWA_ENABLE_VIDEO "Play the game's films (needs FFmpeg)" ON)
+set(AERON_ENABLE_VIDEO ${XWA_ENABLE_VIDEO})
 set(AERON_HOST_TOOLS_ONLY OFF)
 set(AERON_ENABLE_COMPAT ON)
 # In-game debug UI (ImGui overlay, backquote to toggle).
 option(XWA_ENABLE_DEBUG_UI "Build the Aeron ImGui debug overlay" ON)
 set(AERON_DEBUG_UI ${XWA_ENABLE_DEBUG_UI})
 add_subdirectory(aeron)
+
+if(NOT XWA_ENABLE_VIDEO)
+    add_library(aeron_video STATIC src/xwa_runtime/runtime/video_none.c)
+    target_link_libraries(aeron_video PUBLIC aeron)
+endif()
 
 add_library(xwa_2d_formats STATIC
     src/xwa_formats/xwa_2d/xwa_2d.c
@@ -214,6 +221,9 @@ set(XWA_RUNTIME_SOURCES
     src/xwa_runtime/input/rumble_provider.c
     src/xwa_runtime/input/winmm_joystick_provider.c
     src/xwa_runtime/input/mouse_flight.c
+    src/xwa_runtime/net/netplay.c
+    src/xwa_runtime/net/netplay_game.c
+    src/xwa_runtime/net/netplay_screens.c
     src/xwa_runtime/runtime/flight_pause_task.c
     src/xwa_runtime/runtime/flight_task.c
     src/xwa_runtime/runtime/frontend_task.c
@@ -241,8 +251,11 @@ add_library(xwa_core ${XWA_RECOVERED_SOURCES} ${XWA_RUNTIME_SOURCES})
 # translation units out of type-based alias analysis. Port, remaster, app and
 # Aeron code is not covered and must stay strict-aliasing clean.
 if(NOT MSVC)
+    # -ffp-contract=off: no fused multiply-add. Clang fuses by default on
+    # ARM64 (the Quest) but x86-64 cannot without FMA flags, and network games
+    # need every machine to compute the same flight, so keep plain IEEE math.
     set_source_files_properties(${XWA_RECOVERED_SOURCES}
-        PROPERTIES COMPILE_OPTIONS "-fno-strict-aliasing")
+        PROPERTIES COMPILE_OPTIONS "-fno-strict-aliasing;-ffp-contract=off")
 endif()
 
 # Remaster driver — snapshot -> aeron_scene translation.
@@ -622,6 +635,9 @@ set(XWA_FORMAT_HEADERS
     src/xwa_runtime/input/winmm_joystick_provider.h
     src/xwa_runtime/input/controller_mapping.h
     src/xwa_runtime/input/mouse_flight.h
+    src/xwa_runtime/net/netplay.h
+    src/xwa_runtime/net/netplay_game.h
+    src/xwa_runtime/net/netplay_screens.h
     src/xwa_runtime/timing/modern_flight_timing.h
     src/xwa_runtime/runtime/movie_task.h
     src/xwa_runtime/hooks/orientation_hook.h

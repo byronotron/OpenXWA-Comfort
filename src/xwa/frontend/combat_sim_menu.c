@@ -19,6 +19,9 @@
 #include "xwa/frontend/frontend_sound.h"
 #include "xwa/frontend/frontend_text.h"
 #include "xwa/frontend/mission_setup.h"
+#ifdef XWA_MODERN
+#include "xwa_runtime/net/netplay_screens.h"
+#endif
 
 #include <string.h>
 
@@ -34,10 +37,8 @@ int g_combatSimMenuTranslucentFillColor;
 // GLOBAL: XWA 0x782FFC
 int g_combatSimMenuPendingTransition;
 
+#ifndef XWA_MODERN
 int MultiplayerSetup_Update(int frameCounter);
-#ifdef XWA_MODERN
-int MultiplayerSetup_Exit(int frameCounter);
-#else
 void MultiplayerSetup_Exit(int frameCounter);
 #endif
 
@@ -320,10 +321,14 @@ int CombatSimMenu_Exit(int frameCounter) {
 
 // FUNCTION: XWA 0x53C120
 int MultiplayerSetup_Update(int frameCounter) {
+#ifdef XWA_MODERN
+	/* Port: the original chose a DirectPlay service provider here; NetPlay
+	 * has one transport, so the screen offers host and join. */
+	return XwaNetScreens_MultiplayerSetup(frameCounter);
+#else
 	(void)frameCounter;
-
-	/* TODO: Dependency stub for CombatSimMenu_Update. Reimplement MultiplayerSetup_Update @ 0x53C120. */
 	return 0;
+#endif
 }
 
 #ifdef XWA_MODERN
