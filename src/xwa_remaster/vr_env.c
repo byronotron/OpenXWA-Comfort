@@ -1903,7 +1903,18 @@ typedef struct BtShip {
 	float goal[3];
 	float drift, spin; /* capital ships: metres moved; stations: yaw rate */
 	float burn;        /* a burning capital ship: time to its next hull fire */
+	float wish[3];     /* the course it is settling on (smoothed) */
 } BtShip;
+
+/* An asteroid tumbling slowly where the fighters pass. */
+typedef struct BtRock {
+	int type; /* index into s_bt.rock_opt */
+	float p[3], f[3], u[3], v[3], axis[3];
+	float spin, scale, radius;
+} BtRock;
+
+#define BT_MAX_ROCKS 8
+#define BT_ROCK_TYPES 3
 
 typedef struct BtBolt {
 	float p[3], d[3];
@@ -1945,6 +1956,10 @@ static struct {
 	float time;
 	int started;
 	int burning; /* the burning hostile capital ship, -1 none */
+	char rock_opt[BT_ROCK_TYPES][64];
+	int rock_types;
+	BtRock rocks[BT_MAX_ROCKS];
+	int rock_count;
 	/* statistics (self-test, log) */
 	int kills, shots, hits;
 } s_bt;
@@ -2472,6 +2487,68 @@ static void bt_place_backdrops(void) {
 	}
 }
 
+/* The game's asteroid models: AsteroidHR1-6 name rows of the craft lists
+ * (FlightModels/Spacecraft0.LST or Equipment0.LST). */
+static void bt_asteroid_names(void) {
+	AeronVfs* vfs = Aeron_GetVfs();
+	static const char* const lists[2] = { "FlightModels/Spacecraft0.LST", "FlightModels/Equipment0.LST" };
+	char* rows[2][64];
+	int row_count[2] = { 0, 0 };
+	uint8_t* data[2] = { NULL, NULL };
+	for (int l = 0; l < 2; ++l) {
+		size_t size = 0;
+		if (!vfs || !AeronVfs_ReadAll(vfs, AERON_VFS_ROOT_ASSET, lists[l], 1u << 20, &data[l], &size)) {
+			data[l] = NULL;
+			continue;
+		}
+		uint8_t* text = (uint8_t*)realloc(data[l], size + 1);
+		if (!text) {
+			continue;
+		}
+		data[l] = text;
+		text[size] = 0;
+		for (char* line = strtok((char*)text, "\r\n"); line && row_count[l] < 64; line = strtok(NULL, "\r\n")) {
+			if (line[0]) {
+				rows[l][row_count[l]++] = line;
+			}
+		}
+	}
+	/* Three of the six, at random. */
+	int order[6] = { 0, 1, 2, 3, 4, 5 };
+	for (int i = 5; i > 0; --i) {
+		const int j = (int)(bt_rand() % (uint32_t)(i + 1));
+		const int t = order[i];
+		order[i] = order[j];
+		order[j] = t;
+	}
+	for (int k = 0; k < 6 && s_bt.rock_types < BT_ROCK_TYPES; ++k) {
+		const ModelTypeInfo* info = &g_modelTypeTable[OBJ_AsteroidHR1 + order[k]];
+		const int list = info->textureGroup;
+		if (list < 0 || list > 1 || info->frameCount >= row_count[list]) {
+			continue;
+		}
+		const char* path = rows[list][info->frameCount];
+		const char* base = path;
+		for (const char* c = path; *c; ++c) {
+			if (*c == '\\' || *c == '/') {
+				base = c + 1;
+			}
+		}
+		size_t n = 0;
+		char* out = s_bt.rock_opt[s_bt.rock_types];
+		while (base[n] && base[n] != '.' && n + 1 < 64) {
+			out[n] = base[n];
+			n++;
+		}
+		out[n] = 0;
+		if (n) {
+			s_bt.rock_types++;
+		}
+	}
+	free(data[0]);
+	free(data[1]);
+}
+
 static void bt_cast(void) {
 	if (s_bt.cast) {
 		return;
@@ -2502,11 +2579,15 @@ static void bt_cast(void) {
 	}
 	bt_trim();
 	bt_place_backdrops();
+	bt_asteroid_names();
 	for (int i = 0; i < s_bt.type_count; ++i) {
 		env_list_add(s_bt.types[i].opt);
 	}
-	Aeron_LogInfo("xwa.remaster", "VR battle: %s, %d craft types, %d backdrops", have ? s_bt.mission : "generic",
-				  s_bt.type_count, s_bt.backdrop_count);
+	for (int i = 0; i < s_bt.rock_types; ++i) {
+		env_list_add(s_bt.rock_opt[i]);
+	}
+	Aeron_LogInfo("xwa.remaster", "VR battle: %s, %d craft types, %d backdrops, %d asteroid models",
+				  have ? s_bt.mission : "generic", s_bt.type_count, s_bt.backdrop_count, s_bt.rock_types);
 	for (int i = 0; i < s_bt.type_count; ++i) {
 		const BtType* t = &s_bt.types[i];
 		Aeron_LogInfo("xwa.remaster", "VR battle:   %s %s %s x%d%s", t->side == BT_FRIEND ? "friend" : "foe",
@@ -2679,13 +2760,13 @@ static void bt_pick_goal(float out[3], int side) {
 		const float own = side == BT_FRIEND ? -1.0f : 1.0f;
 		const float yaw = (bt_rnd(0.0f, 1.0f) < 0.6f ? own : -own) * bt_rnd(15.0f, 75.0f);
 		const float pitch = bt_rnd(-35.0f, 45.0f);
-		const float dist = close ? bt_rnd(65.0f, 120.0f) : bt_rnd(130.0f, 380.0f);
+		const float dist = close ? bt_rnd(150.0f, 300.0f) : bt_rnd(390.0f, 1140.0f);
 		bt_at(yaw, pitch, dist, out);
 		if (!bt_behind_screen(out)) {
 			return;
 		}
 	}
-	bt_at(side == BT_FRIEND ? -45.0f : 45.0f, 10.0f, 300.0f, out);
+	bt_at(side == BT_FRIEND ? -45.0f : 45.0f, 10.0f, 900.0f, out);
 }
 
 static const EnvMesh* bt_mesh(const BtShip* sh) {
@@ -2704,9 +2785,9 @@ static void bt_spawn_fighter(BtShip* sh, float delay) {
 	float to[3];
 	for (int tries = 0; tries < 16; ++tries) {
 		const float yaw = (sh->side == BT_FRIEND ? -1.0f : 1.0f) * bt_rnd(30.0f, 75.0f);
-		bt_at(yaw, bt_rnd(-15.0f, 35.0f), bt_rnd(340.0f, 520.0f), sh->p);
+		bt_at(yaw, bt_rnd(-15.0f, 35.0f), bt_rnd(1000.0f, 1560.0f), sh->p);
 		bt_pick_goal(to, sh->side);
-		if (bt_len(to) < 130.0f) {
+		if (bt_len(to) < 390.0f) {
 			continue; /* arrive further out */
 		}
 		for (int a = 0; a < 3; ++a) {
@@ -2738,6 +2819,7 @@ static void bt_spawn_fighter(BtShip* sh, float delay) {
 	env_cross(r, sh->f, sh->u);
 	bt_norm(sh->u);
 	memcpy(sh->goal, to, sizeof to);
+	memcpy(sh->wish, sh->f, sizeof sh->wish);
 	sh->alive = 0;
 	sh->respawn = delay;
 	sh->hp = sh->hp_max;
@@ -2766,8 +2848,10 @@ static void bt_start(void) {
 			if (t->cls == BT_CLASS_FIGHTER) {
 				/* Smaller is quicker; Interceptor-like light craft quickest. */
 				sh->cruise = fminf(fmaxf(78.0f - len * 1.6f, 38.0f), 72.0f);
-				sh->turn = fminf(fmaxf(1.5f - len * 0.025f, 0.6f), 1.35f);
-				sh->hp_max = sh->hero ? 1e9f : 6.0f + floorf(len / 5.0f);
+				/* Wide, steady turns (radians a second): small craft about
+				 * 45 degrees a second, big ones half that. */
+				sh->turn = fminf(fmaxf(0.95f - len * 0.015f, 0.4f), 0.8f);
+				sh->hp_max = sh->hero ? 1e9f : 4.0f + floorf(len / 6.0f);
 				bt_spawn_fighter(sh, 0.4f + bt_rnd(0.0f, 5.0f) + (float)c * 0.6f);
 			} else {
 				/* Capital ships hold the flanks a few kilometres out, broadside
@@ -2778,12 +2862,12 @@ static void bt_start(void) {
 				if (t->cls == BT_CLASS_STATION) {
 					yaw = sgn * 62.0f;
 					pitch = 14.0f;
-					dist = fmaxf(3200.0f, len * 4.0f);
+					dist = fmaxf(5000.0f, len * 4.0f);
 					sh->spin = bt_rnd(-1.0f, 1.0f) > 0.0f ? 0.6f : -0.6f;
 				} else {
 					yaw = sgn * (40.0f + 18.0f * (float)k);
 					pitch = 6.0f + 10.0f * (float)k;
-					dist = fmaxf(1400.0f + 900.0f * (float)k, len * 2.6f);
+					dist = fmaxf(2600.0f + 1400.0f * (float)k, len * 2.6f);
 				}
 				bt_at(yaw, pitch, dist, sh->p);
 				/* Nose across the line of sight, toward the other fleet. */
@@ -2808,6 +2892,47 @@ static void bt_start(void) {
 				}
 			}
 		}
+	}
+	/* A few asteroids among the fighters, round the screen. */
+	s_bt.rock_count = 0;
+	for (int i = 0; i < BT_MAX_ROCKS - 1 && s_bt.rock_types > 0; ++i) {
+		BtRock* r = &s_bt.rocks[s_bt.rock_count];
+		memset(r, 0, sizeof *r);
+		r->type = i % s_bt.rock_types;
+		const int m = env_find(s_bt.rock_opt[r->type]);
+		const float len = m >= 0 ? fmaxf(s_env.meshes[m].len_m, fmaxf(s_env.meshes[m].wid_m, s_env.meshes[m].hgt_m))
+								 : 0.0f;
+		if (!(len > 0.5f)) {
+			continue;
+		}
+		const float size = i < 2 ? bt_rnd(90.0f, 160.0f) : bt_rnd(25.0f, 80.0f); /* across, metres */
+		r->scale = size / len;
+		r->radius = 0.5f * size;
+		for (int tries = 0; tries < 20; ++tries) {
+			const float yaw = (bt_rand() & 1 ? 1.0f : -1.0f) * bt_rnd(26.0f, 110.0f);
+			bt_at(yaw, bt_rnd(-40.0f, 40.0f), bt_rnd(300.0f, 1500.0f), r->p);
+			int clash = bt_behind_screen(r->p);
+			for (int j = 0; j < s_bt.rock_count && !clash; ++j) {
+				float d[3] = { r->p[0] - s_bt.rocks[j].p[0], r->p[1] - s_bt.rocks[j].p[1], r->p[2] - s_bt.rocks[j].p[2] };
+				clash = bt_len(d) < 3.0f * (r->radius + s_bt.rocks[j].radius);
+			}
+			if (!clash) {
+				break;
+			}
+		}
+		/* Any attitude; a slow tumble about a random axis and a slow drift. */
+		bt_at(bt_rnd(-180.0f, 180.0f), bt_rnd(-80.0f, 80.0f), 1.0f, r->f);
+		bt_at(bt_rnd(-180.0f, 180.0f), bt_rnd(-80.0f, 80.0f), 1.0f, r->axis);
+		float side[3];
+		env_cross(r->f, r->axis, side);
+		if (!bt_norm(side)) {
+			side[0] = 1.0f;
+		}
+		env_cross(side, r->f, r->u);
+		bt_norm(r->u);
+		bt_at(bt_rnd(-180.0f, 180.0f), bt_rnd(-30.0f, 30.0f), bt_rnd(0.1f, 0.4f), r->v);
+		r->spin = bt_rnd(2.0f, 7.0f) * BT_PI / 180.0f * (r->radius < 40.0f ? 1.6f : 1.0f);
+		s_bt.rock_count++;
 	}
 	s_bt.started = 1;
 }
@@ -2856,8 +2981,8 @@ static void bt_fire(const float from[3], const float dir[3], int side, int big, 
 	b->side = side;
 	b->big = big;
 	b->alive = 1;
-	b->speed = big ? 700.0f : 330.0f;
-	b->range = big ? 5200.0f : 650.0f;
+	b->speed = big ? 1100.0f : 330.0f;
+	b->range = big ? 9000.0f : 650.0f;
 	b->len = big ? 70.0f : 7.0f;
 	b->width = big ? 3.0f : 0.45f;
 	if (green) {
@@ -2894,15 +3019,29 @@ static int bt_pick_target(int self) {
 }
 
 /* Turn toward `want` at the craft's turn rate, banking into the turn. */
+/* Turn toward `want_in`: the wish is smoothed (about half a second) so it
+ * never jumps, small corrections are gentle (the turn rate scales with the
+ * angle up to the craft's limit), and the craft banks by how hard it is
+ * actually turning, rolling back level on the straight. */
 static void bt_steer(BtShip* sh, const float want_in[3], float dt) {
 	float want[3] = { want_in[0], want_in[1], want_in[2] };
 	if (!bt_norm(want)) {
 		return;
 	}
-	const float c = fminf(1.0f, fmaxf(-1.0f, bt_dot(sh->f, want)));
+	if (!(bt_len(sh->wish) > 0.5f)) {
+		memcpy(sh->wish, sh->f, sizeof sh->wish);
+	}
+	const float blend = 1.0f - expf(-dt / 0.55f);
+	for (int a = 0; a < 3; ++a) {
+		sh->wish[a] += (want[a] - sh->wish[a]) * blend;
+	}
+	if (!bt_norm(sh->wish)) {
+		memcpy(sh->wish, sh->f, sizeof sh->wish);
+	}
+	const float c = fminf(1.0f, fmaxf(-1.0f, bt_dot(sh->f, sh->wish)));
 	const float angle = acosf(c);
 	float axis[3];
-	env_cross(sh->f, want, axis);
+	env_cross(sh->f, sh->wish, axis);
 	if (!bt_norm(axis)) {
 		/* Straight ahead: nothing to do; straight behind: pull up. */
 		env_cross(sh->u, sh->f, axis);
@@ -2910,41 +3049,42 @@ static void bt_steer(BtShip* sh, const float want_in[3], float dt) {
 			axis[0] = axis[1] = axis[2] = 0.0f;
 		}
 	}
-	const float step = fminf(angle, sh->turn * dt);
-	if (step > 1e-5f && bt_len(axis) > 0.5f) {
-		bt_rotate(sh->f, axis, step);
-		bt_rotate(sh->u, axis, step);
+	const float rate = fminf(sh->turn, angle * 1.1f);
+	if (rate * dt > 1e-6f && bt_len(axis) > 0.5f) {
+		bt_rotate(sh->f, axis, rate * dt);
+		bt_rotate(sh->u, axis, rate * dt);
 	}
-	/* Bank: up leans toward the turn (lift pulls round the corner), back to
-	 * the sky when flying straight. */
-	float lateral[3];
-	const float along = bt_dot(want, sh->f);
-	for (int a = 0; a < 3; ++a) {
-		lateral[a] = want[a] - sh->f[a] * along;
-	}
-	const float hard = fminf(1.0f, angle / 0.6f);
-	float up_want[3];
+	/* Bank: from level (the sky's up), toward the side it turns to, by how
+	 * hard it turns (65 degrees at the limit). */
 	static const float z[3] = { 0.0f, 0.0f, 1.0f };
-	bt_norm(lateral);
+	float level[3], right[3], lateral[3];
+	const float fz = bt_dot(sh->f, z);
 	for (int a = 0; a < 3; ++a) {
-		up_want[a] = lateral[a] * 1.6f * hard + z[a] * (1.0f - hard) * 0.8f + sh->u[a] * 0.2f;
+		level[a] = z[a] - sh->f[a] * fz;
 	}
-	const float uf = bt_dot(up_want, sh->f);
+	if (!bt_norm(level)) {
+		memcpy(level, sh->u, sizeof level); /* straight up or down: keep it */
+	}
+	env_cross(sh->f, level, right);
+	const float along = bt_dot(sh->wish, sh->f);
 	for (int a = 0; a < 3; ++a) {
-		up_want[a] -= sh->f[a] * uf;
+		lateral[a] = sh->wish[a] - sh->f[a] * along;
 	}
-	if (bt_norm(up_want)) {
-		const float roll_c = fminf(1.0f, fmaxf(-1.0f, bt_dot(sh->u, up_want)));
-		float roll_axis[3];
-		env_cross(sh->u, up_want, roll_axis);
-		const float sgn = bt_dot(roll_axis, sh->f) >= 0.0f ? 1.0f : -1.0f;
-		const float roll = fminf(acosf(roll_c), 2.2f * dt);
-		bt_rotate(sh->u, sh->f, sgn * roll);
-	}
+	const float side = bt_dot(lateral, right);
+	const float bank = (side >= 0.0f ? 1.0f : -1.0f) * 1.13f * (rate / sh->turn) *
+					   fminf(1.0f, fabsf(side) / fmaxf(bt_len(lateral), 1e-4f) * 1.5f);
+	float up_want[3] = { level[0], level[1], level[2] };
+	bt_rotate(up_want, sh->f, bank);
+	const float roll_c = fminf(1.0f, fmaxf(-1.0f, bt_dot(sh->u, up_want)));
+	float roll_axis[3];
+	env_cross(sh->u, up_want, roll_axis);
+	const float sgn = bt_dot(roll_axis, sh->f) >= 0.0f ? 1.0f : -1.0f;
+	const float roll = fminf(acosf(roll_c), fminf(1.0f, acosf(roll_c) * 1.5f + 0.05f) * dt);
+	bt_rotate(sh->u, sh->f, sgn * roll);
 	/* Re-orthonormalise. */
-	const float uf2 = bt_dot(sh->u, sh->f);
+	const float uf = bt_dot(sh->u, sh->f);
 	for (int a = 0; a < 3; ++a) {
-		sh->u[a] -= sh->f[a] * uf2;
+		sh->u[a] -= sh->f[a] * uf;
 	}
 	bt_norm(sh->u);
 	bt_norm(sh->f);
@@ -2987,7 +3127,7 @@ static void bt_step_fighter(int index, float dt) {
 		if (!target || sh->timer <= 0.0f) {
 			sh->target = bt_pick_target(index);
 			target = sh->target >= 0 ? &s_bt.ships[sh->target] : NULL;
-			sh->timer = bt_rnd(5.0f, 10.0f);
+			sh->timer = bt_rnd(9.0f, 16.0f);
 		}
 		if (!target) {
 			sh->mode = BT_RETURN;
@@ -3006,7 +3146,7 @@ static void bt_step_fighter(int index, float dt) {
 			float aim[3] = { lead[0], lead[1], lead[2] };
 			bt_norm(aim);
 			const float lined_up = bt_dot(aim, sh->f);
-			if (lined_up > 0.992f && dist < 300.0f && sh->cooldown <= 0.0f) {
+			if (lined_up > 0.982f && dist < 420.0f && sh->cooldown <= 0.0f) {
 				const EnvMesh* m = bt_mesh(sh);
 				const BtType* t = &s_bt.types[sh->type];
 				const float w = m && m->wid_m > 0.5f ? m->wid_m : 8.0f;
@@ -3019,33 +3159,34 @@ static void bt_step_fighter(int index, float dt) {
 					for (int a = 0; a < 3; ++a) {
 						from[a] = sh->p[a] + sh->f[a] * 0.45f * l + r[a] * (float)g * spread * w -
 								  sh->u[a] * (t->green ? 0.12f * w : 0.0f);
-						dir[a] = sh->f[a] + bt_rnd(-0.045f, 0.045f);
+						dir[a] = aim[a] + bt_rnd(-0.012f, 0.012f);
 					}
 					bt_fire(from, dir, sh->side, 0, t->green);
 				}
 				sh->cooldown = bt_rnd(0.5f, 1.0f);
 			}
-			/* Overshoot or too close: break away. */
-			if (dist < 45.0f || (dist < 120.0f && lined_up < 0.0f)) {
+			/* Overshoot or too close: break away in a long sweep, then come
+			 * round again. */
+			if (dist < 70.0f || (dist < 180.0f && lined_up < 0.0f)) {
 				sh->mode = BT_EVADE;
-				bt_pick_goal(sh->goal, sh->side);
-				sh->timer = bt_rnd(2.5f, 5.0f);
+				for (int tries = 0; tries < 6; ++tries) {
+					bt_pick_goal(sh->goal, sh->side);
+					float away[3] = { sh->goal[0] - sh->p[0], sh->goal[1] - sh->p[1], sh->goal[2] - sh->p[2] };
+					if (bt_len(away) > 400.0f && bt_dot(away, sh->f) > 0.0f) {
+						break;
+					}
+				}
+				sh->timer = bt_rnd(5.0f, 9.0f);
 			}
 		}
 	} else {
-		/* Evade / return: fly to the goal with a little weave. */
+		/* Evade / return: fly to the goal. */
 		for (int a = 0; a < 3; ++a) {
 			want[a] = sh->goal[a] - sh->p[a];
 		}
 		const float d = bt_len(want);
-		float r[3];
-		env_cross(sh->f, sh->u, r);
-		const float weave = sh->mode == BT_EVADE ? 0.35f * sinf(s_bt.time * 2.3f + (float)index) : 0.0f;
 		bt_norm(want);
-		for (int a = 0; a < 3; ++a) {
-			want[a] += r[a] * weave;
-		}
-		if (d < 40.0f || sh->timer <= 0.0f) {
+		if (d < 80.0f || sh->timer <= 0.0f) {
 			sh->mode = BT_HUNT;
 			sh->timer = 0.0f;
 		}
@@ -3076,16 +3217,36 @@ static void bt_step_fighter(int index, float dt) {
 	if (bt_behind_screen(sh->p) && sh->arrive <= 0.0f) {
 		/* Sideways out of the cone, the nearer way. */
 		const float sgn = sh->p[0] >= 0.0f ? 1.0f : -1.0f;
-		want[0] += sgn * 1.3f;
+		want[0] += sgn * 1.4f;
 	}
-	if (view_d > 560.0f) {
+	/* Round the asteroids. */
+	for (int i = 0; i < s_bt.rock_count; ++i) {
+		const BtRock* r = &s_bt.rocks[i];
+		float rel[3] = { r->p[0] - sh->p[0], r->p[1] - sh->p[1], r->p[2] - sh->p[2] };
+		const float t = fminf(fmaxf(bt_dot(rel, sh->f), 0.0f), sh->speed * 5.0f);
+		float c[3];
+		for (int a = 0; a < 3; ++a) {
+			c[a] = sh->p[a] + sh->f[a] * t - r->p[a];
+		}
+		const float clear = r->radius + 70.0f;
+		const float miss = bt_len(c);
+		if (miss < clear && t > 0.0f) {
+			if (!bt_norm(c)) {
+				memcpy(c, sh->u, sizeof c);
+			}
+			for (int a = 0; a < 3; ++a) {
+				want[a] += c[a] * 2.5f * (clear - miss) / clear;
+			}
+		}
+	}
+	if (view_d > 1680.0f) {
 		float home[3];
-		bt_at(sh->side == BT_FRIEND ? -35.0f : 35.0f, 10.0f, 220.0f, home);
+		bt_at(sh->side == BT_FRIEND ? -35.0f : 35.0f, 10.0f, 660.0f, home);
 		for (int a = 0; a < 3; ++a) {
 			home[a] -= sh->p[a];
 		}
 		bt_norm(home);
-		const float k = fminf((view_d - 560.0f) / 120.0f, 2.0f);
+		const float k = fminf((view_d - 1680.0f) / 360.0f, 2.0f);
 		for (int a = 0; a < 3; ++a) {
 			want[a] += home[a] * k;
 		}
@@ -3144,7 +3305,7 @@ static void bt_step_big(int index, float dt) {
 			}
 			bt_fire(from, dir, sh->side, 1, s_bt.types[sh->type].green);
 		}
-		sh->cooldown = bt_rnd(0.8f, 2.2f);
+		sh->cooldown = bt_rnd(0.4f, 1.1f);
 	}
 	/* The burning one: fires breaking out along its hull. */
 	if (index == s_bt.burning) {
@@ -3178,6 +3339,24 @@ static void bt_step_bolts(float dt) {
 			b->alive = 0;
 			continue;
 		}
+		/* Asteroids stop bolts. */
+		for (int r = 0; r < s_bt.rock_count && b->alive; ++r) {
+			const BtRock* rock = &s_bt.rocks[r];
+			float rel[3] = { rock->p[0] - from[0], rock->p[1] - from[1], rock->p[2] - from[2] };
+			const float t = fminf(fmaxf(bt_dot(rel, b->d), 0.0f), step);
+			float c[3];
+			for (int a = 0; a < 3; ++a) {
+				c[a] = from[a] + b->d[a] * t - rock->p[a];
+			}
+			if (bt_dot(c, c) < 0.6f * rock->radius * rock->radius) {
+				float at[3];
+				for (int a = 0; a < 3; ++a) {
+					at[a] = from[a] + b->d[a] * t;
+				}
+				bt_boom(at, b->big ? 18.0f : 5.0f, 0.4f, 1);
+				b->alive = 0;
+			}
+		}
 		/* Hits: the closest approach of this step to each enemy. */
 		for (int s = 0; s < s_bt.ship_count && b->alive; ++s) {
 			BtShip* sh = &s_bt.ships[s];
@@ -3187,7 +3366,7 @@ static void bt_step_bolts(float dt) {
 			if (!b->big && sh->cls != BT_CLASS_FIGHTER) {
 				continue; /* fighters do not shoot at capital ships */
 			}
-			const float rad = sh->cls == BT_CLASS_FIGHTER ? bt_radius(sh) * 0.6f : bt_radius(sh) * 0.45f;
+			const float rad = sh->cls == BT_CLASS_FIGHTER ? bt_radius(sh) * 0.75f : bt_radius(sh) * 0.45f;
 			float rel[3] = { sh->p[0] - from[0], sh->p[1] - from[1], sh->p[2] - from[2] };
 			const float t = fminf(fmaxf(bt_dot(rel, b->d), 0.0f), step);
 			float c[3];
@@ -3240,6 +3419,25 @@ static void bt_step(float dt) {
 			bt_step_fighter(i, dt);
 		} else {
 			bt_step_big(i, dt);
+		}
+	}
+	for (int i = 0; i < s_bt.rock_count; ++i) {
+		BtRock* r = &s_bt.rocks[i];
+		bt_rotate(r->f, r->axis, r->spin * dt);
+		bt_rotate(r->u, r->axis, r->spin * dt);
+		/* Drifting toward the viewer or behind the screen: turn the drift
+		 * round. */
+		float next[3];
+		for (int a = 0; a < 3; ++a) {
+			next[a] = r->p[a] + r->v[a] * dt;
+		}
+		if ((bt_len(next) < 220.0f + r->radius && bt_dot(r->v, r->p) < 0.0f) || bt_len(next) > 1700.0f ||
+			(bt_behind_screen(next) && !bt_behind_screen(r->p))) {
+			for (int a = 0; a < 3; ++a) {
+				r->v[a] = -r->v[a];
+			}
+		} else {
+			memcpy(r->p, next, sizeof next);
 		}
 	}
 	bt_step_bolts(dt);
@@ -3335,16 +3533,8 @@ static void bt_submit(AeronScene3D* scene) {
 		s_env.far[n] = 1; /* no shadows from the battle */
 		env_pose_matrix(sh->f, sh->u, pos, s_env.transform[n]);
 		const EnvMesh* em = &s_env.meshes[m];
-		const BtType* t = &s_bt.types[sh->type];
 		if (sh->cls == BT_CLASS_FIGHTER) {
-			/* Engine glow at the tail; the hyperspace streak behind. */
-			float tail[3];
-			for (int a = 0; a < 3; ++a) {
-				tail[a] = (sh->p[a] - sh->f[a] * 0.5f * em->len_m) * k;
-			}
-			const float glow_size = fmaxf(1.5f, 0.35f * fminf(em->wid_m, em->hgt_m)) * k;
-			const float warm[4] = { 1.6f, 0.65f, 0.3f, 1.0f }, cool[4] = { 0.55f, 0.75f, 1.6f, 1.0f };
-			bt_glow(scene, tail, glow_size, t->green ? cool : warm);
+			/* The hyperspace streak behind a craft jumping in. */
 			if (sh->arrive > 0.0f) {
 				float from[3];
 				for (int a = 0; a < 3; ++a) {
@@ -3353,6 +3543,27 @@ static void bt_submit(AeronScene3D* scene) {
 				const float streak[4] = { 1.6f * sh->arrive, 1.8f * sh->arrive, 2.2f * sh->arrive, 1.0f };
 				env_beam(scene, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, from, pos, fmaxf(em->wid_m, 3.0f) * 0.6f * k,
 						 streak);
+			}
+		}
+	}
+	/* The asteroids, scaled to their sizes. */
+	for (int i = 0; i < s_bt.rock_count && s_env.count < ENV_MAX_INSTANCES; ++i) {
+		const BtRock* r = &s_bt.rocks[i];
+		const int m = env_find(s_bt.rock_opt[r->type]);
+		if (m < 0) {
+			continue;
+		}
+		float pos[3];
+		for (int a = 0; a < 3; ++a) {
+			pos[a] = r->p[a] * k;
+		}
+		const int n = s_env.count++;
+		s_env.mesh_of[n] = m;
+		s_env.far[n] = 1;
+		env_pose_matrix(r->f, r->u, pos, s_env.transform[n]);
+		for (int row = 0; row < 3; ++row) {
+			for (int col = 0; col < 3; ++col) {
+				s_env.transform[n][row * 4 + col] *= r->scale;
 			}
 		}
 	}
