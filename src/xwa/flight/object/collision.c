@@ -37,6 +37,9 @@
 
 #include <math.h>
 #include <string.h>
+#ifdef XWA_MODERN
+#include <SDL3/SDL_stdinc.h>
+#endif
 
 // GLOBAL: XWA 0x761E38
 float g_collidePlaneEpsilonPos;
@@ -4237,6 +4240,62 @@ static __inline void collide_HandleCraftDestruction(unsigned int targetObjIdx, C
 	}
 }
 
+#ifdef XWA_MODERN
+static int collide_ContainsNoCase(const char* text, size_t size, const char* word) {
+	const size_t n = strlen(word);
+	for (size_t i = 0; i + n <= size && text[i]; ++i) {
+		size_t k = 0;
+		while (k < n && text[i + k] && (text[i + k] | 0x20) == (word[k] | 0x20)) {
+			++k;
+		}
+		if (k == n) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/* Original bug: in "Sticking it to the Viraxos" (1B0M4FW) the family's
+ * transport Venix has to be abandoned and destroyed so the Imperials can't
+ * identify it, but it is still on your team, so the tactical officer (the
+ * droid co-pilot) warns you for firing on it and reports it under attack.
+ * In that mission only, those lines are dropped for the Venix (by flight
+ * group name) and for any of your own team's craft the mission's goals
+ * tell you to destroy, attack or disable. */
+static int collide_IsMission4VenixTarget(uint16_t targetObjIdx) {
+	const char* file = g_currentMissionFile;
+	const char* base = file;
+	for (const char* c = file; *c; ++c) {
+		if (*c == '\\' || *c == '/') {
+			base = c + 1;
+		}
+	}
+	if (SDL_strcasecmp(base, "1B0M4FW.TIE") != 0) {
+		return 0;
+	}
+	const uint8_t fgIdx = g_objectTable[targetObjIdx].flightGroupIdx;
+	const XwaFlightGroup* fg = &g_missionFlightGroups[fgIdx].fg;
+	if (collide_ContainsNoCase(fg->name, sizeof fg->name, "venix")) {
+		return 1;
+	}
+	/* Or any craft the player's team is set to destroy, attack or disable
+	 * (goal argument 1 is "must NOT"; conditions 2 destroyed, 3 attacked,
+	 * 8 disabled). */
+	const int playerTeam = g_players[g_localPlayer].playerIff;
+	if (fg->team != playerTeam) {
+		return 0;
+	}
+	for (int g = 0; g < 8; ++g) {
+		const XwaFlightGroupGoalPayload* goal = &fg->fgGoals[g].payload;
+		if (goal->argument != 1 && (goal->condition == 2 || goal->condition == 3 || goal->condition == 8) &&
+			playerTeam >= 0 && playerTeam < 10 && goal->enabledForTeam[playerTeam]) {
+			return 1;
+		}
+	}
+	return 0;
+}
+#endif
+
 // FUNCTION: XWA 0x40F230
 // Central craft damage routine. Applies damage from damageSourceObjIdx to
 // targetObjIdx; componentId low-16 selects the hit mesh (0xFFFF means generic, no
@@ -4639,7 +4698,11 @@ char collide_damagecraft(unsigned int targetObjIdx, unsigned int componentId, un
 		if ((tt < OBJ_Rubble01 || tt > OBJ_Rubble12) &&
 			(uint16_t)g_objectTable[damageSourceObjIdx].mobj->sourceObjIdx ==
 				g_players[g_localPlayer].objectIndex &&
-			!Object_IsHostileToTeam((uint16_t)targetObjIdx, (uint16_t)g_players[g_localPlayer].playerIff)) {
+			!Object_IsHostileToTeam((uint16_t)targetObjIdx, (uint16_t)g_players[g_localPlayer].playerIff)
+#ifdef XWA_MODERN
+			&& !collide_IsMission4VenixTarget((uint16_t)targetObjIdx)
+#endif
+		) {
 			++g_fsfxLocalPlayerTargetedProjectileFriendlyHitCount;
 			if (g_fsfxLocalPlayerTargetedProjectileFriendlyHitCount == 2)
 				fsfx_SpeakTacticalOfficerEvent(5, 124, targetObjIdx, 0xFFFF);
@@ -5118,7 +5181,11 @@ void collide_laserhitcraft(unsigned int projectileObjIdx, unsigned int targetObj
 			// tactical-officer voice line classified by weapon/attacker type.
 			if (g_gameConfig.voiceTacticalOfficerEnabled == 2 &&
 				g_missionFlightGroups[fgIdx].fg.team == g_players[g_localPlayer].playerIff &&
-				g_objectTable[targetObjIdx].genusId != 0) {
+				g_objectTable[targetObjIdx].genusId != 0
+#ifdef XWA_MODERN
+				&& !collide_IsMission4VenixTarget((uint16_t)targetObjIdx)
+#endif
+			) {
 				if (attackerIdx < g_activeRegionObjectSlotStart ||
 					attackerIdx >= g_activeRegionCraftObjectSlotEnd) {
 					fsfx_SpeakTacticalOfficerEvent(4, 86, targetObjIdx, 0xFFFFu);
