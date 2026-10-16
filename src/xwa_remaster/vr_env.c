@@ -397,7 +397,7 @@ static struct {
 	/* The frame as its own layer over the screen. */
 	AeronDrawList2D* frame_list;
 	int frame_drawn, frame_layer_ok;
-	float frame_tint;
+	float frame_tint, frame_fade;
 } s_env;
 
 static float env_float(const char* name, float fallback) {
@@ -463,11 +463,51 @@ static const EnvSpaceScene* env_space(void) {
 
 int XwaVrEnv_Enabled(void) { return env_mode() != ENV_OFF; }
 
-static int s_env_bare;
+/* Bare (stars only) during the startup films and until the scene has
+ * loaded; then the scene fades in (s_env_fade 0..1, eased). */
+static int s_env_bare = 1;
+static float s_env_fade_t; /* linear 0..1 */
+static float s_env_fade;   /* eased */
+static uint64_t s_env_fade_counter;
 
-void XwaVrEnv_SetBare(int bare) { s_env_bare = bare != 0; }
+/* Every model, sprite and the frame of the scene tried (loaded or not). */
+static int env_tex_needed(int slot);
+static int env_ready(void) {
+	if (s_env.mode == ENV_OFF || !s_env.mesh_count || !s_env.laid_out) {
+		return 0;
+	}
+	for (int i = 0; i < s_env.mesh_count; ++i) {
+		if (!s_env.meshes[i].tried) {
+			return 0;
+		}
+	}
+	for (int i = 0; i < ENV_TEX_COUNT; ++i) {
+		if (env_tex_needed(i) && !s_env.tex_tried[i]) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+void XwaVrEnv_SetBare(int bare) {
+	const uint64_t now = SDL_GetPerformanceCounter();
+	const float dt = s_env_fade_counter
+						 ? (float)((double)(now - s_env_fade_counter) / (double)SDL_GetPerformanceFrequency())
+						 : 0.0f;
+	s_env_fade_counter = now;
+	if (bare || !env_ready()) {
+		s_env_bare = 1;
+		s_env_fade_t = 0.0f;
+	} else {
+		s_env_bare = 0;
+		s_env_fade_t = fminf(1.0f, s_env_fade_t + fminf(dt, 0.1f) / env_float("XWA_XR_ENV_FADE_SECONDS", 1.5f));
+	}
+	s_env_fade = s_env_fade_t * s_env_fade_t * (3.0f - 2.0f * s_env_fade_t);
+}
 
 int XwaVrEnv_Bare(void) { return s_env_bare; }
+
+float XwaVrEnv_Fade(void) { return s_env_bare ? 0.0f : s_env_fade; }
 
 /* The live battle (defined below). */
 static void bt_lighting(XwaVrEnvLighting* out, float sun);
@@ -1229,10 +1269,12 @@ static void env_quad(AeronScene3D* scene, int slot, AeronSceneBillboardStage sta
 		memcpy(d.corners[v], c[v], sizeof d.corners[v]);
 		memcpy(d.uv[v], uv[v], sizeof d.uv[v]);
 		/* PMA: alpha scales the colour too. */
+		/* The scene's fade in: PMA fades its opacity (colour with it),
+		 * additive its light. */
 		for (int k = 0; k < 3; ++k) {
-			d.colors[v][k] = tint[k] * (blend == AERON_SCENE_BILLBOARD_BLEND_PMA ? tint[3] : 1.0f);
+			d.colors[v][k] = tint[k] * (blend == AERON_SCENE_BILLBOARD_BLEND_PMA ? tint[3] : 1.0f) * s_env_fade;
 		}
-		d.colors[v][3] = tint[3];
+		d.colors[v][3] = tint[3] * (blend == AERON_SCENE_BILLBOARD_BLEND_PMA ? s_env_fade : 1.0f);
 	}
 	AeronScene_AddBillboard(scene, &d);
 }
@@ -1432,7 +1474,8 @@ int XwaVrEnv_CommitFrameLayer(AeronCommandBuffer* cmd, float brightness) {
 		return 0;
 	}
 	const float tint = fminf(fmaxf(brightness, 0.0f), 1.0f);
-	if (!s_env.frame_drawn || fabsf(tint - s_env.frame_tint) > 0.004f) {
+	const float fade = s_env_fade;
+	if (!s_env.frame_drawn || fabsf(tint - s_env.frame_tint) > 0.004f || fabsf(fade - s_env.frame_fade) > 0.004f) {
 		int w = 0, h = 0;
 		AeronRenderTarget* target = Aeron_XrStereoPanelTarget(AERON_XR_PANEL_FRAME, &w, &h);
 		if (!target) {
@@ -1454,14 +1497,16 @@ int XwaVrEnv_CommitFrameLayer(AeronCommandBuffer* cmd, float brightness) {
 		sp.src_v1 = 1.0f;
 		sp.dst_w = (float)s_env.tex_w[ENV_TEX_FRAME];
 		sp.dst_h = (float)s_env.tex_h[ENV_TEX_FRAME];
-		sp.tint[0] = sp.tint[1] = sp.tint[2] = tint;
-		sp.tint[3] = 1.0f;
+		/* Premultiplied: fading the opacity fades the colour with it. */
+		sp.tint[0] = sp.tint[1] = sp.tint[2] = tint * fade;
+		sp.tint[3] = fade;
 		sp.blend = AERON_BLIT2D_BLEND_NONE; /* premultiplied texels as they are */
 		sp.filter = AERON_BLIT2D_FILTER_NEAREST;
 		AeronDrawList_AddSprite(s_env.frame_list, &sp);
 		AeronDrawList_Render(s_env.frame_list, cmd);
 		s_env.frame_drawn = 1;
 		s_env.frame_tint = tint;
+		s_env.frame_fade = fade;
 	}
 	EnvScreen sc;
 	env_screen(&sc);

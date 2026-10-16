@@ -5454,6 +5454,21 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 	if (!fl_configure_clustered_lights(s.scene)) {
 		return 0;
 	}
+	/* The scene fading in after loading: its craft come up out of the dark. */
+	{
+		const float fade = XwaVrEnv_Fade();
+		for (int l = 0; l < light_count; l++) {
+			lights[l].intensity *= fade;
+		}
+		for (int c = 0; c < 3; c++) {
+			ambient.pos_x[c] *= fade;
+			ambient.neg_x[c] *= fade;
+			ambient.pos_y[c] *= fade;
+			ambient.neg_y[c] *= fade;
+			ambient.pos_z[c] *= fade;
+			ambient.neg_z[c] *= fade;
+		}
+	}
 	XwaRemasterShip_SetPbrEnv(s.scene, lights, light_count, NULL, s.camera_local, NULL, NULL, &ambient, NULL);
 
 	/* Dimmed so the hangar does not compete with the screen:
