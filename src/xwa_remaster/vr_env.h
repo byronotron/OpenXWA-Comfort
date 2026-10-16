@@ -26,7 +26,10 @@
  *   tiefighter      — the TIE Fighter box art: its Interceptors, TIE fighters,
  *                     bomber and the X-wing breaking up in the explosion,
  *                     at their cover attitudes around the screen, before
- *                     Vader's helmet (vr/vader.rgba, APK assets only);
+ *                     Vader's helmet (vr/vader.rgba, APK assets only).
+ *                     Played: the five seconds of fighting before the
+ *                     cover's moment, which then holds while the helmet
+ *                     fades in (XWA_XR_VADER_FADE_SECONDS, default 2.5);
  *   xvt             — the X-Wing vs. TIE Fighter box art: its X-wings, TIE
  *                     Interceptor and TIE fighters round the explosion and
  *                     its pillar of light, at their cover attitudes, before
