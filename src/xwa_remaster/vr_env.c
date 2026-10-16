@@ -396,8 +396,13 @@ static struct {
 	float anim_t;
 	uint64_t anim_counter;
 	int anim_paths;
-	float anim_path[8][4][3]; /* cubic Bezier per ship, world units */
-	float anim_up0[8][3];
+	struct {
+		float v;     /* speed, world units per second */
+		float w;     /* turn rate into the pose, rad/s */
+		float alpha; /* the last turn's angle (pulling into the pose) */
+		float beta;  /* an earlier turn's angle (0: none) */
+		float b1;    /* that turn's bank from level */
+	} anim_fl[8];
 	struct {
 		float p[3], d[3], life;
 		int green, alive;
@@ -536,14 +541,15 @@ static float env_screen_reveal(void);
 int XwaVrEnv_ScreenHidden(void) { return !s_env_bare && env_screen_reveal() <= 0.0f; }
 
 /* The TIE Fighter box art's animation (defined below). */
-#define ENV_TIE_ANIM_SECONDS 5.0f
-#define ENV_TIE_BOOM_AT 3.6f
+#define ENV_TIE_ANIM_SECONDS 10.0f
+#define ENV_TIE_BOOM_AT (ENV_TIE_ANIM_SECONDS - 1.4f)
 #define ENV_TIE_SALVO_SECONDS 0.5f
-#define ENV_TIE_BOLT_SPEED 240.0f /* m/s */
+#define ENV_TIE_BOLT_SPEED 320.0f /* m/s */
 /* The X-wing (ship 5) is hit at these times, then blows up at BOOM_AT. */
-static const float k_tie_hits[3] = { 2.5f, 2.95f, 3.3f };
+static const float k_tie_hits[3] = { ENV_TIE_ANIM_SECONDS - 2.6f, ENV_TIE_ANIM_SECONDS - 2.15f,
+									 ENV_TIE_ANIM_SECONDS - 1.75f };
 /* The hunter's shots that miss before those. */
-static const float k_tie_misses[2] = { 1.55f, 2.05f };
+static const float k_tie_misses[2] = { ENV_TIE_ANIM_SECONDS - 3.6f, ENV_TIE_ANIM_SECONDS - 3.1f };
 static void env_tie_pose(int ship, float t, float pos[3], float n[3], float u[3]);
 static void env_tie_submit_bolts(AeronScene3D* scene);
 static void env_es_stop(void);
@@ -3840,103 +3846,190 @@ static void bt_submit(AeronScene3D* scene) {
 }
 
 /* ---- the TIE Fighter box art, played ------------------------------------
- * Each craft flies the last five seconds into its pose on the cover along a
- * curve (a cubic Bezier ending on its position along its nose), banking out
- * of the turn into the cover's attitude. Of eight approach directions the
- * one whose path stays clearest of the viewer and least behind the screen
- * is taken. The cover's shooters fire bolts on the way; the X-wing is hit,
- * then the great explosion grows into the cover's; the still holds. */
+ * Ten seconds of the fight before the cover's moment, flown the way the
+ * live battle's craft fly: the nose always along the flight path, rolling
+ * only into a turn. Each craft comes in fast on a straight line, rolls as
+ * it enters its last turn and pulls through it (turning toward its own top
+ * side, the turn's centre above its canopy) straight into its pose on the
+ * cover, which is where that turn has brought it. Of a few turn angles and
+ * rates the one whose path keeps clearest of the viewer and least behind
+ * the screen is taken; the X-wing's and its killer's are picked together so
+ * the TIE's guns bear on the X-wing as it is hit. Then the great explosion
+ * grows into the cover's and the still holds. */
+
+#define ENV_TIE_CANDIDATES 126
+
+static float env_tie_speed(int ship) {
+	const char* opt = env_space()->ships[ship].opt;
+	float v = 70.0f; /* m/s */
+	if (opt && !SDL_strncasecmp(opt, "TieInterceptor", 14)) {
+		v = 80.0f;
+	} else if (opt && !SDL_strncasecmp(opt, "TieBomber", 9)) {
+		v = 55.0f;
+	} else if (!es_is_tie(ship)) {
+		v = 62.0f;
+	}
+	return v * env_float("XWA_XR_TIEART_SPEED", 1.0f) * AERON_OPT_UNITS_PER_METER;
+}
+
+static void env_tie_candidate(int ship, int c) {
+	static const float alphas[6] = { 25.0f, 45.0f, 65.0f, 85.0f, 110.0f, 140.0f };
+	static const float rates[3] = { 0.7f, 1.0f, 1.3f };
+	static const float firsts[7][2] = { { 0.0f, 0.0f },	   { 60.0f, 55.0f },	{ 60.0f, -55.0f }, { 120.0f, 55.0f },
+										{ 120.0f, -55.0f }, { 180.0f, 55.0f }, { 180.0f, -55.0f } };
+	const float deg = BT_PI / 180.0f;
+	s_env.anim_fl[ship].v = env_tie_speed(ship);
+	s_env.anim_fl[ship].alpha = alphas[c % 6] * deg;
+	s_env.anim_fl[ship].w = rates[(c / 6) % 3];
+	s_env.anim_fl[ship].beta = firsts[(c / 18) % 7][0] * deg;
+	s_env.anim_fl[ship].b1 = firsts[(c / 18) % 7][1] * deg;
+}
+
+/* The sky's up across nose n (or `fallback` when n is vertical). */
+static void env_tie_level(const float n[3], const float fallback[3], float out[3]) {
+	static const float z[3] = { 0.0f, 0.0f, 1.0f };
+	const float nz = bt_dot(n, z);
+	for (int a = 0; a < 3; ++a) {
+		out[a] = z[a] - n[a] * nz;
+	}
+	if (!bt_norm(out)) {
+		memcpy(out, fallback, 3 * sizeof(float));
+	}
+}
+
+/* The signed roll about n taking a to b. */
+static float env_tie_roll(const float a[3], const float b[3], const float n[3]) {
+	float x[3];
+	env_cross(a, b, x);
+	return atan2f(bt_dot(x, n), bt_dot(a, b));
+}
+
+/* How well a path does: clear of the viewer, in view (the last seconds
+ * most), not behind the screen. */
+static float env_tie_path_score(int ship) {
+	const float k = AERON_OPT_UNITS_PER_METER;
+	float e[3];
+	env_ship_pos(ship, e);
+	const float end_m = bt_len(e) / k;
+	float closest = 1e9f, roll_max = 0.0f, prev_u[3] = { 0.0f, 0.0f, 0.0f };
+	int hidden = 0, seen = 0;
+	for (int i = 0; i <= 40; ++i) {
+		float p[3], n[3], u[3];
+		env_tie_pose(ship, ENV_TIE_ANIM_SECONDS * (float)i / 40.0f * 0.999f, p, n, u);
+		if (i > 0) {
+			/* Turn plus roll, per second: the attitude's rate. */
+			roll_max = fmaxf(roll_max, acosf(fminf(1.0f, bt_dot(prev_u, u))) / (ENV_TIE_ANIM_SECONDS / 40.0f));
+		}
+		memcpy(prev_u, u, sizeof prev_u);
+		for (int a = 0; a < 3; ++a) {
+			p[a] /= k;
+		}
+		const float d = bt_len(p);
+		if (i < 40) {
+			closest = fminf(closest, d);
+		}
+		const int late = i >= 24 ? 3 : 1;
+		hidden += bt_behind_screen(p) * late;
+		const float yaw = atan2f(p[0], p[1]) * 180.0f / BT_PI;
+		const float pitch = atan2f(p[2], sqrtf(p[0] * p[0] + p[1] * p[1])) * 180.0f / BT_PI;
+		/* In front and near enough to watch. */
+		seen += (i >= 8 && fabsf(yaw) < 75.0f && pitch > -45.0f && pitch < 55.0f) * ((d < 350.0f) + 2 * (d < 160.0f)) *
+				late;
+	}
+	/* Snap rolls look wrong: more than about 2 rad/s costs. */
+	return fminf(closest, fmaxf(0.7f * end_m, 8.0f)) - (closest < 5.0f ? 100.0f : 0.0f) - 1.5f * (float)hidden +
+		   0.12f * (float)seen - 15.0f * fmaxf(roll_max - 2.0f, 0.0f);
+}
 
 static void env_tie_paths(void) {
 	const EnvSpaceScene* sc = env_space();
 	const float k = AERON_OPT_UNITS_PER_METER;
-	for (int i = 0; i < sc->count && i < 8; ++i) {
-		float e[3], n[3], r[3], u[3];
-		env_ship_pos(i, e);
-		env_ship_basis(i, n, r, u);
-		const float dist_m = bt_len(e) / k;
-		/* Slow near the viewer, quicker further out. */
-		const float len = fminf(fmaxf(0.9f * dist_m, 25.0f), 140.0f) * k;
-		float best_score = -1e9f;
-		for (int c = 0; c < 8; ++c) {
-			const float ang = (float)c * BT_PI / 4.0f;
-			float axis[3], d0[3];
-			for (int a = 0; a < 3; ++a) {
-				axis[a] = r[a] * cosf(ang) + u[a] * sinf(ang);
-			}
-			memcpy(d0, n, sizeof d0);
-			bt_rotate(d0, axis, 55.0f * BT_PI / 180.0f);
-			float chord[3];
-			for (int a = 0; a < 3; ++a) {
-				chord[a] = d0[a] + n[a];
-			}
-			bt_norm(chord);
-			float b[4][3];
-			for (int a = 0; a < 3; ++a) {
-				b[0][a] = e[a] - chord[a] * len;
-				b[1][a] = b[0][a] + d0[a] * len / 3.0f;
-				b[2][a] = e[a] - n[a] * len / 3.0f;
-				b[3][a] = e[a];
-			}
-			float closest = 1e9f;
-			int hidden = 0;
-			for (int sample = 0; sample <= 20; ++sample) {
-				const float s = (float)sample / 20.0f, is = 1.0f - s;
-				float p[3];
-				for (int a = 0; a < 3; ++a) {
-					p[a] = (is * is * is * b[0][a] + 3.0f * is * is * s * b[1][a] + 3.0f * is * s * s * b[2][a] +
-							s * s * s * b[3][a]) /
-						   k;
-				}
-				closest = fminf(closest, bt_len(p));
-				hidden += bt_behind_screen(p);
-			}
-			const float score = fminf(closest, 0.6f * dist_m) - 2.0f * (float)hidden - (b[0][1] / k < 3.0f ? 50.0f : 0.0f);
-			if (score > best_score) {
-				best_score = score;
-				memcpy(s_env.anim_path[i], b, sizeof b);
-				/* Banked into the turn at the start, the cover's roll at the end. */
-				memcpy(s_env.anim_up0[i], u, sizeof u);
-				float side[3];
-				env_cross(n, d0, side);
-				bt_rotate(s_env.anim_up0[i], n, (bt_dot(side, u) >= 0.0f ? 1.0f : -1.0f) * 0.6f);
+	const int count = sc->count < 8 ? sc->count : 8;
+	s_env.anim_paths = 1; /* env_tie_pose follows anim_fl from here */
+	static float scores[8][ENV_TIE_CANDIDATES];
+	for (int i = 0; i < count; ++i) {
+		int best = 0;
+		for (int c = 0; c < ENV_TIE_CANDIDATES; ++c) {
+			env_tie_candidate(i, c);
+			scores[i][c] = env_tie_path_score(i);
+			if (scores[i][c] > scores[i][best]) {
+				best = c;
 			}
 		}
-		s_env.anim_next_shot[i] = 0.5f + 0.17f * (float)i;
+		env_tie_candidate(i, best);
+		s_env.anim_next_shot[i] = 3.0f + 0.31f * (float)i;
 	}
-	s_env.anim_paths = 1;
-	/* The X-wing's killer: a TIE fighter (any TIE when there is none), the
-	 * nearest to it while it is being hit, favouring one already headed
-	 * its way. */
+	/* The X-wing's killer: a TIE fighter (any TIE when there is none). It
+	 * and the X-wing take the paths, among their good ones, on which its
+	 * guns bear best on the X-wing while it hits it. */
 	s_env.anim_hunter = -1;
-	if (sc->count > 5) {
-		float best = -1e9f;
-		int fighters = 0;
-		for (int i = 0; i < sc->count && i < 8; ++i) {
-			fighters += i != 5 && sc->ships[i].opt && !SDL_strncasecmp(sc->ships[i].opt, "TieFighter", 10);
+	if (count <= 5) {
+		return;
+	}
+	int fighters = 0;
+	for (int i = 0; i < count; ++i) {
+		fighters += i != 5 && sc->ships[i].opt && !SDL_strncasecmp(sc->ships[i].opt, "TieFighter", 10);
+	}
+	float best = -1e9f;
+	int best_h = -1, best_hc = 0, best_xc = 0;
+	for (int h = 0; h < count; ++h) {
+		if (h == 5 || !es_is_tie(h) || (fighters && SDL_strncasecmp(sc->ships[h].opt, "TieFighter", 10))) {
+			continue;
 		}
-		for (int i = 0; i < sc->count && i < 8; ++i) {
-			if (i == 5 || !es_is_tie(i) ||
-				(fighters && SDL_strncasecmp(sc->ships[i].opt, "TieFighter", 10))) {
-				continue;
-			}
-			float p[3], n[3], u[3], x[3], dir[3];
-			env_tie_pose(i, k_tie_hits[1], p, n, u);
-			env_tie_pose(5, k_tie_hits[1], x, dir, u);
-			for (int a = 0; a < 3; ++a) {
-				dir[a] = x[a] - p[a];
-			}
-			const float dist = bt_len(dir) / k;
-			bt_norm(dir);
-			const float score = 15.0f * bt_dot(n, dir) - dist;
-			if (score > best) {
-				best = score;
-				s_env.anim_hunter = i;
+		for (int hc = 0; hc < ENV_TIE_CANDIDATES; ++hc) {
+			env_tie_candidate(h, hc);
+			for (int xc = 0; xc < ENV_TIE_CANDIDATES; ++xc) {
+				env_tie_candidate(5, xc);
+				float miss = 0.0f, range = 0.0f;
+				for (int q = 0; q < 3; ++q) {
+					float hp[3], hn[3], hu[3], xp[3], xn[3], xu[3], dir[3];
+					env_tie_pose(h, k_tie_hits[q] - 0.15f, hp, hn, hu);
+					env_tie_pose(5, k_tie_hits[q], xp, xn, xu);
+					for (int a = 0; a < 3; ++a) {
+						dir[a] = xp[a] - hp[a];
+					}
+					range += bt_len(dir) / k;
+					bt_norm(dir);
+					miss += acosf(fminf(1.0f, fmaxf(-1.0f, bt_dot(hn, dir)))) * 180.0f / BT_PI;
+				}
+				miss /= 3.0f;
+				range /= 3.0f;
+				const float score =
+					scores[h][hc] + scores[5][xc] - 1.5f * miss - (range > 150.0f ? (range - 150.0f) * 0.3f : 0.0f);
+				if (score > best) {
+					best = score;
+					best_h = h;
+					best_hc = hc;
+					best_xc = xc;
+				}
 			}
 		}
+		/* Back to its own best until it wins. */
+		int own = 0;
+		for (int c = 0; c < ENV_TIE_CANDIDATES; ++c) {
+			own = scores[h][c] > scores[h][own] ? c : own;
+		}
+		env_tie_candidate(h, own);
+	}
+	{
+		int own = 0;
+		for (int c = 0; c < ENV_TIE_CANDIDATES; ++c) {
+			own = scores[5][c] > scores[5][own] ? c : own;
+		}
+		env_tie_candidate(5, own);
+	}
+	if (best_h >= 0) {
+		s_env.anim_hunter = best_h;
+		env_tie_candidate(best_h, best_hc);
+		env_tie_candidate(5, best_xc);
 	}
 }
 
+/* The pose at t, flown backwards from the cover's: the last turn (a pull
+ * toward the canopy, its centre above it), before it the earlier turn (a
+ * pull banked b1 from level), before that the straight run in, level.
+ * Rolls happen only where a turn begins: into the first turn, and from
+ * its bank into the last turn's. */
 static void env_tie_pose(int ship, float t, float pos[3], float n[3], float u[3]) {
 	float r[3];
 	env_ship_basis(ship, n, r, u);
@@ -3944,50 +4037,74 @@ static void env_tie_pose(int ship, float t, float pos[3], float n[3], float u[3]
 	if (!s_env.anim_paths || ship >= 8 || t >= ENV_TIE_ANIM_SECONDS) {
 		return;
 	}
-	const float s = fmaxf(t, 0.0f) / ENV_TIE_ANIM_SECONDS, is = 1.0f - s;
-	const float(*b)[3] = s_env.anim_path[ship];
-	float d[3];
+	const float T = ENV_TIE_ANIM_SECONDS;
+	const float v = s_env.anim_fl[ship].v, w = s_env.anim_fl[ship].w;
+	const float alpha = s_env.anim_fl[ship].alpha, beta = s_env.anim_fl[ship].beta;
+	const float R = v / w;
+	const float t2 = alpha / w, t1 = beta / w; /* seconds in each turn */
+	const float tau = T - t;
+	/* The junction of the turns (J) and the first turn's start (B). */
+	float nj[3], uj[3], pj[3], u1[3], nb[3], ub[3], pb[3];
 	for (int a = 0; a < 3; ++a) {
-		pos[a] = is * is * is * b[0][a] + 3.0f * is * is * s * b[1][a] + 3.0f * is * s * s * b[2][a] + s * s * s * b[3][a];
-		d[a] = 3.0f * is * is * (b[1][a] - b[0][a]) + 6.0f * is * s * (b[2][a] - b[1][a]) + 3.0f * s * s * (b[3][a] - b[2][a]);
+		nj[a] = n[a] * cosf(alpha) - u[a] * sinf(alpha);
+		uj[a] = u[a] * cosf(alpha) + n[a] * sinf(alpha);
+		pj[a] = pos[a] + u[a] * R - uj[a] * R;
 	}
-	if (bt_norm(d)) {
-		/* Ease the last tenth onto the cover's exact nose. */
-		const float w = env_smooth((s - 0.85f) / 0.15f);
+	env_tie_level(nj, uj, u1);
+	bt_rotate(u1, nj, s_env.anim_fl[ship].b1);
+	for (int a = 0; a < 3; ++a) {
+		nb[a] = nj[a] * cosf(beta) - u1[a] * sinf(beta);
+		ub[a] = u1[a] * cosf(beta) + nj[a] * sinf(beta);
+		pb[a] = pj[a] + u1[a] * R - ub[a] * R;
+	}
+	float level_b[3];
+	env_tie_level(nb, ub, level_b);
+	const float bank_b = env_tie_roll(level_b, ub, nb); /* into the first turn */
+	const float bank_j = env_tie_roll(u1, uj, nj);      /* first turn's bank into the last's */
+	/* The roll into a turn starts with it (never on the straight); between
+	 * the turns it spans the junction; each is done before the next. */
+	float f_b = 1.0f, f_j;
+	if (t1 > 0.0f) {
+		const float entry = T - t2 - t1;
+		const float rt_b = fmaxf(fminf(0.5f + 0.6f * fabsf(bank_b), 0.5f * t1), 1e-3f);
+		f_b = env_smooth((t - entry) / rt_b);
+		const float half = fmaxf(fminf(fminf(0.25f + 0.3f * fabsf(bank_j), 0.5f * t1), t2), 1e-3f);
+		f_j = env_smooth((t - (T - t2 - half)) / (2.0f * half));
+	} else {
+		const float rt_j = fmaxf(fminf(0.5f + 0.6f * fabsf(bank_j), t2), 1e-3f);
+		f_j = env_smooth((t - (T - t2)) / rt_j);
+	}
+	float geo[3], off;
+	if (tau <= t2) {
+		const float th = w * tau;
+		float n0[3], r0[3], u0[3];
+		env_ship_basis(ship, n0, r0, u0);
 		for (int a = 0; a < 3; ++a) {
-			n[a] = d[a] * (1.0f - w) + n[a] * w;
+			n[a] = n0[a] * cosf(th) - u0[a] * sinf(th);
+			geo[a] = u0[a] * cosf(th) + n0[a] * sinf(th);
+			pos[a] = pos[a] + u0[a] * R - geo[a] * R;
 		}
-		bt_norm(n);
-	}
-	if (ship == s_env.anim_hunter) {
-		/* Bearing down on the X-wing while it shoots it. */
-		const float aim = env_smooth((t - (k_tie_misses[0] - 0.7f)) / 0.6f) *
-						  (1.0f - env_smooth((t - (ENV_TIE_BOOM_AT - 0.1f)) / 0.7f));
-		if (aim > 0.0f) {
-			float x[3], xn[3], xu[3], dir[3];
-			env_tie_pose(5, t, x, xn, xu);
-			for (int a = 0; a < 3; ++a) {
-				dir[a] = x[a] - pos[a];
-			}
-			if (bt_norm(dir)) {
-				for (int a = 0; a < 3; ++a) {
-					n[a] = n[a] * (1.0f - aim) + dir[a] * aim;
-				}
-				bt_norm(n);
-			}
+		off = -(1.0f - f_j) * bank_j;
+	} else if (tau <= t2 + t1) {
+		const float th = w * (tau - t2);
+		for (int a = 0; a < 3; ++a) {
+			n[a] = nj[a] * cosf(th) - u1[a] * sinf(th);
+			geo[a] = u1[a] * cosf(th) + nj[a] * sinf(th);
+			pos[a] = pj[a] + u1[a] * R - geo[a] * R;
 		}
+		off = -(1.0f - f_b) * bank_b + f_j * bank_j;
+	} else {
+		const float run = v * (tau - t2 - t1);
+		for (int a = 0; a < 3; ++a) {
+			n[a] = nb[a];
+			geo[a] = level_b[a];
+			pos[a] = pb[a] - nb[a] * run;
+		}
+		off = f_b * bank_b + f_j * bank_j;
 	}
-	const float w = env_smooth(s);
-	float up[3];
-	for (int a = 0; a < 3; ++a) {
-		up[a] = s_env.anim_up0[ship][a] * (1.0f - w) + u[a] * w;
-	}
-	const float along = bt_dot(up, n);
-	for (int a = 0; a < 3; ++a) {
-		up[a] -= n[a] * along;
-	}
-	if (bt_norm(up)) {
-		memcpy(u, up, sizeof up);
+	memcpy(u, geo, sizeof geo);
+	if (fabsf(off) > 1e-5f) {
+		bt_rotate(u, n, off);
 	}
 }
 
