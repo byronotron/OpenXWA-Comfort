@@ -8362,6 +8362,11 @@ int MissionSetup_Update(int frameCounter) {
 		}
 	}
 
+	/* "One screen back" in a tour's mission: back to its battle select. */
+	const int backToBattle = g_frontendMissionSessionMode == FRONTEND_MISSION_SESSION_SINGLEPLAYER &&
+							 g_pilotData.missionDirectoryId == MISSION_DIRECTORY_TOUR &&
+							 g_missionSetupActivePanel == MISSION_SETUP_PANEL_DEFAULT &&
+							 g_frontendRightBarAnimState == 1 && FrontendScreen_TakeBack();
 	if (g_frontendMissionSessionMode == FRONTEND_MISSION_SESSION_SINGLEPLAYER) {
 		if (g_pilotData.missionDirectoryId != MISSION_DIRECTORY_SKIRMISH) {
 			if (g_frontendRightBarPanelIndex >= 3) {
@@ -8462,10 +8467,10 @@ int MissionSetup_Update(int frameCounter) {
 			FrontendDraw_RectCopy(&rect, &g_frontendSidebarButtonRects[6]);
 		}
 		if (g_frontendRightBarAnimState == 1 &&
-			FrontendButton_DrawSpriteWithHoverText(
+			(backToBattle || FrontendButton_DrawSpriteWithHoverText(
 				&rect, (char*)"retbattle", (char*)"retbattle",
 				(void*)FrontendString_Get(STR_GAME_RETURN_TO_SELECT_BATTLE), (unsigned int)g_colorPaleBlue,
-				(unsigned int)g_colorLightBlue, 9, (char*)"buttonsound")) {
+				(unsigned int)g_colorLightBlue, 9, (char*)"buttonsound"))) {
 			g_missionSetupActivePanel = MISSION_SETUP_PANEL_BATTLE_SELECT;
 			g_frontendRightBarAnimState = 5;
 			FrontendSound_PlayUISound((char*)"panelarm", 1, 0, 255, 12 * g_gameConfig.sfxDatapadVolume, 63);

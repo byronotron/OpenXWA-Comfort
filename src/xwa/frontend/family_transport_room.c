@@ -2030,7 +2030,11 @@ int FamilyTransportRoom_Update(int frameCounter) {
 				}
 			} else {
 				FrontendDraw_RectAssign(&rect, 0, 150, 120, 287);
-				if (FrontendDraw_PointInRect(&rect, outX, frameCounter)) {
+				if (g_frontendFamilyDetailMode == 0 && !g_familyTransportRoomPendingTransition &&
+					FrontendScreen_TakeBack()) {
+					/* "One screen back": to the Calamari cruiser's concourse. */
+					g_familyTransportRoomPendingTransition = FAMILY_TRANSPORT_ROOM_TRANSITION_CONCOURSE;
+				} else if (FrontendDraw_PointInRect(&rect, outX, frameCounter)) {
 					FamilyTransportRoom_DrawHoverLabel(&rect, STR_FAMILY_BACK_TO_CALAMARI);
 					if (FrontendMouse_GetLeftClick() || FrontendMouse_GetRightClick()) {
 						g_familyTransportRoomPendingTransition = FAMILY_TRANSPORT_ROOM_TRANSITION_CONCOURSE;

@@ -6,8 +6,11 @@
 #include "xwa/frontend/frontend_draw.h"
 #include "xwa/frontend/frontend_image.h"
 #include "xwa/frontend/frontend_input.h"
+#include "xwa/frontend/frontend_screen.h"
 #include "xwa/frontend/frontend_sound.h"
 #include "xwa/frontend/frontend_text.h"
+
+#include <string.h>
 
 // GLOBAL: XWA 0x7831BC
 int g_buttonOverlayTextEnabled;
@@ -312,6 +315,15 @@ int FrontendButton_DrawSpriteHitTest(FrontendRect* rect, const char* normalSprit
 	int outX;
 	FrontendRect clippedRect;
 
+	/* The mission setup's cancel / no / done: "one screen back" presses them. */
+	if (normalSprite &&
+		(!strcmp(normalSprite, "cancelsetting") || !strcmp(normalSprite, "nosetting") ||
+		 !strcmp(normalSprite, "donesetting")) &&
+		FrontendScreen_TakeBack()) {
+		FrontendButton_UsePressedOverlayStyle();
+		FrontendButton_DrawSpriteAndTooltip(rect, pressedSprite, tooltipText, fontSize, textColor);
+		return 1;
+	}
 	FrontendCursor_GetPos(&outX, &outY);
 	FrontendDraw_RectCopy(&clippedRect, rect);
 	FrontendDraw_RectClipToBounds(&clippedRect);
@@ -356,8 +368,10 @@ int FrontendButton_DrawSpriteWithHoverText(FrontendRect* buttonRect, char* upSpr
 	FrontendCursor_GetPos(&outX, &outY);
 	FrontendDraw_RectCopy(&clippedRect, buttonRect);
 	FrontendDraw_RectClipToBounds(&clippedRect);
-	if (FrontendDraw_PointInRect(&clippedRect, outX, outY)) {
-		if (FrontendMouse_GetLeftClick() || FrontendMouse_GetRightClick()) {
+	/* A screen's own back / done button: "one screen back" presses it. */
+	const int back = upSpriteName && !strcmp(upSpriteName, "back") && FrontendScreen_TakeBack();
+	if (back || FrontendDraw_PointInRect(&clippedRect, outX, outY)) {
+		if (back || FrontendMouse_GetLeftClick() || FrontendMouse_GetRightClick()) {
 			int left;
 			int top;
 			int centeredX;
@@ -372,7 +386,7 @@ int FrontendButton_DrawSpriteWithHoverText(FrontendRect* buttonRect, char* upSpr
 			outX = (centeredX - left) >> 1;
 			FrontImage_DrawSpriteRectTinted(downSpriteName, &sourceRect, left + outX, top + centeredY,
 											pressedTint);
-			return FrontendMouse_GetLeftClick() ? 1 : 2;
+			return back || FrontendMouse_GetLeftClick() ? 1 : 2;
 		}
 
 		if (FrontendMouse_GetLeftDown() || FrontendMouse_GetRightDown()) {

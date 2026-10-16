@@ -236,7 +236,21 @@ static const EnvShip k_tieart[] = {
 	 * runners). */
 	{ "Xwing", 80.0f, 30.0f, 300.0f, { 1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, 0, 0 },
 	{ "AWing", -80.0f, 30.0f, 300.0f, { -1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, 0, 0 },
+	/* 8, 9: not on the cover: two A-wings screaming past the viewer early in
+	 * the animation (see the passers); hidden in the still. */
+	{ "AWing", 80.0f, -30.0f, 300.0f, { 1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, 0, 0 },
+	{ "AWing", -80.0f, -30.0f, 300.0f, { -1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, 0, 0 },
 };
+/* The passers: ships 8 and 9 fly straight in from far ahead, cross each
+ * other's course PASS_CROSS_M ahead of the viewer and pass it at PASS_AT
+ * seconds, one on the left, one on the right (viewer's x right, y ahead,
+ * z up; metres at the moment they pass). */
+#define ENV_TIE_FIRST_PASSER 8
+#define ENV_TIE_PASSERS 2
+#define ENV_TIE_PASS_AT 3.0f
+#define ENV_TIE_PASS_SPEED 140.0f
+#define ENV_TIE_PASS_CROSS_M 35.0f
+static const float k_tie_pass[ENV_TIE_PASSERS][2] = { { -7.0f, 3.0f }, { 7.5f, -2.0f } };
 #define ENV_TIE_RUNNERS 2
 #define ENV_TIE_CHASE_SHIP 0 /* the Interceptor after the jinking X-wing */
 #define ENV_TIE_FIRST_RUNNER 6
@@ -561,7 +575,7 @@ void XwaVrEnv_SetBare(int bare) {
 	if (bare || !env_ready()) {
 		s_env_bare = 1;
 		s_env_fade_t = 0.0f;
-		(void)Aeron_XrTakeMenuBPressed(); /* no stale B (from flight) on the way in */
+		(void)Aeron_XrTakeMenuXPressed(); /* no stale X (from flight) on the way in */
 	} else {
 		s_env_bare = 0;
 		s_env_fade_t = fminf(1.0f, s_env_fade_t + fminf(dt, 0.1f) / env_float("XWA_XR_ENV_FADE_SECONDS", 1.5f));
@@ -601,7 +615,7 @@ extern int musicState;
 int Music_SetState(int state);
 #define ENV_MUSIC_MISSION_FAILED 1280 /* MUSIC_STATE_FRONTEND_1280: the failed mission's debriefing */
 
-/* B in the menus puts the screen away: it fades out (with its frame and
+/* X in the menus puts the screen away: it fades out (with its frame and
  * logo) and nothing reaches the menus until A or the trigger brings it
  * back. */
 static struct {
@@ -647,6 +661,7 @@ enum {
 	ES_HIT1,
 	ES_HIT2,
 	ES_XW_FLYBY,
+	ES_AW_FLYBY,
 	ES_COUNT
 };
 static int es_is_tie(int ship);
@@ -4302,15 +4317,15 @@ static void env_tie_paths(void) {
  * Rolls happen only where a turn begins: into the first turn, and from
  * its bank into the last turn's. */
 /* ---- the jinking X-wing ----------------------------------------------------
- * It flies its chaser's path 50 m ahead of it, weaving across it: two
- * slow, heavy pulls left and right, each a banked turn (the craft leans into the curve,
+ * It flies its chaser's path 50 m ahead of it, weaving across it: three
+ * slow, heavy pulls, left, right, left (as the viewer sees it), each a banked turn (the craft leans into the curve,
  * its lift toward the turn's centre, rolling over as the turn reverses),
  * then slides onto the great explosion's centre as it starts and is gone
  * in it. The chaser follows its weaving a moment late, smaller. Both keep
  * the nose along their path. */
 #define ENV_WEAVE_FROM 1.6f
 #define ENV_WEAVE_TO (ENV_TIE_BOOM_AT - 0.3f)
-#define ENV_WEAVE_PULLS 2.0f
+#define ENV_WEAVE_PULLS 1.5f /* left, right, left */
 
 /* Smootherstep: its pull (second derivative) has no jumps either, so
  * the lean it gives never snaps. */
@@ -4418,7 +4433,33 @@ static int env_tie_weave_chaser_of(int ship) {
 	return -1;
 }
 
+/* A passer's pose: a straight line through its passing point, level, the
+ * nose along it. */
+static void env_tie_passer_pose(int ship, float t, float pos[3], float n[3], float u[3]) {
+	const float k = AERON_OPT_UNITS_PER_METER;
+	const float* at = k_tie_pass[ship - ENV_TIE_FIRST_PASSER];
+	/* Heading toward and past the viewer, its x through 0 at the crossing. */
+	float d[3] = { at[0] / ENV_TIE_PASS_CROSS_M, -1.0f, 0.0f };
+	bt_norm(d);
+	const float s = ENV_TIE_PASS_SPEED * (t - ENV_TIE_PASS_AT);
+	for (int a = 0; a < 3; ++a) {
+		pos[a] = ((a == 0 ? at[0] : a == 2 ? at[1] : 0.0f) + d[a] * s) * k;
+		n[a] = d[a];
+	}
+	u[0] = 0.0f;
+	u[1] = 0.0f;
+	u[2] = 1.0f;
+}
+
+static int env_tie_is_passer(int ship) {
+	return ship >= ENV_TIE_FIRST_PASSER && ship < ENV_TIE_FIRST_PASSER + ENV_TIE_PASSERS;
+}
+
 static void env_tie_pose(int ship, float t, float pos[3], float n[3], float u[3]) {
+	if (s_env.anim_paths && env_tie_is_passer(ship) && ship < env_space()->count && t < ENV_TIE_ANIM_SECONDS) {
+		env_tie_passer_pose(ship, t, pos, n, u);
+		return;
+	}
 	if (s_env.anim_paths && ship < 8 && t < ENV_TIE_ANIM_SECONDS) {
 		const int r = env_tie_runner_of(ship);
 		if (r >= 0) {
@@ -4584,12 +4625,13 @@ static void env_tie_hunter_shot(float before, float t, float at, float miss_m) {
  * flight's 3D listener is left alone. Exterior SFX volume for the effects,
  * engine volume for the engines; XWA_XR_SCENE_SFX_VOLUME scales both
  * (0 = silent). */
-static const int k_es_slot[ES_COUNT] = { 20, 4, 97, 102, 36, 25, 26, 27, 112 };
-static const int k_es_alt_slot[ES_COUNT] = { 0, 0, 0, 101, 0, 0, 0, 0, 111 };
+static const int k_es_slot[ES_COUNT] = { 20, 4, 97, 102, 36, 25, 26, 27, 112, 112 };
+static const int k_es_alt_slot[ES_COUNT] = { 0, 0, 0, 101, 0, 0, 0, 0, 111, 111 };
 /* Effects taken by file name first (the list's slot as the fallback). */
 static const char* const k_es_file[ES_COUNT] = {
 	[ES_TIE_FLYBY] = "FLYBYTI3D.WAV",
 	[ES_XW_FLYBY] = "FLYBYCORT.WAV",
+	[ES_AW_FLYBY] = "FLYBYAW.WAV",
 };
 
 static struct {
@@ -4861,6 +4903,20 @@ static void env_tie_animate(void) {
 		const int r = env_tie_runner_of(s_env.ship_of[i]);
 		s_env.hidden[i] = r >= 0 && (t >= T || !s_env.runner[r].ok ||
 									 (k_tie_runners[r].weave && t >= ENV_TIE_BOOM_AT + 0.12f));
+		/* The passers are gone once well past the viewer. */
+		if (env_tie_is_passer(s_env.ship_of[i]) && t >= ENV_TIE_PASS_AT + 1.5f) {
+			s_env.hidden[i] = 1;
+		}
+	}
+	/* Their scream just before they pass. */
+	if (before < ENV_TIE_PASS_AT - 0.35f && t >= ENV_TIE_PASS_AT - 0.35f) {
+		for (int ship = ENV_TIE_FIRST_PASSER; ship < ENV_TIE_FIRST_PASSER + ENV_TIE_PASSERS; ++ship) {
+			if (ship < env_space()->count) {
+				float pos[3], n[3], u[3];
+				env_tie_pose(ship, ENV_TIE_PASS_AT, pos, n, u);
+				es_play(ES_AW_FLYBY, pos, 30.0f, 1.1f, ship == ENV_TIE_FIRST_PASSER ? 1.0f : 1.06f);
+			}
+		}
 	}
 	for (int r = 0; r < ENV_TIE_RUNNERS; ++r) {
 		if (s_env.runner[r].ok && !s_env.runner[r].flyby_done && t >= s_env.runner[r].tb + 0.25f && t < T) {
@@ -5039,8 +5095,8 @@ static void env_title_update(void) {
 	dt = fminf(fmaxf(dt, 0.0f), 0.1f);
 	s_title.pressed = 0;
 	if (!env_title_active()) {
-		/* B puts the screen away; A or the trigger brings it back. */
-		if (Aeron_XrTakeMenuBPressed() && !s_dismiss.away) {
+		/* X puts the screen away; A or the trigger brings it back. */
+		if (Aeron_XrTakeMenuXPressed() && !s_dismiss.away) {
 			s_dismiss.away = 1;
 		}
 		if (s_dismiss.away) {

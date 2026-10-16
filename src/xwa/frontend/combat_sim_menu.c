@@ -262,6 +262,9 @@ int CombatSimMenu_Update(int frameCounter) {
 				FrontendScreen_SetCallbacks(Concourse_Update, Concourse_Exit);
 			}
 		}
+		if (FrontendScreen_TakeBack()) { /* "one screen back" */
+			FrontendScreen_SetCallbacks(Concourse_Update, Concourse_Exit);
+		}
 		FrontendText_DrawCentered(15, FrontendString_Get(STR_BACK_TO_FAMILY_TRANSPORT), &rect, color);
 	} else {
 		FrontendDraw_RectAssign(&rect, 326, 22, 412, 148);
@@ -301,6 +304,9 @@ int CombatSimMenu_Update(int frameCounter) {
 		}
 	}
 
+	if (FrontendScreen_TakeBack()) { /* "one screen back": to the concourse */
+		FrontendScreen_SetCallbacks(Concourse_Update, Concourse_Exit);
+	}
 	if (Frontend_HandleEscapeQuit(1) == 1) {
 		return 1;
 	}

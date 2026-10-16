@@ -51,6 +51,12 @@ int FrontendScreen_BeginModalWithCleanup(FrontendScreenUpdateFn updateFn, Fronte
 FrontendScreenModalStatus FrontendScreen_TickModal(void);
 void FrontendScreen_EndModal(void);
 int FrontendScreen_IsModalActive(void);
+/* "One screen back" (the VR controller's B): asks the screen run next to
+ * take its own back / exit / cancel step. The request lasts that one frame;
+ * the first back button the screen draws takes it (FrontendScreen_TakeBack),
+ * and an untaken one is dropped. */
+void FrontendScreen_RequestBack(void);
+int FrontendScreen_TakeBack(void);
 FrontendScreenModalStatus FrontendScreen_GetModalStatus(void);
 int FrontendScreen_PushState(FrontendScreenUpdateFn updateFn, FrontendRect* screenRect);
 void FrontendScreen_PopState(void);

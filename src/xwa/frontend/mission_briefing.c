@@ -1974,7 +1974,7 @@ int MissionBriefing_DrawPlaybackControls(void) {
 		result = FrontendButton_DrawSpriteWithHoverText(
 			&dst, "briefing", "briefing", (void*)FrontendString_Get(STR_VIEW_BRIEFING_MAP),
 			(unsigned int)g_colorPaleBlue, (unsigned int)g_colorLightBlue, 16, "jewelsound");
-		if (result) {
+		if (result || FrontendScreen_TakeBack()) { /* "one screen back": to the map */
 			FrontendWaveStream_Shutdown();
 			g_frontendLeftBarAnimState = 4;
 			FrontendSound_PlayUISound("panelarm", 1, 0, 255, 12 * g_gameConfig.sfxDatapadVolume, 63);

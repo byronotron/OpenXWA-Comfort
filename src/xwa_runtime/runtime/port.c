@@ -24,6 +24,7 @@
 #include "xwa/frontend/flight_loading.h"
 #include "xwa/frontend/frontend_display.h"
 #include "xwa/frontend/frontend_flight.h"
+#include "xwa/frontend/frontend_screen.h"
 #include "xwa/frontend/frontend_input.h"
 #include "xwa/frontend/frontend_resources.h"
 #include "xwa/input/forcefeedback.h"
@@ -658,6 +659,20 @@ static void XwaPort_UpdateVrModes(void) {
 	XwaPort_UpdateVrFlightButtons(flight && !g_inHangarReady && !modal && !XwaFlightPauseTask_IsActive());
 }
 
+/* The VR controller's B in the 2D menus: one screen back. In a modal (the
+ * options datapad, a dialog) it is Escape, their own back / cancel; on a
+ * frontend screen it presses that screen's back button. */
+static void XwaPort_ServiceVrBack(int modal) {
+	if (!Aeron_XrTakeMenuBPressed()) {
+		return;
+	}
+	if (modal || FrontendScreen_IsModalActive()) {
+		XwaInputBridge_InjectFrontendChar(27);
+	} else {
+		FrontendScreen_RequestBack();
+	}
+}
+
 void XwaPort_ToggleMouseCapture(void) {
 	g_xwaPortMouseCaptureSuspended = !g_xwaPortMouseCaptureSuspended;
 	Aeron_LogInfo("xwa", "%s", g_xwaPortMouseCaptureSuspended ? "mouse released to OS" : "mouse captured");
@@ -699,6 +714,7 @@ static void XwaPort_TickBody(int32_t delta_us) {
 		XwaPort_SetHostCursorVisible(0);
 		input = Aeron_InputSnapshot();
 		XwaInputBridge_UpdateFrontend(input);
+		(void)Aeron_XrTakeMenuBPressed(); /* no back in the films */
 		XwaTime_AdvanceHostClock(delta_us);
 		XwaSnapshot_SetSceneKind(XWA_SCENE_CUTSCENE);
 		XwaMovieTask_Tick();
@@ -722,6 +738,7 @@ static void XwaPort_TickBody(int32_t delta_us) {
 			 * even if the capture was released by hotkey before it opened. */
 			XwaPort_SetHostCursorVisible(0);
 			XwaInputBridge_UpdateFrontend(input);
+			XwaPort_ServiceVrBack(1);
 			XwaTime_AdvanceHostClock(delta_us);
 			XwaFrontendTask_ServiceFrameSystems();
 			if (!FlightDisplay_PumpFrontendModal()) {
@@ -740,6 +757,7 @@ static void XwaPort_TickBody(int32_t delta_us) {
 				g_xwaPortMouseCaptureSuspended = 0;
 				Aeron_LogInfo("xwa", "mouse captured");
 			}
+			(void)Aeron_XrTakeMenuBPressed(); /* flight: B is a flight button */
 			const int capture = input != 0 && input->has_focus && !g_xwaPortMouseCaptureSuspended;
 			Aeron_SetRelativeMouseMode(capture);
 			XwaPort_SetHostCursorVisible(!capture);
@@ -806,6 +824,7 @@ static void XwaPort_TickBody(int32_t delta_us) {
 	g_xwaPortHadFocus = 1;
 	XwaTime_AdvanceHostClock(delta_us);
 	XwaSnapshot_SetSceneKind(XWA_SCENE_FRONTEND);
+	XwaPort_ServiceVrBack(0);
 	XwaFrontendTask_Tick();
 	if (FrontendFlight_HasPendingLaunch()) {
 		FrontendFlight_BeginPendingLaunch();

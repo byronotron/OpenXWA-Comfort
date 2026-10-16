@@ -26,6 +26,16 @@ FrontendScreenUpdateFn g_pendingScreenUpdateFn;
 // GLOBAL: XWA 0xA1C079
 FrontendRect g_pendingScreenRect;
 static int g_frontendScreenRunFrameActive;
+static int g_frontendBackRequested; /* for the next frame */
+static int g_frontendBackActive;    /* this frame's, until taken */
+
+void FrontendScreen_RequestBack(void) { g_frontendBackRequested = 1; }
+
+int FrontendScreen_TakeBack(void) {
+	const int back = g_frontendBackActive;
+	g_frontendBackActive = 0;
+	return back;
+}
 static FrontendScreenModalCleanupFn g_modalScreenCleanupFns[FRONTEND_SCREEN_MAX_STACK];
 
 // FUNCTION: XWA 0x541810
@@ -411,7 +421,10 @@ int FrontendScreen_RunFrame(void) {
 
 	exitFn = state->exitFn;
 	g_frontendScreenRunFrameActive = 1;
+	g_frontendBackActive = g_frontendBackRequested;
+	g_frontendBackRequested = 0;
 	result = state->updateFn(g_frameCounter);
+	g_frontendBackActive = 0;
 	if (g_screenCallbacksDirty == 1 || result == 1) {
 		g_screenCallbacksDirty = 0;
 		if (exitFn != 0) {
