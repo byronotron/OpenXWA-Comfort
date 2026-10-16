@@ -2760,13 +2760,13 @@ static void bt_pick_goal(float out[3], int side) {
 		const float own = side == BT_FRIEND ? -1.0f : 1.0f;
 		const float yaw = (bt_rnd(0.0f, 1.0f) < 0.6f ? own : -own) * bt_rnd(15.0f, 75.0f);
 		const float pitch = bt_rnd(-35.0f, 45.0f);
-		const float dist = close ? bt_rnd(110.0f, 200.0f) : bt_rnd(232.0f, 832.0f);
+		const float dist = close ? bt_rnd(110.0f, 200.0f) : bt_rnd(152.0f, 752.0f);
 		bt_at(yaw, pitch, dist, out);
 		if (!bt_behind_screen(out)) {
 			return;
 		}
 	}
-	bt_at(side == BT_FRIEND ? -45.0f : 45.0f, 10.0f, 640.0f, out);
+	bt_at(side == BT_FRIEND ? -45.0f : 45.0f, 10.0f, 560.0f, out);
 }
 
 static const EnvMesh* bt_mesh(const BtShip* sh) {
@@ -2785,9 +2785,9 @@ static void bt_spawn_fighter(BtShip* sh, float delay) {
 	float to[3];
 	for (int tries = 0; tries < 16; ++tries) {
 		const float yaw = (sh->side == BT_FRIEND ? -1.0f : 1.0f) * bt_rnd(30.0f, 75.0f);
-		bt_at(yaw, bt_rnd(-15.0f, 35.0f), bt_rnd(720.0f, 1170.0f), sh->p);
+		bt_at(yaw, bt_rnd(-15.0f, 35.0f), bt_rnd(640.0f, 1090.0f), sh->p);
 		bt_pick_goal(to, sh->side);
-		if (bt_len(to) < 232.0f) {
+		if (bt_len(to) < 152.0f) {
 			continue; /* arrive further out */
 		}
 		for (int a = 0; a < 3; ++a) {
@@ -2921,7 +2921,7 @@ static void bt_start(void) {
 		r->radius = 0.5f * size;
 		for (int tries = 0; tries < 20; ++tries) {
 			const float yaw = (bt_rand() & 1 ? 1.0f : -1.0f) * bt_rnd(26.0f, 110.0f);
-			bt_at(yaw, bt_rnd(-40.0f, 40.0f), bt_rnd(220.0f, 1120.0f), r->p);
+			bt_at(yaw, bt_rnd(-40.0f, 40.0f), bt_rnd(200.0f, 1040.0f), r->p);
 			int clash = bt_behind_screen(r->p);
 			for (int j = 0; j < s_bt.rock_count && !clash; ++j) {
 				float d[3] = { r->p[0] - s_bt.rocks[j].p[0], r->p[1] - s_bt.rocks[j].p[1], r->p[2] - s_bt.rocks[j].p[2] };
@@ -3208,18 +3208,18 @@ static void bt_step_fighter(int index, float dt) {
 	bt_norm(want);
 	{
 		/* Where the present course passes the viewer in the next 3 s: steer
-		 * out from that point while it is closer than 60 m. */
+		 * out from that point while it is closer than 80 m. */
 		const float t = fminf(fmaxf(-bt_dot(sh->p, sh->f), 0.0f), sh->speed * 3.0f);
 		float c[3];
 		for (int a = 0; a < 3; ++a) {
 			c[a] = sh->p[a] + sh->f[a] * t;
 		}
 		const float miss = bt_len(c);
-		if (miss < 60.0f) {
+		if (miss < 80.0f) {
 			if (!bt_norm(c)) {
 				memcpy(c, sh->u, sizeof c);
 			}
-			const float k = 3.0f * (60.0f - miss) / 60.0f + (view_d < 40.0f ? 2.0f : 0.0f);
+			const float k = 3.5f * (80.0f - miss) / 80.0f + (view_d < 50.0f ? 2.0f : 0.0f);
 			for (int a = 0; a < 3; ++a) {
 				want[a] += c[a] * k;
 			}
@@ -3250,14 +3250,14 @@ static void bt_step_fighter(int index, float dt) {
 			}
 		}
 	}
-	if (view_d > 1264.0f) {
+	if (view_d > 1184.0f) {
 		float home[3];
-		bt_at(sh->side == BT_FRIEND ? -35.0f : 35.0f, 10.0f, 448.0f, home);
+		bt_at(sh->side == BT_FRIEND ? -35.0f : 35.0f, 10.0f, 368.0f, home);
 		for (int a = 0; a < 3; ++a) {
 			home[a] -= sh->p[a];
 		}
 		bt_norm(home);
-		const float k = fminf((view_d - 1264.0f) / 288.0f, 2.0f);
+		const float k = fminf((view_d - 1184.0f) / 288.0f, 2.0f);
 		for (int a = 0; a < 3; ++a) {
 			want[a] += home[a] * k;
 		}
@@ -3442,7 +3442,7 @@ static void bt_step(float dt) {
 		for (int a = 0; a < 3; ++a) {
 			next[a] = r->p[a] + r->v[a] * dt;
 		}
-		if ((bt_len(next) < 180.0f + r->radius && bt_dot(r->v, r->p) < 0.0f) || bt_len(next) > 1280.0f ||
+		if ((bt_len(next) < 180.0f + r->radius && bt_dot(r->v, r->p) < 0.0f) || bt_len(next) > 1200.0f ||
 			(bt_behind_screen(next) && !bt_behind_screen(r->p))) {
 			for (int a = 0; a < 3; ++a) {
 				r->v[a] = -r->v[a];
