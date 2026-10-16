@@ -3764,6 +3764,23 @@ static void fl_build_scene_lighting(const XwaSnapshot* snap, const XwaFlightCame
 	memset(out, 0, sizeof *out);
 	out->lights = snap->dir_lights;
 	out->light_count = snap->dir_light_count;
+	if (cam->death_star_mode && !cam->in_hangar) {
+		/* Inside the Death Star (upstream issue #55): the sealed tunnels get
+		 * little or no directional light, so their pipes and trenches went
+		 * near black. Raise the ambient floor (XWA_DS_AMBIENT_BOOST, 2.2;
+		 * 1 = as before). */
+		const char* env = getenv("XWA_DS_AMBIENT_BOOST");
+		const float boost = env && env[0] ? (float)atof(env) : 2.2f;
+		if (boost > 1.0f && boost < 10.0f) {
+			XwaRemasterShip_GetAmbientCube(&out->ambient_cube);
+			float* cube = &out->ambient_cube.pos_x[0];
+			for (size_t i = 0; i < sizeof out->ambient_cube / sizeof(float); i++) {
+				cube[i] *= boost;
+			}
+			out->ambient = &out->ambient_cube;
+		}
+		return;
+	}
 	if (!cam->in_hangar || !s.hangar_lighting.enabled) {
 		return;
 	}

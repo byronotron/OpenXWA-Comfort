@@ -32,6 +32,7 @@
 #include <math.h>
 #include <stddef.h>
 #include <string.h>
+#include <stdlib.h>
 
 // GLOBAL: XWA 0x5B6330
 const uint16_t g_projectileLifetimeSecondsByObjectType[OBJ_LaserImperialDS + 1] = {
@@ -935,6 +936,22 @@ static __inline uint16_t laser_ComputeLauncherCooldownTicks(ModelIndex modelInde
 		} else if (skill >= 0xaaaau) {
 			cooldown = (uint16_t)(2u * cooldown);
 		}
+#ifdef XWA_MODERN
+		else {
+			/* The original leaves Veteran (0x8000) out of the ladder, so a
+			 * Veteran fired at the bare rate: twice as fast as an Ace
+			 * (upstream issue #45). Fit it between Officer and Ace (x2.5);
+			 * XWA_ORIGINAL_VETERAN_FIRE=1 keeps the original. */
+			static int original = -1;
+			if (original < 0) {
+				const char* env = getenv("XWA_ORIGINAL_VETERAN_FIRE");
+				original = env && env[0] == '1';
+			}
+			if (!original) {
+				cooldown = (uint16_t)((5u * cooldown) / 2u);
+			}
+		}
+#endif
 	}
 	return cooldown;
 }
