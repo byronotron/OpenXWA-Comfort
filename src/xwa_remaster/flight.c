@@ -5408,11 +5408,18 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 	}
 
 	XwaVrEnv_Submit(s.scene);
-	XwaVrGloves_Submit(s.scene, cmd, rows, base.pos,
-					   AERON_OPT_UNITS_PER_METER * fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f));
+	/* The startup title (or the TIE art's fight): no screen, no hands, and
+	 * the controllers reach nothing but the A it waits for. */
+	const int screen_hidden = XwaVrEnv_ScreenHidden();
+	Aeron_XrSetInputBlocked(screen_hidden);
+	if (screen_hidden) {
+		XwaVrGloves_Idle();
+	} else {
+		XwaVrGloves_Submit(s.scene, cmd, rows, base.pos,
+						   AERON_OPT_UNITS_PER_METER * fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f));
+	}
 	/* The screen and its frame are layers over the eyes: the gloves reach in
 	 * front of them through a second, alpha-masked copy of the eyes. */
-	const int screen_hidden = XwaVrEnv_ScreenHidden();
 	const int hands_over =
 		!screen_hidden && XwaVrHandOverlay_Prepare(cmd, xr_frame.views, xr_frame.width, xr_frame.height);
 

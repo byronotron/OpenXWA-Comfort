@@ -6,6 +6,8 @@
 #include "aeron/log.h"
 #include "aeron/scene/billboard.h"
 #include "aeron/scene/draw_list2d.h"
+#include "aeron/scene/font_atlas.h"
+#include "aeron/scene/text2d.h"
 #include "aeron/scene/mesh.h"
 #include "aeron/vfs.h"
 #include "aeron/xr.h"
@@ -445,8 +447,6 @@ static struct {
 		int flyby_done;
 	} runner[ENV_TIE_RUNNERS];
 	int anim_hunter; /* the TIE that shoots the X-wing down (-1: none) */
-	int anim_go;     /* pressed on the title: the screen comes in */
-	float anim_go_t; /* seconds since */
 	float transform[ENV_MAX_INSTANCES][16];
 	uint8_t far[ENV_MAX_INSTANCES];
 	uint8_t hidden[ENV_MAX_INSTANCES]; /* not drawn this frame */
@@ -569,13 +569,35 @@ int XwaVrEnv_Bare(void) { return s_env_bare; }
 
 float XwaVrEnv_Fade(void) { return s_env_bare ? 0.0f : s_env_fade; }
 
-/* The TIE Fighter box art plays out without the screen and its frame:
- * the fight plays out, the X-Wing Alliance logo fades in over the cover's
- * moment, and they come in at a button press (a press during the fight
- * jumps to its end; XWA_XR_TIEART_HIDE_SCREEN=0 shows them throughout). */
+/* The startup title: once per run, when the menu environment first comes
+ * up after the startup films, it shows the X-Wing Alliance logo large where
+ * the screen will be, "Press A to Continue" under it, and no screen, frame,
+ * hands or pointer; the controllers reach nothing (Aeron_XrSetInputBlocked)
+ * until A is pressed, then the screen and frame come in. The TIE Fighter
+ * box art plays its fight first (A during it jumps to its end). Later
+ * (after missions) the menus come straight up. XWA_XR_TITLE=0: no title. */
 #define ENV_TIE_REVEAL_SECONDS 0.6f
+static struct {
+	int done;      /* the title has been passed this run */
+	int go;        /* A pressed: the screen is coming in */
+	float go_t;    /* seconds since */
+	float shown_t; /* seconds the title has been up */
+	int pressed;   /* an A press this frame not taken by the title */
+	uint64_t counter;
+	AeronFontAtlas font;
+	int font_state; /* 0 not tried, 1 loaded, -1 failed */
+	AeronRenderTarget* text_rt;
+	AeronDrawList2D* text_list;
+	int text_w, text_h;
+} s_title;
+
+static int env_title_active(void) {
+	return !s_title.done && s_env.mode != ENV_OFF && env_float("XWA_XR_TITLE", 1.0f) != 0.0f;
+}
+
 static float env_screen_reveal(void);
-int XwaVrEnv_ScreenHidden(void) { return !s_env_bare && env_screen_reveal() <= 0.0f; }
+static void env_title_text(AeronCommandBuffer* cmd);
+int XwaVrEnv_ScreenHidden(void) { return !s_env_bare && s_env.mode != ENV_OFF && env_screen_reveal() <= 0.0f; }
 
 /* The TIE Fighter box art's animation (defined below). */
 #define ENV_TIE_ANIM_SECONDS 7.0f
@@ -607,12 +629,17 @@ static int es_is_tie(int ship);
 static void es_play(int s, const float p[3], float ref_m, float gain, float pitch);
 
 static float env_screen_reveal(void) {
-	if (s_env.mode != ENV_TIEART || !env_float("XWA_XR_TIEART_HIDE_SCREEN", 1.0f)) {
+	if (!env_title_active()) {
 		return 1.0f;
 	}
-	/* After the fight, the title holds until a button is pressed. */
-	const float x = fminf(fmaxf(s_env.anim_go_t / ENV_TIE_REVEAL_SECONDS, 0.0f), 1.0f);
-	return s_env.anim_go ? fmaxf(x * x * (3.0f - 2.0f * x), 1e-3f) : 0.0f;
+	/* The title holds until A is pressed. */
+	const float x = fminf(fmaxf(s_title.go_t / ENV_TIE_REVEAL_SECONDS, 0.0f), 1.0f);
+	return s_title.go ? fmaxf(x * x * (3.0f - 2.0f * x), 1e-3f) : 0.0f;
+}
+
+/* The title is up: at once, or for the TIE art once its fight is over. */
+static int env_title_shown(void) {
+	return env_title_active() && (s_env.mode != ENV_TIEART || s_env.anim_t >= ENV_TIE_ANIM_SECONDS);
 }
 
 /* The live battle (defined below). */
@@ -1249,9 +1276,9 @@ static int env_tex_needed(int slot) {
 			return slot != ENV_TEX_DEATHSTAR && slot != ENV_TEX_ENDOR && slot != ENV_TEX_NEBULA &&
 				   slot != ENV_TEX_VADER && slot < ENV_TEX_GLOW;
 		case ENV_BATTLE:
-			return bt_tex_needed(slot);
+			return bt_tex_needed(slot) || (slot == ENV_TEX_LOGO && env_title_active());
 		default:
-			return slot == ENV_TEX_FRAME;
+			return slot == ENV_TEX_FRAME || (slot == ENV_TEX_LOGO && env_title_active());
 	}
 }
 
@@ -1299,6 +1326,9 @@ int XwaVrEnv_Prepare(AeronCommandBuffer* cmd) {
 		return 0;
 	}
 	env_list();
+	if (env_title_active()) {
+		env_title_text(cmd);
+	}
 	/* One OPT (or sprite) per frame. */
 	int busy = 0;
 	for (int i = 0; i < s_env.mesh_count; ++i) {
@@ -1342,7 +1372,12 @@ void XwaVrEnv_View(float pos[3], float rows[9]) {
 	/* XWA_XR_ENV_BACK: the viewer sits this far (metres) behind the scene's
 	 * reference point, matching the screen being as much further away than
 	 * its original 2.1 m (the Quest default screen distance includes it). */
-	const float back = env_float("XWA_XR_ENV_BACK", 1.1f) * AERON_OPT_UNITS_PER_METER;
+	/* The X-Wing vs. TIE Fighter scene: XWA_XR_XVT_BACK (0.4 m) further
+	 * back still; the screen and frame keep their distance (they go with
+	 * the viewer). */
+	const float back = (env_float("XWA_XR_ENV_BACK", 1.1f) +
+						(s_env.mode == ENV_XVTART ? env_float("XWA_XR_XVT_BACK", 0.4f) : 0.0f)) *
+					   AERON_OPT_UNITS_PER_METER;
 	pos[0] = x - f[0] * back;
 	pos[1] = y - f[1] * back;
 	pos[2] = env_is_space(s_env.mode) ? 0.0f : s_env.floor_z + eye * AERON_OPT_UNITS_PER_METER;
@@ -1362,15 +1397,15 @@ void XwaVrEnv_View(float pos[3], float rows[9]) {
 
 /* Queue a quad: corners (world units) bottom-left, bottom-right, top-right,
  * top-left; tint linear RGBA (HDR allowed). */
-static void env_quad(AeronScene3D* scene, int slot, AeronSceneBillboardStage stage, AeronSceneBillboardBlend blend,
-					 const float c[4][3], const float tint[4]) {
-	if (!s_env.tex[slot]) {
+static void env_quad_tex(AeronScene3D* scene, AeronTexture* tex, AeronSceneBillboardStage stage,
+						 AeronSceneBillboardBlend blend, const float c[4][3], const float tint[4]) {
+	if (!tex) {
 		return;
 	}
 	static const float uv[4][2] = { { 0, 1 }, { 1, 1 }, { 1, 0 }, { 0, 0 } };
 	AeronSceneBillboardDesc d;
 	memset(&d, 0, sizeof d);
-	d.texture = s_env.tex[slot];
+	d.texture = tex;
 	d.blend = blend;
 	d.stage = stage;
 	for (int v = 0; v < 4; ++v) {
@@ -1385,6 +1420,11 @@ static void env_quad(AeronScene3D* scene, int slot, AeronSceneBillboardStage sta
 		d.colors[v][3] = tint[3] * (blend == AERON_SCENE_BILLBOARD_BLEND_PMA ? s_env_fade : 1.0f);
 	}
 	AeronScene_AddBillboard(scene, &d);
+}
+
+static void env_quad(AeronScene3D* scene, int slot, AeronSceneBillboardStage stage, AeronSceneBillboardBlend blend,
+					 const float c[4][3], const float tint[4]) {
+	env_quad_tex(scene, s_env.tex[slot], stage, blend, c, tint);
 }
 
 /* Corners of a rectangle at `center` spanned by half-axes `ax` (right) and
@@ -1790,7 +1830,8 @@ static void env_submit_logo_at(AeronScene3D* scene, float alpha, int title) {
 	env_quad(scene, ENV_TEX_LOGO, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, tint);
 }
 
-static void env_submit_logo(AeronScene3D* scene) { env_submit_logo_at(scene, 1.0f, 0); }
+/* Above the frame; hidden behind the startup title until the screen comes. */
+static void env_submit_logo(AeronScene3D* scene) { env_submit_logo_at(scene, env_screen_reveal(), 0); }
 
 static void env_submit_endor_sprites(AeronScene3D* scene) {
 	const float k = AERON_OPT_UNITS_PER_METER;
@@ -1993,12 +2034,8 @@ static void env_submit_tieart_sprites(AeronScene3D* scene) {
 		env_quad(scene, ENV_TEX_FIRE, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
 		env_facing(q, 10.0f * k, -20.0f, c);
 		env_quad(scene, ENV_TEX_BLAST, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
-		/* The title over the cover's moment, then (on the press) the logo
-		 * moves above the frame as the screen comes in. */
-		const float reveal = env_screen_reveal();
-		const float title = env_smooth((t - T) / env_float("XWA_XR_TITLE_FADE_SECONDS", 1.2f));
-		env_submit_logo_at(scene, title * (1.0f - reveal), 1);
-		env_submit_logo_at(scene, reveal, 0);
+		/* (The startup title over the cover's moment: env_submit_title.) */
+		env_submit_logo(scene);
 		return;
 	}
 	/* The run-up: bolts in flight, the X-wing hit, then the blast; the
@@ -2084,7 +2121,7 @@ static void env_submit_xvtart_sprites(AeronScene3D* scene) {
 		static const struct {
 			int slot;
 			float yaw, h;
-		} pilots[] = { { ENV_TEX_TIE_PILOT, -28.0f, 37.3f }, { ENV_TEX_REBEL_PILOT, 32.0f, 29.6f } };
+		} pilots[] = { { ENV_TEX_TIE_PILOT, -28.0f, 37.3f * 0.95f }, { ENV_TEX_REBEL_PILOT, 32.0f, 29.6f * 0.9f } };
 		for (size_t i = 0; i < sizeof pilots / sizeof pilots[0]; ++i) {
 			const int slot = pilots[i].slot;
 			if (s_env.tex[slot] && s_env.tex_h[slot] > 0) {
@@ -4359,27 +4396,6 @@ static void env_tie_hunter_shot(float before, float t, float at, float miss_m) {
 	es_play(ES_TIE_LASER, pos, 18.0f, 1.0f, 1.0f);
 }
 
-/* Any button: a key the films take for skipping, a mouse / pointer click,
- * or a controller button. */
-static int env_tie_pressed(void) {
-	const AeronInputSnapshot* in = Aeron_InputSnapshot();
-	if (!in) {
-		return 0;
-	}
-	if (in->key_pressed[AERON_KEY_ESCAPE] || in->key_pressed[AERON_KEY_SPACE] || in->key_pressed[AERON_KEY_RETURN] ||
-		in->key_pressed[AERON_KEY_BACKSPACE] ||
-		(in->mouse.released_buttons & (AERON_MOUSE_BUTTON_LEFT | AERON_MOUSE_BUTTON_RIGHT)) != 0) {
-		return 1;
-	}
-	for (int i = 0; i < AERON_CONTROLLER_MAX; ++i) {
-		if (in->controllers[i].connected &&
-			(in->controllers[i].gamepad_pressed_buttons || in->controllers[i].raw_pressed_buttons)) {
-			return 1;
-		}
-	}
-	return 0;
-}
-
 /* ---- the TIE art's sound ---------------------------------------------------
  * The flight's own effects from wave\SfxBlastNew.lst (its line n is effect
  * slot 4 + n, the WAVs in FE_High_Res or FE_Low_Res): the TIE and rebel
@@ -4638,14 +4654,10 @@ static void env_tie_animate(void) {
 		es_load();
 	}
 	const float T = ENV_TIE_ANIM_SECONDS;
-	/* A press during the fight jumps to the cover's moment; on the title it
-	 * brings in the screen. Until then presses go no further (the menu
-	 * behind is not shown yet). */
-	if (env_float("XWA_XR_TIEART_HIDE_SCREEN", 1.0f) && !s_env.anim_go) {
-		const int pressed = env_tie_pressed();
-		if (pressed && s_env.anim_t >= T + 0.4f) {
-			s_env.anim_go = 1;
-		} else if (pressed && s_env.anim_t > 0.5f && s_env.anim_t < T) {
+	/* On the startup title, A during the fight jumps to the cover's moment. */
+	{
+		const int pressed = s_title.pressed;
+		if (pressed && s_env.anim_t > 0.5f && s_env.anim_t < T) {
 			if (s_env.anim_t < ENV_TIE_BOOM_AT) {
 				/* Jumped past the blast: still heard. */
 				float p[3];
@@ -4657,11 +4669,6 @@ static void env_tie_animate(void) {
 			}
 			s_env.anim_t = T;
 		}
-		Keyboard_FlushCharBuffer();
-		FrontendMouse_ClearClicks();
-	}
-	if (s_env.anim_go) {
-		s_env.anim_go_t += dt;
 	}
 	const float before = s_env.anim_t;
 	s_env.anim_t = fminf(s_env.anim_t + dt, T + 60.0f);
@@ -4798,10 +4805,121 @@ static void env_tie_submit_bolts(AeronScene3D* scene) {
 	}
 }
 
+/* ---- the startup title ------------------------------------------------- */
+
+/* "Press A to Continue" into a texture of its own (once). */
+static void env_title_text(AeronCommandBuffer* cmd) {
+	if (s_title.text_rt || s_title.font_state < 0 || !cmd) {
+		return;
+	}
+	if (s_title.font_state == 0) {
+		s_title.font_state = -1;
+		if (AeronFontAtlas_LoadVfs(&s_title.font, cmd, Aeron_GetVfs(), AERON_VFS_ROOT_RESOURCE, "fonts/setup",
+								   4u * 1024u * 1024u)) {
+			s_title.font_state = 1;
+		} else {
+			Aeron_LogWarn("xwa.remaster", "VR environment: no font for the title's prompt");
+			return;
+		}
+	}
+	s_title.text_w = 1024;
+	s_title.text_h = 128;
+	s_title.text_rt = Aeron_CreateRenderTarget(&(AeronRenderTargetDesc) {
+		.width = s_title.text_w, .height = s_title.text_h, .format = AERON_TEXTURE_FORMAT_RGBA8_UNORM });
+	s_title.text_list = AeronDrawList_Create(64);
+	if (!s_title.text_rt || !s_title.text_list) {
+		s_title.font_state = -1;
+		return;
+	}
+	static const char* const prompt = "Press A to Continue";
+	AeronTextStyle style;
+	memset(&style, 0, sizeof style);
+	style.font = &s_title.font;
+	/* As wide as the texture allows, the line no taller than 80 % of it. */
+	style.scale = 1.0f;
+	const float wide = AeronText_MeasureWidth(&style, prompt, -1);
+	const float tall = AeronText_LineHeight(&style);
+	style.scale = fminf(wide > 0.0f ? 0.92f * (float)s_title.text_w / wide : 1.0f,
+						tall > 0.0f ? 0.8f * (float)s_title.text_h / tall : 1.0f);
+	style.tint[0] = style.tint[1] = style.tint[2] = style.tint[3] = 1.0f;
+	style.filter = AERON_BLIT2D_FILTER_LINEAR;
+	AeronDrawList_Begin(s_title.text_list, s_title.text_rt, s_title.text_w, s_title.text_h, AERON_DRAWLIST2D_CLEAR,
+						NULL);
+	AeronText_Draw(s_title.text_list, &style, 0.5f * (float)s_title.text_w,
+				   0.5f * ((float)s_title.text_h - AeronText_LineHeight(&style)), AERON_TEXT_CENTER, prompt, -1, NULL);
+	AeronDrawList_Render(s_title.text_list, cmd);
+}
+
+/* Once a frame (the scene up): the title's clock and its A. */
+static void env_title_update(void) {
+	const uint64_t now = SDL_GetPerformanceCounter();
+	float dt = s_title.counter ? (float)((double)(now - s_title.counter) / (double)SDL_GetPerformanceFrequency()) : 0.0f;
+	s_title.counter = now;
+	dt = fminf(fmaxf(dt, 0.0f), 0.1f);
+	s_title.pressed = 0;
+	if (!env_title_active()) {
+		return;
+	}
+	const AeronInputSnapshot* in = Aeron_InputSnapshot();
+	int pressed = Aeron_XrTakeAPressed() || (in && (in->key_pressed[AERON_KEY_RETURN] || in->key_pressed[AERON_KEY_SPACE]));
+	/* Nothing reaches the hidden menu meanwhile. */
+	Keyboard_FlushCharBuffer();
+	FrontendMouse_ClearClicks();
+	if (env_title_shown()) {
+		s_title.shown_t += dt;
+		if (!s_title.go && pressed && s_title.shown_t >= 0.4f) {
+			s_title.go = 1;
+			pressed = 0;
+		}
+	}
+	s_title.pressed = pressed;
+	if (s_title.go) {
+		s_title.go_t += dt;
+		if (s_title.go_t >= ENV_TIE_REVEAL_SECONDS) {
+			s_title.done = 1;
+		}
+	}
+}
+
+/* The logo large where the screen will be, the prompt under it, gently
+ * pulsing; both fade out as the screen comes in. */
+static void env_submit_title(AeronScene3D* scene) {
+	if (!env_title_shown()) {
+		return;
+	}
+	const float a = env_smooth(s_title.shown_t / env_float("XWA_XR_TITLE_FADE_SECONDS", 1.2f)) *
+					(1.0f - env_screen_reveal());
+	env_submit_logo_at(scene, a, 1);
+	if (!s_title.text_rt || a <= 0.0f) {
+		return;
+	}
+	EnvScreen sc;
+	env_screen(&sc);
+	const float f = sc.frame_scale;
+	float logo_h = 0.0f;
+	if (s_env.tex[ENV_TEX_LOGO] && s_env.tex_w[ENV_TEX_LOGO] > 0) {
+		logo_h = 0.9f * sc.pic_w * f * env_float("XWA_XR_LOGO_SCALE", 1.0f) * (float)s_env.tex_h[ENV_TEX_LOGO] /
+				 (float)s_env.tex_w[ENV_TEX_LOGO];
+	}
+	const float tw = 0.55f * sc.pic_w * f, th = tw * (float)s_title.text_h / (float)s_title.text_w;
+	const float up = sc.lift * f - 0.5f * logo_h - 0.03f - 0.5f * th;
+	const float center[3] = { s_env.view_pos[0], s_env.view_pos[1] + (sc.frame_dist + 0.02f) * sc.k,
+							  s_env.view_pos[2] + up * sc.k };
+	const float ax[3] = { 0.5f * tw * sc.k, 0.0f, 0.0f };
+	const float ay[3] = { 0.0f, 0.0f, 0.5f * th * sc.k };
+	float c[4][3];
+	env_rect(center, ax, ay, c);
+	const float pulse = a * (0.75f + 0.25f * (0.5f + 0.5f * sinf(2.0f * BT_PI * 0.6f * s_title.shown_t)));
+	const float tint[4] = { 1.15f, 1.2f, 1.3f, pulse };
+	env_quad_tex(scene, Aeron_RenderTargetGetTexture(s_title.text_rt), AERON_SCENE_BILLBOARD_STAGE_OVERLAY,
+				 AERON_SCENE_BILLBOARD_BLEND_PMA, c, tint);
+}
+
 void XwaVrEnv_Submit(AeronScene3D* scene) {
 	if (s_env_bare) {
 		return; /* the startup films: empty space */
 	}
+	env_title_update();
 	if (s_env.mode == ENV_BATTLE) {
 		/* The battle moves: its craft are placed again every frame. */
 		bt_advance();
@@ -4838,11 +4956,13 @@ void XwaVrEnv_Submit(AeronScene3D* scene) {
 	} else if (s_env.mode == ENV_XVTART) {
 		env_submit_xvtart_sprites(scene);
 	}
+	env_submit_title(scene);
 	env_submit_frame(scene);
 }
 
 void XwaVrEnv_Release(void) {
 	env_es_stop();
+	Aeron_XrSetInputBlocked(0);
 	for (int i = 0; i < s_env.mesh_count; ++i) {
 		if (s_env.meshes[i].mesh) {
 			AeronScene_MeshDestroy(s_env.meshes[i].mesh);
