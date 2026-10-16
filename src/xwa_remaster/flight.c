@@ -5335,7 +5335,13 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 		XwaVrGloves_Idle();
 		return 0;
 	}
-	if (!fl_ensure(xr_frame.width, xr_frame.height) || !XwaVrEnv_Prepare(cmd)) {
+	if (!fl_ensure(xr_frame.width, xr_frame.height)) {
+		XwaVrGloves_Idle();
+		return 0;
+	}
+	/* The startup films play in empty space (stars only) while the scene
+	 * loads behind them. */
+	if (!XwaVrEnv_Prepare(cmd) && !XwaVrEnv_Bare()) {
 		XwaVrGloves_Idle();
 		return 0;
 	}

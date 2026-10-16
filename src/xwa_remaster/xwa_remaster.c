@@ -27,6 +27,8 @@
 #include "xwa_remaster/hud.h"
 #include "xwa_remaster/opt_mesh.h"
 #include "xwa_remaster/ship.h"
+#include "xwa_remaster/vr_env.h"
+#include "xwa/frontend/frontend_bootstrap.h"
 #include "xwa_runtime/runtime/movie_task.h"
 #include "xwa_runtime/runtime/port.h"
 #include "xwa_runtime/runtime/presentation.h"
@@ -562,6 +564,8 @@ void XwaRemaster_Frame(int32_t delta_us) {
 		AeronCommandBuffer* env_cmd = Aeron_XrIsPresenting() ? Aeron_AcquireCommandBuffer() : NULL;
 		if (env_cmd) {
 			Aeron_GpuDebugPush(env_cmd, "OpenXWA VR environment");
+			/* The logos and the opening crawl: empty space, no frame. */
+			XwaVrEnv_SetBare(FrontendBootstrap_IntroPlaying());
 			(void)XwaRemasterFlight_RenderVrEnvironment(env_cmd, snap->scene_kind == XWA_SCENE_CUTSCENE);
 			g.vr_env_used = 1;
 			Aeron_GpuDebugPop(env_cmd);

@@ -88,6 +88,11 @@ int XwaVrEnv_CommitFrameLayer(AeronCommandBuffer* cmd, float brightness);
  * metres, LOCAL space (x right, y up, -z ahead). */
 int XwaVrEnv_LayerRect(float centre[3], float size[2]);
 
+/* Bare: only the stars round the screen, no scene, frame or logo (the
+ * startup films). The scene keeps loading meanwhile. */
+void XwaVrEnv_SetBare(int bare);
+int XwaVrEnv_Bare(void);
+
 /* Frees the GPU meshes (the flight scene loads its own hangar). */
 void XwaVrEnv_Release(void);
 

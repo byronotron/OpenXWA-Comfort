@@ -463,6 +463,12 @@ static const EnvSpaceScene* env_space(void) {
 
 int XwaVrEnv_Enabled(void) { return env_mode() != ENV_OFF; }
 
+static int s_env_bare;
+
+void XwaVrEnv_SetBare(int bare) { s_env_bare = bare != 0; }
+
+int XwaVrEnv_Bare(void) { return s_env_bare; }
+
 /* The live battle (defined below). */
 static void bt_lighting(XwaVrEnvLighting* out, float sun);
 static void bt_cast(void);
@@ -1399,7 +1405,7 @@ int XwaVrEnv_LayerRect(float centre[3], float size[2]) {
 	if (sc.dist <= 0.0f || sc.w <= 0.0f) {
 		return 0;
 	}
-	if (s_env.tex[ENV_TEX_FRAME] && s_env.frame_layer_ok) {
+	if (s_env.tex[ENV_TEX_FRAME] && s_env.frame_layer_ok && !s_env_bare) {
 		float q[3];
 		env_frame_quad(&sc, q, size);
 		centre[0] = q[0];
@@ -1417,6 +1423,9 @@ int XwaVrEnv_LayerRect(float centre[3], float size[2]) {
 }
 
 int XwaVrEnv_CommitFrameLayer(AeronCommandBuffer* cmd, float brightness) {
+	if (s_env_bare) {
+		return 0; /* no frame round the startup films */
+	}
 	if (!cmd || !s_env.tex[ENV_TEX_FRAME] || s_env.tex_w[ENV_TEX_FRAME] > AERON_XR_FRAME_WIDTH ||
 		s_env.tex_h[ENV_TEX_FRAME] > AERON_XR_FRAME_HEIGHT) {
 		s_env.frame_layer_ok = 0;
@@ -3628,6 +3637,9 @@ static void bt_submit(AeronScene3D* scene) {
 }
 
 void XwaVrEnv_Submit(AeronScene3D* scene) {
+	if (s_env_bare) {
+		return; /* the startup films: empty space */
+	}
 	if (s_env.mode == ENV_BATTLE) {
 		/* The battle moves: its craft are placed again every frame. */
 		bt_advance();

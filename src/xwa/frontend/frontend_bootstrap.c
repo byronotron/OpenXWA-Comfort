@@ -56,6 +56,14 @@ int FrontendBootstrap_RunIntroAndEnterConcourse(int frameCounter) {
 	return 0;
 }
 
+int FrontendBootstrap_IntroPlaying(void) {
+#ifdef XWA_MODERN
+	return g_frontendBootstrapIntroStarted;
+#else
+	return 0;
+#endif
+}
+
 // FUNCTION: XWA 0x57E560
 int FrontendBootstrap_InitMode(void) {
 	FrontendDisplay_DisableEscapeClose();
