@@ -561,6 +561,7 @@ void XwaVrEnv_SetBare(int bare) {
 	if (bare || !env_ready()) {
 		s_env_bare = 1;
 		s_env_fade_t = 0.0f;
+		(void)Aeron_XrTakeMenuBPressed(); /* no stale B (from flight) on the way in */
 	} else {
 		s_env_bare = 0;
 		s_env_fade_t = fminf(1.0f, s_env_fade_t + fminf(dt, 0.1f) / env_float("XWA_XR_ENV_FADE_SECONDS", 1.5f));
@@ -600,6 +601,15 @@ extern int musicState;
 int Music_SetState(int state);
 #define ENV_MUSIC_MISSION_FAILED 1280 /* MUSIC_STATE_FRONTEND_1280: the failed mission's debriefing */
 
+/* B in the menus puts the screen away: it fades out (with its frame and
+ * logo) and nothing reaches the menus until A or the trigger brings it
+ * back. */
+static struct {
+	int away;    /* put away (input blocked at once) */
+	float level; /* 1 shown .. 0 gone */
+} s_dismiss = { 0, 1.0f };
+#define ENV_DISMISS_SECONDS 0.4f
+
 static int env_title_active(void) {
 	return !s_title.done && s_env.mode != ENV_OFF && env_float("XWA_XR_TITLE", 1.0f) != 0.0f;
 }
@@ -607,6 +617,10 @@ static int env_title_active(void) {
 static float env_screen_reveal(void);
 static void env_title_text(AeronCommandBuffer* cmd);
 int XwaVrEnv_ScreenHidden(void) { return !s_env_bare && s_env.mode != ENV_OFF && env_screen_reveal() <= 0.0f; }
+int XwaVrEnv_InputBlocked(void) {
+	return XwaVrEnv_ScreenHidden() || (!s_env_bare && s_env.mode != ENV_OFF && s_dismiss.away);
+}
+float XwaVrEnv_ScreenFade(void) { return s_env_bare || s_env.mode == ENV_OFF ? 1.0f : env_screen_reveal(); }
 
 /* The TIE Fighter box art's animation (defined below). */
 #define ENV_TIE_ANIM_SECONDS 7.0f
@@ -640,7 +654,8 @@ static void es_play(int s, const float p[3], float ref_m, float gain, float pitc
 
 static float env_screen_reveal(void) {
 	if (!env_title_active()) {
-		return 1.0f;
+		const float x = s_dismiss.level;
+		return s_dismiss.away ? x * x * (3.0f - 2.0f * x) : fmaxf(x * x * (3.0f - 2.0f * x), 1e-3f);
 	}
 	/* The title holds until A is pressed. */
 	const float x = fminf(fmaxf(s_title.go_t / ENV_TIE_REVEAL_SECONDS, 0.0f), 1.0f);
@@ -5024,6 +5039,20 @@ static void env_title_update(void) {
 	dt = fminf(fmaxf(dt, 0.0f), 0.1f);
 	s_title.pressed = 0;
 	if (!env_title_active()) {
+		/* B puts the screen away; A or the trigger brings it back. */
+		if (Aeron_XrTakeMenuBPressed() && !s_dismiss.away) {
+			s_dismiss.away = 1;
+		}
+		if (s_dismiss.away) {
+			const AeronInputSnapshot* in = Aeron_InputSnapshot();
+			if (Aeron_XrTakeAPressed() || (in && (in->key_pressed[AERON_KEY_RETURN] || in->key_pressed[AERON_KEY_SPACE]))) {
+				s_dismiss.away = 0;
+			}
+			Keyboard_FlushCharBuffer();
+			FrontendMouse_ClearClicks();
+		}
+		const float step = dt / ENV_DISMISS_SECONDS;
+		s_dismiss.level = s_dismiss.away ? fmaxf(s_dismiss.level - step, 0.0f) : fminf(s_dismiss.level + step, 1.0f);
 		return;
 	}
 	const AeronInputSnapshot* in = Aeron_InputSnapshot();
@@ -5142,6 +5171,9 @@ void XwaVrEnv_Submit(AeronScene3D* scene) {
 void XwaVrEnv_Release(void) {
 	env_es_stop();
 	Aeron_XrSetInputBlocked(0);
+	Aeron_XrSetScreenFade(1.0f);
+	s_dismiss.away = 0;
+	s_dismiss.level = 1.0f;
 	for (int i = 0; i < s_env.mesh_count; ++i) {
 		if (s_env.meshes[i].mesh) {
 			AeronScene_MeshDestroy(s_env.meshes[i].mesh);

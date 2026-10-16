@@ -1333,6 +1333,35 @@ AeronTexture* XwaRemasterFrontend_RightEyeTexture(void) {
 	return g.stereo && g.output_rt_right ? Aeron_RenderTargetGetTexture(g.output_rt_right) : NULL;
 }
 
+/* VR: the cursor sits on the screen's "glass", the frame's plane
+ * (XWA_XR_CURSOR_DEPTH metres in front of the picture, by default the
+ * frame's XWA_XR_FRAME_DEPTH), the rest of the 2D screen behind it; the
+ * right eye sees the cursor moved by the disparity of that depth.
+ * XWA_XR_CURSOR_GLASS=0: on the picture. */
+static int rm_cursor_eye_offset(void) {
+	const char* on = SDL_getenv("XWA_XR_CURSOR_GLASS");
+	if ((on && on[0] == '0') || !Aeron_XrIsPresenting()) {
+		return 0;
+	}
+	float distance_m = 0.0f, width_m = 0.0f, height_m = 0.0f, offset_m = 0.0f;
+	if (!Aeron_XrVirtualScreenGeometry(&distance_m, &width_m, &height_m, &offset_m) || distance_m <= 0.3f ||
+		width_m <= 0.1f) {
+		return 0;
+	}
+	const char* depth_env = SDL_getenv("XWA_XR_CURSOR_DEPTH");
+	if (!depth_env || !depth_env[0]) {
+		depth_env = SDL_getenv("XWA_XR_FRAME_DEPTH");
+	}
+	float depth = depth_env && depth_env[0] ? (float)SDL_atof(depth_env) : 0.12f;
+	depth = depth < 0.0f ? 0.0f : (depth > distance_m - 0.2f ? distance_m - 0.2f : depth);
+	const char* ipd_env = SDL_getenv("XWA_XR_SHIP_3D_IPD");
+	const float ipd = ipd_env && SDL_atof(ipd_env) > 0.0 ? (float)SDL_atof(ipd_env) : 0.064f;
+	const XwaPresentationRect frame = XwaPresentation_Frame();
+	/* Crossed disparity on the screen's plane, in its logical pixels. */
+	const float shift_m = ipd * depth / (distance_m - depth);
+	return -(int)lroundf(shift_m * (float)frame.width / width_m);
+}
+
 static void rm_submit_cursor_layer(const RmCursorLayer* cursor, int x, int y, float opacity, int split_view) {
 	if (!cursor->visible || !cursor->rt)
 		return;
@@ -1349,6 +1378,7 @@ static void rm_submit_cursor_layer(const RmCursorLayer* cursor, int x, int y, fl
 		.tint_enabled = 1,
 		.tint_rgba = { opacity, opacity, opacity, opacity },
 		.scissor = { safe.x, safe.y, safe.width, safe.height },
+		.right_eye_offset_x = rm_cursor_eye_offset(),
 	};
 	if (split_view) {
 		layer.scissor.x += safe.width / 2;

@@ -5411,8 +5411,10 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 	/* The startup title (or the TIE art's fight): no screen, no hands, and
 	 * the controllers reach nothing but the A it waits for. */
 	const int screen_hidden = XwaVrEnv_ScreenHidden();
-	Aeron_XrSetInputBlocked(screen_hidden);
-	if (screen_hidden) {
+	const int input_blocked = XwaVrEnv_InputBlocked();
+	Aeron_XrSetInputBlocked(input_blocked);
+	Aeron_XrSetScreenFade(XwaVrEnv_ScreenFade());
+	if (input_blocked) {
 		XwaVrGloves_Idle();
 	} else {
 		XwaVrGloves_Submit(s.scene, cmd, rows, base.pos,
@@ -5546,7 +5548,7 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 		}
 		/* The pointer beam over the screen (beam layer). */
 		AeronXrPanel beam;
-		if (xr_frame.beam_target &&
+		if (!input_blocked && xr_frame.beam_target &&
 			XwaVrMenuBeam_Frame(cmd, xr_frame.beam_target, xr_frame.beam_width, xr_frame.beam_height,
 								xr_frame.views, &beam)) {
 			Aeron_XrStereoCommitBeams(&beam, 1);

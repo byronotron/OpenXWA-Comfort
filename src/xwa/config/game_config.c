@@ -146,6 +146,21 @@ unsigned int g_joystickEntryCount;
 // GLOBAL: XWA 0xB0CA20
 ConfigNumericStepperRepeatState g_configNumericStepperRepeatByButtonId[128];
 
+/* VR: the options that do nothing in the VR port are left out (the
+ * performance presets, the original renderer's video options, the sound
+ * channel count, mouse flight). */
+static int Config_VrPortMenus(void) {
+#ifdef XWA_MODERN
+	return XwaModernVrOptions_Available();
+#else
+	return 0;
+#endif
+}
+
+/* A main menu row as the original numbers it, with Performance Options
+ * (row 1) left out in VR. */
+static int Config_MainRow(int row) { return row > 1 && Config_VrPortMenus() ? row - 1 : row; }
+
 // FUNCTION: XWA 0x51D3D0
 int Config_MainMenuScreen(void) {
 	char keyState;
@@ -185,6 +200,9 @@ int Config_MainMenuScreen(void) {
 	rowCount = g_configRestrictedOptionsModalActive ? 8 : 12;
 	if (g_configRestrictedOptionsModalActive && g_configExitMissionAvailable) {
 		++rowCount;
+	}
+	if (Config_VrPortMenus()) {
+		--rowCount; /* no Performance Options */
 	}
 #else
 	rowCount = g_configRestrictedOptionsModalActive ? 7 : 10;
@@ -247,6 +265,7 @@ int Config_MainMenuScreen(void) {
 
 	y += 25;
 	++rowIndex;
+	if (!Config_VrPortMenus()) {
 	text = FrontendString_Get(STR_CONFIG_PERFORMANCE_OPTIONS);
 	titleWidth = FrontendText_MeasureWidth(text, 20);
 	textX = g_configMenuCenterX - (int)(titleWidth >> 1);
@@ -267,6 +286,7 @@ int Config_MainMenuScreen(void) {
 
 	y += 25;
 	++rowIndex;
+	}
 	text = FrontendString_Get(STR_CONFIG_VIDEO_OPTIONS);
 	titleWidth = FrontendText_MeasureWidth(text, 20);
 	textX = g_configMenuCenterX - (int)(titleWidth >> 1);
@@ -908,7 +928,7 @@ int Config_SoundOptionsScreen(void) {
 	}
 	if (buttonPressed) {
 		g_pendingMenuScreen = 0;
-		g_menuCursorRow = 3;
+		g_menuCursorRow = Config_MainRow(3);
 	}
 
 	if (restoreDefaults == 1) {
@@ -962,7 +982,7 @@ int Config_ControllerOptionsScreen(void) {
 	switch (XwaModernInputOptionsScreen_Update(g_configMenuCenterX, &g_menuCursorRow)) {
 		case 1:
 			g_pendingMenuScreen = 0;
-			g_menuCursorRow = 4;
+			g_menuCursorRow = Config_MainRow(4);
 			break;
 		case 2:
 			g_pendingMenuScreen = 20;
@@ -1086,7 +1106,7 @@ int Config_ControllerOptionsScreen(void) {
 	}
 	if (buttonPressed) {
 		g_pendingMenuScreen = 0;
-		g_menuCursorRow = 4;
+		g_menuCursorRow = Config_MainRow(4);
 	}
 
 	if (restoreDefaults == 1) {
@@ -2129,7 +2149,7 @@ int Config_CreditsScreen(void) {
 			}
 			FrontendCursor_Show();
 			g_pendingMenuScreen = 0;
-			g_menuCursorRow = 6;
+			g_menuCursorRow = Config_MainRow(6);
 			FrontendDisplay_SetFrameRate(24);
 			if (g_gameConfig.datapadMusicEnabled) {
 				Music_PauseIfInitialized();
@@ -2415,7 +2435,7 @@ int Config_CutsceneViewerScreen(void) {
 	if (menuNavKey == CONFIG_KEY_ESCAPE || requiredDisk) {
 		Keyboard_FlushCharBuffer();
 		g_pendingMenuScreen = zero;
-		g_menuCursorRow = 7;
+		g_menuCursorRow = Config_MainRow(7);
 	}
 
 	return zero;
@@ -2590,14 +2610,14 @@ int Config_OptionsDatapadUpdate(int frameState) {
 		case 24:
 			if (XwaModernVrCreditsScreen_Update(g_configMenuCenterX, &g_menuCursorRow)) {
 				g_pendingMenuScreen = 0;
-				g_menuCursorRow = 8; /* on "VR Port Credits" */
+				g_menuCursorRow = Config_MainRow(8); /* on "VR Port Credits" */
 			}
 			done = 0;
 			break;
 		case 19:
 			if (XwaModernPilotProfilesScreen_Update(g_configMenuCenterX, &g_menuCursorRow)) {
 				g_pendingMenuScreen = 0;
-				g_menuCursorRow = g_configRestrictedOptionsModalActive ? 5 : 9;
+				g_menuCursorRow = Config_MainRow(g_configRestrictedOptionsModalActive ? 5 : 9);
 			}
 			done = 0;
 			break;
@@ -2605,7 +2625,7 @@ int Config_OptionsDatapadUpdate(int frameState) {
 			switch (XwaModernControllerOptionsScreen_Update(g_configMenuCenterX, &g_menuCursorRow)) {
 				case XWA_MODERN_CONTROLLER_SCREEN_BACK:
 					g_pendingMenuScreen = 4;
-					g_menuCursorRow = 4;
+					g_menuCursorRow = XwaModernVrOptions_Available() ? 0 : 4; /* on "Controller Setup" */
 					break;
 				case XWA_MODERN_CONTROLLER_SCREEN_AXES:
 					g_pendingMenuScreen = 21;
@@ -3528,7 +3548,7 @@ int Config_NetworkOptionsScreen(void) {
 	}
 	if (buttonPressed) {
 		g_pendingMenuScreen = 0;
-		g_menuCursorRow = 5;
+		g_menuCursorRow = Config_MainRow(5);
 		if (g_frontendMissionSessionMode == FRONTEND_MISSION_SESSION_NET_HOST) {
 			MissionSetup_BroadcastStatePacket(0);
 		}
@@ -3886,8 +3906,11 @@ int Config_VideoOptionsMenu(void) {
 	unsigned int titleWidth;
 	FrontendRect rect;
 #ifdef XWA_MODERN
-	/* VR: "OpenXWA VR Options" is the first row; the rest move down one. */
+	/* VR: "OpenXWA VR Options" is the first row; the rest move down one.
+	 * The original renderer's single/multiplayer video options do nothing
+	 * in VR and are left out there. */
 	const int vr = XwaModernVrOptions_Available() ? 1 : 0;
+	const int rows = vr ? 3 : 4;
 #endif
 
 	keyState = (char)Config_GetMenuNavKey();
@@ -3897,7 +3920,7 @@ int Config_VideoOptionsMenu(void) {
 		keyState = 0;
 		if (--g_menuCursorRow < 0) {
 #ifdef XWA_MODERN
-			g_menuCursorRow = 3 + vr;
+			g_menuCursorRow = rows - 1;
 #else
 			g_menuCursorRow = 2;
 #endif
@@ -3907,7 +3930,7 @@ int Config_VideoOptionsMenu(void) {
 		Keyboard_FlushCharBuffer();
 		keyState = 0;
 #ifdef XWA_MODERN
-		if (++g_menuCursorRow >= 4 + vr) {
+		if (++g_menuCursorRow >= rows) {
 #else
 		if (++g_menuCursorRow >= 3) {
 #endif
@@ -3963,6 +3986,9 @@ int Config_VideoOptionsMenu(void) {
 	}
 #endif
 
+#ifdef XWA_MODERN
+	if (!vr) {
+#endif
 	text = FrontendString_Get(STR_CONFIG_VIDEO_SINGLE_PLAYER_OPTIONS);
 	titleWidth = FrontendText_MeasureWidth(text, 20);
 	textX = g_configMenuCenterX - (int)(titleWidth >> 1);
@@ -4014,15 +4040,18 @@ int Config_VideoOptionsMenu(void) {
 		g_pendingMenuScreen = 8;
 		g_menuCursorRow = 0;
 	}
+#ifdef XWA_MODERN
+	}
+#endif
 
 #ifdef XWA_MODERN
 	text = FrontendString_Get(STR_BACK);
 	titleWidth = FrontendText_MeasureWidth(text, 20);
 	textX = g_configMenuCenterX - (int)(titleWidth >> 1);
 	buttonPressed =
-		FrontendButton_DrawMenuButton(textX, 278 + 25 * vr, text, 20, g_colorPaleBlue, 24, 0, "settingsound");
-	if (g_menuCursorRow == 3 + vr) {
-		FrontendText_Draw(20, text, textX, 278 + 25 * vr, g_colorGreen);
+		FrontendButton_DrawMenuButton(textX, vr ? 253 : 278, text, 20, g_colorPaleBlue, 24, 0, "settingsound");
+	if (g_menuCursorRow == rows - 1) {
+		FrontendText_Draw(20, text, textX, vr ? 253 : 278, g_colorGreen);
 		if (keyState == CONFIG_KEY_ENTER) {
 			FrontendSound_PlayUISound("settingsound", 1, 0, 255, 12 * g_gameConfig.sfxDatapadVolume, 63);
 			Keyboard_FlushCharBuffer();
@@ -4052,7 +4081,7 @@ int Config_VideoOptionsMenu(void) {
 	}
 	if (buttonPressed) {
 		g_pendingMenuScreen = 0;
-		g_menuCursorRow = 2;
+		g_menuCursorRow = Config_MainRow(2);
 	}
 
 	return 0;
@@ -4297,6 +4326,17 @@ int Config_DrawOptionSliderDisabled(uint8_t* value, UIString labelId, UIString r
 }
 
 // FUNCTION: XWA 0x523A70
+/* Sliders take a click on a notch (or an end label), not a held button
+ * swept across them: a VR controller's grip is the right button and is
+ * often held, which made the sliders follow the pointer. */
+static int Config_SliderClicked(void) {
+#ifdef XWA_MODERN
+	return FrontendMouse_GetLeftClick();
+#else
+	return FrontendMouse_GetLeftDown() || FrontendMouse_GetRightDown();
+#endif
+}
+
 int Config_DrawOptionSliderImpl(uint8_t* value, UIString labelId, UIString rangeLabelId, int notchCount,
 								int* y, int* rowIndex, char* keyState, int buttonId, int disabled) {
 	const char* label;
@@ -4350,7 +4390,7 @@ int Config_DrawOptionSliderImpl(uint8_t* value, UIString labelId, UIString range
 	FrontendText_Draw(10, minLabel, sliderX, *y + 4, disabled ? g_colorGray : g_colorLightBlue);
 	FrontendDraw_RectAssign(&rect, sliderX, *y, minLabelWidth + sliderX + 1, *y + 15);
 	if (!disabled && FrontendDraw_PointInRect(&rect, mouseX, mouseY) &&
-		(FrontendMouse_GetLeftDown() || FrontendMouse_GetRightDown())) {
+		Config_SliderClicked()) {
 		FrontendSound_PlayUISound("settingsound", 1, 0, 255, 12 * g_gameConfig.sfxDatapadVolume, 63);
 		*value = 0;
 	}
@@ -4362,7 +4402,7 @@ int Config_DrawOptionSliderImpl(uint8_t* value, UIString labelId, UIString range
 		for (notchIndex = 0; notchIndex < notchCount; ++notchIndex) {
 			FrontendDraw_RectAssign(&rect, notchX, *y + 5, notchX + notchWidth, *y + 15);
 			if (!disabled && FrontendDraw_PointInRect(&rect, mouseX, mouseY) &&
-				(FrontendMouse_GetLeftDown() || FrontendMouse_GetRightDown())) {
+				Config_SliderClicked()) {
 				if (*value != notchIndex + 1) {
 					FrontendSound_PlayUISound("settingsound", 1, 0, 255, 12 * g_gameConfig.sfxDatapadVolume,
 											  63);
@@ -4391,7 +4431,7 @@ int Config_DrawOptionSliderImpl(uint8_t* value, UIString labelId, UIString range
 	FrontendText_Draw(10, maxLabel, notchX + 15, *y + 4, disabled ? g_colorGray : g_colorLightBlue);
 	FrontendDraw_RectAssign(&rect, notchX + 15, *y, maxLabelWidth + notchX + 16, *y + 15);
 	if (!disabled && FrontendDraw_PointInRect(&rect, mouseX, mouseY) &&
-		(FrontendMouse_GetLeftDown() || FrontendMouse_GetRightDown())) {
+		Config_SliderClicked()) {
 		FrontendSound_PlayUISound("settingsound", 1, 0, 255, 12 * g_gameConfig.sfxDatapadVolume, 63);
 		*value = (uint8_t)notchCount;
 	}

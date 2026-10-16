@@ -102,6 +102,11 @@ float XwaVrEnv_Fade(void);
 /* Nonzero while the screen and its frame are kept out of view (the TIE
  * Fighter box art playing out its fight). */
 int XwaVrEnv_ScreenHidden(void);
+/* Nonzero while the menus must get no input (the startup title, or the
+ * screen put away with B until A or the trigger). */
+int XwaVrEnv_InputBlocked(void);
+/* The 2D screen's brightness as it fades in or out (1 = shown). */
+float XwaVrEnv_ScreenFade(void);
 /* The head's orientation this frame (an XR view's, LOCAL space, x y z w),
  * for placing the scene's sounds. */
 void XwaVrEnv_SetHeadOrientation(const float q[4]);

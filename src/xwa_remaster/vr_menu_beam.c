@@ -3,6 +3,7 @@
 #include "xwa_remaster/vr_menu_beam.h"
 
 #include "aeron/aeron.h"
+#include <SDL3/SDL_stdinc.h>
 #include "aeron/scene/draw_list2d.h"
 #include "xwa_remaster/vr_gloves.h"
 
@@ -159,6 +160,23 @@ int XwaVrMenuBeam_Frame(AeronCommandBuffer* cmd, AeronRenderTarget* target, int 
 			return 0;
 		}
 		memcpy(start, hand.position, sizeof start);
+	}
+	/* It ends on the screen's glass, where the cursor is drawn (see the
+	 * frontend's cursor depth). */
+	{
+		const char* on = SDL_getenv("XWA_XR_CURSOR_GLASS");
+		const char* depth_env = SDL_getenv("XWA_XR_CURSOR_DEPTH");
+		if (!depth_env || !depth_env[0]) {
+			depth_env = SDL_getenv("XWA_XR_FRAME_DEPTH");
+		}
+		const float depth = depth_env && depth_env[0] ? (float)SDL_atof(depth_env) : 0.12f;
+		const float glass_z = hit[2] + depth; /* LOCAL: -z ahead */
+		if (!(on && on[0] == '0') && depth > 0.0f && start[2] > glass_z && hit[2] < glass_z) {
+			const float f = (glass_z - start[2]) / (hit[2] - start[2]);
+			for (int a = 0; a < 3; ++a) {
+				hit[a] = start[a] + (hit[a] - start[a]) * f;
+			}
+		}
 	}
 	return XwaVrBeam_Pose(start, hit, views, 0, height, out) && XwaVrBeam_DrawStrips(cmd, target, width, height);
 }

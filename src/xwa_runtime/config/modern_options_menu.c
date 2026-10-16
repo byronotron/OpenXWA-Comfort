@@ -211,7 +211,7 @@ int XwaModernOptionsMenu_DrawSliderU8(XwaModernOptionsMenu* menu, uint8_t* value
 	FrontendText_Draw(10, min_label, slider_x, menu->y + 4, disabled ? g_colorGray : g_colorLightBlue);
 	FrontendDraw_RectAssign(&rect, slider_x, menu->y, min_label_width + slider_x + 1, menu->y + 15);
 	if (!disabled && FrontendDraw_PointInRect(&rect, mouse_x, mouse_y) &&
-		(FrontendMouse_GetLeftDown() || FrontendMouse_GetRightDown()) && *value != 0) {
+		FrontendMouse_GetLeftClick() /* a click, not a held button swept over it */ && *value != 0) {
 		XwaModernOptionsMenu_PlaySelect();
 		*value = 0;
 	}
@@ -222,7 +222,7 @@ int XwaModernOptionsMenu_DrawSliderU8(XwaModernOptionsMenu* menu, uint8_t* value
 	for (notch_index = 0; notch_index < notch_count; ++notch_index) {
 		FrontendDraw_RectAssign(&rect, notch_x, menu->y + 5, notch_x + notch_width, menu->y + 15);
 		if (!disabled && FrontendDraw_PointInRect(&rect, mouse_x, mouse_y) &&
-			(FrontendMouse_GetLeftDown() || FrontendMouse_GetRightDown()) && *value != notch_index + 1) {
+			FrontendMouse_GetLeftClick() /* a click, not a held button swept over it */ && *value != notch_index + 1) {
 			XwaModernOptionsMenu_PlaySelect();
 			*value = (uint8_t)(notch_index + 1);
 		}
@@ -244,7 +244,7 @@ int XwaModernOptionsMenu_DrawSliderU8(XwaModernOptionsMenu* menu, uint8_t* value
 	FrontendDraw_RectAssign(&rect, notch_x + 15, menu->y,
 							FrontendText_MeasureWidth(max_label, 10) + notch_x + 16, menu->y + 15);
 	if (!disabled && FrontendDraw_PointInRect(&rect, mouse_x, mouse_y) &&
-		(FrontendMouse_GetLeftDown() || FrontendMouse_GetRightDown()) && *value != notch_count) {
+		FrontendMouse_GetLeftClick() /* a click, not a held button swept over it */ && *value != notch_count) {
 		XwaModernOptionsMenu_PlaySelect();
 		*value = (uint8_t)notch_count;
 	}

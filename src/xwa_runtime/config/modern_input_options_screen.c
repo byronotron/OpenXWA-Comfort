@@ -3,6 +3,7 @@
 #include "xwa/assets/string_table.h"
 #include "xwa_runtime/config/modern_input_options.h"
 #include "xwa_runtime/config/modern_options_menu.h"
+#include "xwa_runtime/config/modern_vr_options_screen.h"
 
 #include <stdint.h>
 
@@ -33,16 +34,21 @@ int XwaModernInputOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 	sensitivity = (uint8_t)(options.mouse_sensitivity - XWA_MODERN_MOUSE_SENSITIVITY_MIN);
 	invert_y = (uint8_t)(options.mouse_invert_y != 0);
 	changed = 0;
-	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 160, cursor_row, 6);
+	/* VR: no mouse to fly with; only the controller setup. */
+	const int vr = XwaModernVrOptions_Available();
+	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 160, cursor_row, vr ? 2 : 6);
 	XwaModernOptionsMenu_DrawTitle(&menu, FrontendString_Get(STR_CONFIG_GAME_CONTROLLER_OPTIONS));
 
-	changed |= XwaModernOptionsMenu_DrawCycleU8(&menu, &mouse_flight, "Mouse Flight Control", toggle_texts, 2,
-												70, 0);
-	changed |=
-		XwaModernOptionsMenu_DrawCycleU8(&menu, &mouse_mode, "Mouse Control Mode", mode_texts, 2, 74, 0);
-	changed |= XwaModernOptionsMenu_DrawCycleU8(&menu, &sensitivity, "Mouse Sensitivity", sensitivity_texts,
-												9, 71, 0);
-	changed |= XwaModernOptionsMenu_DrawCycleU8(&menu, &invert_y, "Invert Mouse Y", toggle_texts, 2, 72, 0);
+	if (!vr) {
+		changed |= XwaModernOptionsMenu_DrawCycleU8(&menu, &mouse_flight, "Mouse Flight Control", toggle_texts,
+													2, 70, 0);
+		changed |=
+			XwaModernOptionsMenu_DrawCycleU8(&menu, &mouse_mode, "Mouse Control Mode", mode_texts, 2, 74, 0);
+		changed |= XwaModernOptionsMenu_DrawCycleU8(&menu, &sensitivity, "Mouse Sensitivity",
+													sensitivity_texts, 9, 71, 0);
+		changed |=
+			XwaModernOptionsMenu_DrawCycleU8(&menu, &invert_y, "Invert Mouse Y", toggle_texts, 2, 72, 0);
+	}
 
 	if (changed) {
 		options.mouse_flight_enabled = mouse_flight != 0;
