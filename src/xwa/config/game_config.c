@@ -42,6 +42,7 @@
 #include "xwa_runtime/config/modern_video_options.h"
 #include "xwa_runtime/config/modern_video_options_screen.h"
 #include "xwa_runtime/config/modern_vr_options_screen.h"
+#include "xwa_runtime/config/modern_vr_credits_screen.h"
 #include "xwa_runtime/input/controller_mapping.h"
 #endif
 
@@ -181,7 +182,7 @@ int Config_MainMenuScreen(void) {
 #endif
 
 #ifdef XWA_MODERN
-	rowCount = g_configRestrictedOptionsModalActive ? 8 : 11;
+	rowCount = g_configRestrictedOptionsModalActive ? 8 : 12;
 	if (g_configRestrictedOptionsModalActive && g_configExitMissionAvailable) {
 		++rowCount;
 	}
@@ -392,6 +393,29 @@ int Config_MainMenuScreen(void) {
 
 		y += 25;
 		++rowIndex;
+#ifdef XWA_MODERN
+		text = "VR Port Credits";
+		titleWidth = FrontendText_MeasureWidth(text, 20);
+		textX = g_configMenuCenterX - (int)(titleWidth >> 1);
+		buttonPressed =
+			FrontendButton_DrawMenuButton(textX, y, text, 20, g_colorPaleBlue, 32, 0, "settingsound");
+		if (g_menuCursorRow == rowIndex) {
+			FrontendText_Draw(20, text, textX, y, g_colorGreen);
+			if (keyState == CONFIG_KEY_ENTER) {
+				FrontendSound_PlayUISound("settingsound", 1, 0, 255, 12 * g_gameConfig.sfxDatapadVolume, 63);
+				Keyboard_FlushCharBuffer();
+				keyState = 0;
+				buttonPressed = 1;
+			}
+		}
+		if (buttonPressed) {
+			g_pendingMenuScreen = 24;
+			g_menuCursorRow = 0;
+		}
+
+		y += 25;
+		++rowIndex;
+#endif
 	}
 
 #ifdef XWA_MODERN
@@ -2563,10 +2587,17 @@ int Config_OptionsDatapadUpdate(int frameState) {
 			}
 			done = 0;
 			break;
+		case 24:
+			if (XwaModernVrCreditsScreen_Update(g_configMenuCenterX, &g_menuCursorRow)) {
+				g_pendingMenuScreen = 0;
+				g_menuCursorRow = 8; /* on "VR Port Credits" */
+			}
+			done = 0;
+			break;
 		case 19:
 			if (XwaModernPilotProfilesScreen_Update(g_configMenuCenterX, &g_menuCursorRow)) {
 				g_pendingMenuScreen = 0;
-				g_menuCursorRow = g_configRestrictedOptionsModalActive ? 5 : 8;
+				g_menuCursorRow = g_configRestrictedOptionsModalActive ? 5 : 9;
 			}
 			done = 0;
 			break;
