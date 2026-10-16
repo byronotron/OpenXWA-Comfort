@@ -228,13 +228,33 @@ static const EnvShip k_tieart[] = {
 	{ "TieFighter", 28.0f, 2.0f, 90.0f, { 0.28f, -0.94f, -0.18f }, { 0.05f, -0.17f, 0.98f }, 0, 1 },
 	/* 5: the X-wing breaking up in the explosion, nose down to the right. */
 	{ "Xwing", 18.0f, -32.0f, 45.0f, { 0.55f, -0.35f, -0.75f }, { 0.30f, -0.60f, 0.50f }, 0, 1 },
-	/* 6: not on the cover: the X-wing running from the big Interceptor in
-	 * the animation, gone off to the right by the cover's moment (hidden in
-	 * the still; see env_tie_runner). */
+	/* 6, 7: not on the cover: in the animation an X-wing runs from the big
+	 * Interceptor and an A-wing from the TIE fighter on the left, both gone
+	 * from the view by the cover's moment (hidden in the still; see the
+	 * runners). */
 	{ "Xwing", 80.0f, 30.0f, 300.0f, { 1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, 0, 0 },
+	{ "AWing", -80.0f, 30.0f, 300.0f, { -1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, 0, 0 },
 };
-#define ENV_TIE_RUNNER 6  /* the X-wing on the run */
-#define ENV_TIE_CHASER 0  /* the Interceptor after it */
+#define ENV_TIE_RUNNERS 2
+#define ENV_TIE_FIRST_RUNNER 6
+/* Who runs from whom, and how it gets away: the break comes where it is
+ * break_m from the viewer (0: never by distance) or end_s before the
+ * cover's moment, whichever is first; a barrel roll of roll_s (0: none),
+ * then a pull at pull_w rad/s toward `away` (viewer's x right, y ahead,
+ * z up). */
+static const struct {
+	int ship, chaser;
+	float lead_m, break_m, end_s, roll_s, pull_w;
+	float away[3];
+} k_tie_runners[ENV_TIE_RUNNERS] = {
+	/* The X-wing from the big Interceptor: a barrel roll short of the
+	 * viewer, then up to the right. */
+	{ 6, 0, 50.0f, 130.0f, 0.9f, 1.0f, 1.6f, { 1.0f, 0.0f, 0.65f } },
+	/* The A-wing from the TIE fighter on the left: it holds on to the end
+	 * of the TIE's path (where the TIE will be on the cover), then curves
+	 * away out past the viewer's left. */
+	{ 7, 2, 50.0f, 0.0f, 0.02f, 0.0f, 0.8f, { -1.0f, -0.4f, 0.3f } },
+};
 
 /* The explosion's centre behind the big Interceptor: yaw, pitch, metres,
  * diameter in metres. */
@@ -415,7 +435,7 @@ static struct {
 	} anim_bolts[32];
 	float anim_next_shot[8];
 	struct {
-		int ok;
+		int ok, chaser;
 		float lead;   /* seconds ahead of the chaser on its path */
 		float tb;     /* the break: barrel roll, then the pull away */
 		float v, roll_time, helix;
@@ -423,7 +443,7 @@ static struct {
 		float pull_up[3];          /* the pull's turn centre direction */
 		float pull_w, pull_bank;
 		int flyby_done;
-	} runner;
+	} runner[ENV_TIE_RUNNERS];
 	int anim_hunter; /* the TIE that shoots the X-wing down (-1: none) */
 	int anim_go;     /* pressed on the title: the screen comes in */
 	float anim_go_t; /* seconds since */
@@ -558,7 +578,7 @@ static float env_screen_reveal(void);
 int XwaVrEnv_ScreenHidden(void) { return !s_env_bare && env_screen_reveal() <= 0.0f; }
 
 /* The TIE Fighter box art's animation (defined below). */
-#define ENV_TIE_ANIM_SECONDS 10.0f
+#define ENV_TIE_ANIM_SECONDS 7.0f
 #define ENV_TIE_BOOM_AT (ENV_TIE_ANIM_SECONDS - 1.4f)
 #define ENV_TIE_SALVO_SECONDS 0.5f
 #define ENV_TIE_BOLT_SPEED 320.0f /* m/s */
@@ -3969,9 +3989,10 @@ static float env_tie_path_score(int ship) {
 		/* In front and near enough to watch. */
 		seen += (i >= 8 && fabsf(yaw) < 75.0f && pitch > -45.0f && pitch < 55.0f) * ((d < 350.0f) + 2 * (d < 160.0f)) *
 				late;
-		/* From 4 s on, every craft roughly in the view: how far out of it. */
+		/* From 0.4 of the way in (about 4 s before the end) every craft in
+		 * the middle of the view: how far out of it. */
 		if (i >= 16) {
-			out_of_view += fmaxf(fabsf(yaw) - 55.0f, 0.0f) + fmaxf(pitch - 35.0f, 0.0f) + fmaxf(-30.0f - pitch, 0.0f);
+			out_of_view += fmaxf(fabsf(yaw) - 38.0f, 0.0f) + fmaxf(pitch - 25.0f, 0.0f) + fmaxf(-32.0f - pitch, 0.0f);
 		}
 		/* No diving in steeply from above (or climbing from below). */
 		if (i >= 8) {
@@ -3980,68 +4001,82 @@ static float env_tie_path_score(int ship) {
 	}
 	/* Snap rolls look wrong: more than about 2 rad/s costs. */
 	return fminf(closest, fmaxf(0.7f * end_m, 8.0f)) - (closest < 5.0f ? 100.0f : 0.0f) - 1.5f * (float)hidden +
-		   0.12f * (float)seen - 15.0f * fmaxf(roll_max - 2.0f, 0.0f) - 0.12f * out_of_view - 4.0f * steep;
+		   0.12f * (float)seen - 15.0f * fmaxf(roll_max - 2.0f, 0.0f) - 0.35f * out_of_view - 4.0f * steep;
 }
 
-/* The X-wing on the run: it flies the chaser's path 50 m ahead of it,
- * then, short of the viewer, barrel-rolls (a roll round a small helix, the
- * nose along the path all the way) and pulls up to the right out of the
- * forward view. */
-static void env_tie_runner_pose(float t, float pos[3], float n[3], float u[3]);
+/* The runners: each flies its chaser's path 50 m ahead of it, then
+ * breaks away: a barrel roll (a roll round a small helix, the nose along
+ * the path all the way) if it has one, then a pull out of the forward
+ * view. */
+static int env_tie_runner_of(int ship) {
+	for (int r = 0; r < ENV_TIE_RUNNERS; ++r) {
+		if (k_tie_runners[r].ship == ship) {
+			return r;
+		}
+	}
+	return -1;
+}
+
+static void env_tie_runner_pose(int r, float t, float pos[3], float n[3], float u[3]);
 
 static void env_tie_runner_plan(void) {
 	const float k = AERON_OPT_UNITS_PER_METER;
-	s_env.runner.ok = 0;
-	if (env_space()->count <= ENV_TIE_RUNNER || !s_env.anim_fl[ENV_TIE_CHASER].v) {
-		return;
-	}
-	const float v = s_env.anim_fl[ENV_TIE_CHASER].v;
-	const float lead = 50.0f * k / v;
 	const float T = ENV_TIE_ANIM_SECONDS;
-	/* The break: where (on the chaser's path, lead seconds on) it is about
-	 * 110 m from the viewer, or as late as the path allows. */
-	float tb = T - lead - 0.05f;
-	for (float t = 0.0f; t < T - lead; t += 0.02f) {
-		float p[3], nn[3], uu[3];
-		env_tie_pose(ENV_TIE_CHASER, t + lead, p, nn, uu);
-		if (bt_len(p) / k < env_float("XWA_XR_RUNNER_BREAK_M", 110.0f)) {
-			tb = t;
-			break;
+	for (int r = 0; r < ENV_TIE_RUNNERS; ++r) {
+		__typeof__(s_env.runner[0])* rn = &s_env.runner[r];
+		const int chaser = k_tie_runners[r].chaser;
+		rn->ok = 0;
+		if (env_space()->count <= k_tie_runners[r].ship || !s_env.anim_fl[chaser].v) {
+			continue;
 		}
+		const float v = s_env.anim_fl[chaser].v;
+		const float lead = k_tie_runners[r].lead_m * k / v;
+		float tb = T - lead - k_tie_runners[r].end_s;
+		const float break_m = k_tie_runners[r].break_m *
+							  (r == 0 ? env_float("XWA_XR_RUNNER_BREAK_M", 130.0f) / 130.0f : 1.0f);
+		for (float t = 0.0f; break_m > 0.0f && t < tb; t += 0.02f) {
+			float p[3], nn[3], uu[3];
+			env_tie_pose(chaser, t + lead, p, nn, uu);
+			if (bt_len(p) / k < break_m) {
+				tb = t;
+				break;
+			}
+		}
+		rn->chaser = chaser;
+		rn->lead = lead;
+		rn->tb = fmaxf(tb, 0.0f);
+		rn->v = v;
+		rn->roll_time = k_tie_runners[r].roll_s;
+		rn->helix = 3.0f * k;
+		env_tie_pose(chaser, rn->tb + lead, rn->pb, rn->nb, rn->ub);
+		const float* away = k_tie_runners[r].away;
+		const float along = bt_dot(away, rn->nb);
+		for (int a = 0; a < 3; ++a) {
+			rn->pull_up[a] = away[a] - rn->nb[a] * along;
+		}
+		if (!bt_norm(rn->pull_up)) {
+			memcpy(rn->pull_up, rn->ub, sizeof rn->pull_up);
+		}
+		rn->pull_w = k_tie_runners[r].pull_w;
+		rn->pull_bank = env_tie_roll(rn->ub, rn->pull_up, rn->nb);
+		rn->flyby_done = 0;
+		rn->ok = 1;
 	}
-	s_env.runner.lead = lead;
-	s_env.runner.tb = tb;
-	s_env.runner.v = v;
-	s_env.runner.roll_time = 0.8f;
-	s_env.runner.helix = 3.0f * k;
-	env_tie_pose(ENV_TIE_CHASER, tb + lead, s_env.runner.pb, s_env.runner.nb, s_env.runner.ub);
-	/* Pull toward the viewer's right and up. */
-	static const float away[3] = { 1.0f, 0.0f, 0.65f };
-	const float along = bt_dot(away, s_env.runner.nb);
-	for (int a = 0; a < 3; ++a) {
-		s_env.runner.pull_up[a] = away[a] - s_env.runner.nb[a] * along;
-	}
-	if (!bt_norm(s_env.runner.pull_up)) {
-		memcpy(s_env.runner.pull_up, s_env.runner.ub, sizeof s_env.runner.pull_up);
-	}
-	s_env.runner.pull_w = 1.6f;
-	s_env.runner.pull_bank = env_tie_roll(s_env.runner.ub, s_env.runner.pull_up, s_env.runner.nb);
-	s_env.runner.flyby_done = 0;
-	s_env.runner.ok = 1;
 }
 
-static void env_tie_runner_pose(float t, float pos[3], float n[3], float u[3]) {
-	if (!s_env.runner.ok) {
+static void env_tie_runner_pose(int r, float t, float pos[3], float n[3], float u[3]) {
+	const __typeof__(s_env.runner[0])* rn = &s_env.runner[r];
+	if (!rn->ok) {
 		return;
 	}
-	if (t < s_env.runner.tb) {
-		env_tie_pose(ENV_TIE_CHASER, t + s_env.runner.lead, pos, n, u);
+	if (t < rn->tb) {
+		env_tie_pose(rn->chaser, t + rn->lead, pos, n, u);
 		return;
 	}
-	const float v = s_env.runner.v, D1 = s_env.runner.roll_time, Rh = s_env.runner.helix;
-	const float* nb = s_env.runner.nb;
-	const float* ub = s_env.runner.ub;
-	const float s = t - s_env.runner.tb;
+	const float v = rn->v, D1 = rn->roll_time, Rh = rn->helix;
+	const float* nb = rn->nb;
+	const float* ub = rn->ub;
+	const float s = t - rn->tb;
 	if (s < D1) {
 		/* The barrel roll: a full roll while flying round a helix whose axis
 		 * runs along the old heading, its centre toward the canopy. */
@@ -4053,7 +4088,7 @@ static void env_tie_runner_pose(float t, float pos[3], float n[3], float u[3]) {
 		float side[3];
 		env_cross(nb, u, side); /* du/dphi */
 		for (int a = 0; a < 3; ++a) {
-			pos[a] = s_env.runner.pb[a] + nb[a] * v * s + Rh * (ub[a] - u[a]);
+			pos[a] = rn->pb[a] + nb[a] * v * s + Rh * (ub[a] - u[a]);
 			n[a] = nb[a] * v - Rh * dphi * side[a];
 		}
 		bt_norm(n);
@@ -4066,16 +4101,16 @@ static void env_tie_runner_pose(float t, float pos[3], float n[3], float u[3]) {
 	}
 	/* The pull: rolling onto the turn as it begins, then round. */
 	const float s2 = s - D1;
-	const float w = s_env.runner.pull_w, R = v / w, th = w * s2;
-	const float* up = s_env.runner.pull_up;
+	const float w = rn->pull_w, R = v / w, th = w * s2;
+	const float* up = rn->pull_up;
 	for (int a = 0; a < 3; ++a) {
 		n[a] = nb[a] * cosf(th) + up[a] * sinf(th);
 		u[a] = up[a] * cosf(th) - nb[a] * sinf(th);
-		pos[a] = s_env.runner.pb[a] + nb[a] * v * D1 + R * (up[a] - u[a]);
+		pos[a] = rn->pb[a] + nb[a] * v * D1 + R * (up[a] - u[a]);
 	}
 	const float f = env_smooth(s2 / 0.45f);
 	if (f < 1.0f) {
-		bt_rotate(u, n, -(1.0f - f) * s_env.runner.pull_bank);
+		bt_rotate(u, n, -(1.0f - f) * rn->pull_bank);
 	}
 }
 
@@ -4087,8 +4122,8 @@ static void env_tie_paths(void) {
 	static float scores[8][ENV_TIE_CANDIDATES];
 	for (int i = 0; i < count; ++i) {
 		int best = 0;
-		if (i == ENV_TIE_RUNNER) {
-			continue; /* flies after the chaser (env_tie_runner_plan) */
+		if (env_tie_runner_of(i) >= 0) {
+			continue; /* flies after its chaser (env_tie_runner_plan) */
 		}
 		for (int c = 0; c < ENV_TIE_CANDIDATES; ++c) {
 			env_tie_candidate(i, c);
@@ -4098,7 +4133,7 @@ static void env_tie_paths(void) {
 			}
 		}
 		env_tie_candidate(i, best);
-		s_env.anim_next_shot[i] = 3.0f + 0.31f * (float)i;
+		s_env.anim_next_shot[i] = 1.2f + 0.27f * (float)i;
 	}
 	/* The X-wing's killer: a TIE fighter (any TIE when there is none). It
 	 * and the X-wing take the paths, among their good ones, on which its
@@ -4115,7 +4150,7 @@ static void env_tie_paths(void) {
 	/* Each one's best few paths only. */
 	enum { TOP = 24 };
 	int top[8][TOP];
-	for (int i = 0; i < count && i != ENV_TIE_RUNNER; ++i) {
+	for (int i = 0; i < count && i < ENV_TIE_FIRST_RUNNER; ++i) {
 		for (int j = 0; j < TOP; ++j) {
 			top[i][j] = -1;
 			for (int c = 0; c < ENV_TIE_CANDIDATES; ++c) {
@@ -4198,8 +4233,8 @@ static void env_tie_pose(int ship, float t, float pos[3], float n[3], float u[3]
 	if (!s_env.anim_paths || ship >= 8 || t >= ENV_TIE_ANIM_SECONDS) {
 		return;
 	}
-	if (ship == ENV_TIE_RUNNER) {
-		env_tie_runner_pose(t, pos, n, u);
+	if (env_tie_runner_of(ship) >= 0) {
+		env_tie_runner_pose(env_tie_runner_of(ship), t, pos, n, u);
 		return;
 	}
 	const float T = ENV_TIE_ANIM_SECONDS;
@@ -4636,13 +4671,16 @@ static void env_tie_animate(void) {
 		env_tie_pose(s_env.ship_of[i], t, pos, n, u);
 		env_pose_matrix(n, u, pos, s_env.transform[i]);
 		/* The runner is gone by the cover's moment. */
-		s_env.hidden[i] = s_env.ship_of[i] == ENV_TIE_RUNNER && (t >= T || !s_env.runner.ok);
+		const int r = env_tie_runner_of(s_env.ship_of[i]);
+		s_env.hidden[i] = r >= 0 && (t >= T || !s_env.runner[r].ok);
 	}
-	if (s_env.runner.ok && !s_env.runner.flyby_done && t >= s_env.runner.tb + 0.25f && t < T) {
-		float pos[3], n[3], u[3];
-		env_tie_pose(ENV_TIE_RUNNER, t, pos, n, u);
-		s_env.runner.flyby_done = 1;
-		es_play(ES_XW_FLYBY, pos, 30.0f, 1.2f, 1.0f);
+	for (int r = 0; r < ENV_TIE_RUNNERS; ++r) {
+		if (s_env.runner[r].ok && !s_env.runner[r].flyby_done && t >= s_env.runner[r].tb + 0.25f && t < T) {
+			float pos[3], n[3], u[3];
+			env_tie_pose(k_tie_runners[r].ship, t, pos, n, u);
+			s_env.runner[r].flyby_done = 1;
+			es_play(ES_XW_FLYBY, pos, 30.0f, 1.2f, 1.0f);
+		}
 	}
 	/* Bolts: the cover's shooters, the big Interceptor and the X-wing fire
 	 * along their noses in bursts until the cover's moment. */
