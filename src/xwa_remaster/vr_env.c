@@ -3857,7 +3857,7 @@ static void bt_submit(AeronScene3D* scene) {
  * the TIE's guns bear on the X-wing as it is hit. Then the great explosion
  * grows into the cover's and the still holds. */
 
-#define ENV_TIE_CANDIDATES 126
+#define ENV_TIE_CANDIDATES 234 /* 6 last-turn angles x 3 rates x 13 first turns */
 
 static float env_tie_speed(int ship) {
 	const char* opt = env_space()->ships[ship].opt;
@@ -3875,14 +3875,19 @@ static float env_tie_speed(int ship) {
 static void env_tie_candidate(int ship, int c) {
 	static const float alphas[6] = { 25.0f, 45.0f, 65.0f, 85.0f, 110.0f, 140.0f };
 	static const float rates[3] = { 0.7f, 1.0f, 1.3f };
-	static const float firsts[7][2] = { { 0.0f, 0.0f },	   { 60.0f, 55.0f },	{ 60.0f, -55.0f }, { 120.0f, 55.0f },
-										{ 120.0f, -55.0f }, { 180.0f, 55.0f }, { 180.0f, -55.0f } };
+	/* No first turn, or one of 60/120/180 degrees banked 55 or 85 degrees
+	 * either way (85: nearly a flat turn across the sky). */
+	static const float firsts[13][2] = {
+		{ 0.0f, 0.0f },	   { 60.0f, 55.0f },   { 60.0f, -55.0f },  { 60.0f, 85.0f },	{ 60.0f, -85.0f },
+		{ 120.0f, 55.0f }, { 120.0f, -55.0f }, { 120.0f, 85.0f },  { 120.0f, -85.0f }, { 180.0f, 55.0f },
+		{ 180.0f, -55.0f }, { 180.0f, 85.0f }, { 180.0f, -85.0f },
+	};
 	const float deg = BT_PI / 180.0f;
 	s_env.anim_fl[ship].v = env_tie_speed(ship);
 	s_env.anim_fl[ship].alpha = alphas[c % 6] * deg;
 	s_env.anim_fl[ship].w = rates[(c / 6) % 3];
-	s_env.anim_fl[ship].beta = firsts[(c / 18) % 7][0] * deg;
-	s_env.anim_fl[ship].b1 = firsts[(c / 18) % 7][1] * deg;
+	s_env.anim_fl[ship].beta = firsts[(c / 18) % 13][0] * deg;
+	s_env.anim_fl[ship].b1 = firsts[(c / 18) % 13][1] * deg;
 }
 
 /* The sky's up across nose n (or `fallback` when n is vertical). */
@@ -3913,6 +3918,7 @@ static float env_tie_path_score(int ship) {
 	const float end_m = bt_len(e) / k;
 	float closest = 1e9f, roll_max = 0.0f, prev_u[3] = { 0.0f, 0.0f, 0.0f };
 	int hidden = 0, seen = 0;
+	float out_of_view = 0.0f, steep = 0.0f;
 	for (int i = 0; i <= 40; ++i) {
 		float p[3], n[3], u[3];
 		env_tie_pose(ship, ENV_TIE_ANIM_SECONDS * (float)i / 40.0f * 0.999f, p, n, u);
@@ -3935,10 +3941,18 @@ static float env_tie_path_score(int ship) {
 		/* In front and near enough to watch. */
 		seen += (i >= 8 && fabsf(yaw) < 75.0f && pitch > -45.0f && pitch < 55.0f) * ((d < 350.0f) + 2 * (d < 160.0f)) *
 				late;
+		/* From 4 s on, every craft roughly in the view: how far out of it. */
+		if (i >= 16) {
+			out_of_view += fmaxf(fabsf(yaw) - 55.0f, 0.0f) + fmaxf(pitch - 35.0f, 0.0f) + fmaxf(-30.0f - pitch, 0.0f);
+		}
+		/* No diving in steeply from above (or climbing from below). */
+		if (i >= 8) {
+			steep += fmaxf(fabsf(n[2]) - 0.5f, 0.0f);
+		}
 	}
 	/* Snap rolls look wrong: more than about 2 rad/s costs. */
 	return fminf(closest, fmaxf(0.7f * end_m, 8.0f)) - (closest < 5.0f ? 100.0f : 0.0f) - 1.5f * (float)hidden +
-		   0.12f * (float)seen - 15.0f * fmaxf(roll_max - 2.0f, 0.0f);
+		   0.12f * (float)seen - 15.0f * fmaxf(roll_max - 2.0f, 0.0f) - 0.12f * out_of_view - 4.0f * steep;
 }
 
 static void env_tie_paths(void) {
@@ -3970,15 +3984,34 @@ static void env_tie_paths(void) {
 	for (int i = 0; i < count; ++i) {
 		fighters += i != 5 && sc->ships[i].opt && !SDL_strncasecmp(sc->ships[i].opt, "TieFighter", 10);
 	}
+	/* Each one's best few paths only. */
+	enum { TOP = 24 };
+	int top[8][TOP];
+	for (int i = 0; i < count; ++i) {
+		for (int j = 0; j < TOP; ++j) {
+			top[i][j] = -1;
+			for (int c = 0; c < ENV_TIE_CANDIDATES; ++c) {
+				int taken = 0;
+				for (int q = 0; q < j; ++q) {
+					taken |= top[i][q] == c;
+				}
+				if (!taken && (top[i][j] < 0 || scores[i][c] > scores[i][top[i][j]])) {
+					top[i][j] = c;
+				}
+			}
+		}
+	}
 	float best = -1e9f;
 	int best_h = -1, best_hc = 0, best_xc = 0;
 	for (int h = 0; h < count; ++h) {
 		if (h == 5 || !es_is_tie(h) || (fighters && SDL_strncasecmp(sc->ships[h].opt, "TieFighter", 10))) {
 			continue;
 		}
-		for (int hc = 0; hc < ENV_TIE_CANDIDATES; ++hc) {
+		for (int hj = 0; hj < TOP; ++hj) {
+			const int hc = top[h][hj];
 			env_tie_candidate(h, hc);
-			for (int xc = 0; xc < ENV_TIE_CANDIDATES; ++xc) {
+			for (int xj = 0; xj < TOP; ++xj) {
+				const int xc = top[5][xj];
 				env_tie_candidate(5, xc);
 				float miss = 0.0f, range = 0.0f;
 				for (int q = 0; q < 3; ++q) {
@@ -4521,6 +4554,27 @@ static void env_tie_animate(void) {
 		}
 		es_play(ES_BOOM, p, 60.0f, 1.0f, 1.0f);
 		es_play(ES_HIT2, p, 60.0f, 0.7f, 0.8f);
+	}
+	/* A TIE screaming past right at the cover's moment: the nearest. */
+	if (before < T && t >= T) {
+		int nearest = -1;
+		float nd = 1e30f, np[3] = { 0.0f, 0.0f, 0.0f };
+		for (int i = 0; i < env_space()->count && i < 8; ++i) {
+			float p[3], n[3], u[3];
+			if (!es_is_tie(i)) {
+				continue;
+			}
+			env_tie_pose(i, T - 0.05f, p, n, u);
+			const float d = bt_len(p);
+			if (d < nd) {
+				nd = d;
+				nearest = i;
+				memcpy(np, p, sizeof np);
+			}
+		}
+		if (nearest >= 0) {
+			es_play(ES_TIE_FLYBY, np, 25.0f, 1.2f, 1.0f);
+		}
 	}
 	es_update_craft(t, dt);
 }
