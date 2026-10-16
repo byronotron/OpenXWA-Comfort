@@ -238,6 +238,7 @@ static const EnvShip k_tieart[] = {
 	{ "AWing", -80.0f, 30.0f, 300.0f, { -1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, 0, 0 },
 };
 #define ENV_TIE_RUNNERS 2
+#define ENV_TIE_CHASE_SHIP 0 /* the Interceptor after the jinking X-wing */
 #define ENV_TIE_FIRST_RUNNER 6
 /* Who runs from whom, and how it gets away: the break comes where it is
  * break_m from the viewer (0: never by distance) or end_s before the
@@ -591,7 +592,13 @@ static struct {
 	AeronRenderTarget* text_rt;
 	AeronDrawList2D* text_list;
 	int text_w, text_h;
-} s_title;
+	int music_saved; /* the music state before ours (-1: not changed) */
+} s_title = { .music_saved = -1 };
+
+/* The game's music (xwa/audio/music.h pulls in iMUSE's headers). */
+extern int musicState;
+int Music_SetState(int state);
+#define ENV_MUSIC_MISSION_FAILED 1280 /* MUSIC_STATE_FRONTEND_1280: the failed mission's debriefing */
 
 static int env_title_active(void) {
 	return !s_title.done && s_env.mode != ENV_OFF && env_float("XWA_XR_TITLE", 1.0f) != 0.0f;
@@ -4038,6 +4045,10 @@ static float env_tie_path_score(int ship) {
 		if (i >= 8) {
 			steep += fmaxf(fabsf(n[2]) - 0.5f, 0.0f);
 		}
+		/* The X-wing's chaser: the chase right in the middle of the view. */
+		if (ship == ENV_TIE_CHASE_SHIP && i >= 7 && i <= 30) {
+			out_of_view += 2.0f * (fabsf(yaw) + fabsf(pitch + 6.0f));
+		}
 	}
 	/* Snap rolls look wrong: more than about 2 rad/s costs. */
 	return fminf(closest, fmaxf(0.7f * end_m, 8.0f)) - (closest < 5.0f ? 100.0f : 0.0f) - 1.5f * (float)hidden +
@@ -4276,15 +4287,15 @@ static void env_tie_paths(void) {
  * Rolls happen only where a turn begins: into the first turn, and from
  * its bank into the last turn's. */
 /* ---- the jinking X-wing ----------------------------------------------------
- * It flies its chaser's path 50 m ahead of it, weaving across it: three
- * pulls left and right, each a banked turn (the craft leans into the curve,
+ * It flies its chaser's path 50 m ahead of it, weaving across it: two
+ * slow, heavy pulls left and right, each a banked turn (the craft leans into the curve,
  * its lift toward the turn's centre, rolling over as the turn reverses),
  * then slides onto the great explosion's centre as it starts and is gone
  * in it. The chaser follows its weaving a moment late, smaller. Both keep
  * the nose along their path. */
 #define ENV_WEAVE_FROM 1.6f
 #define ENV_WEAVE_TO (ENV_TIE_BOOM_AT - 0.3f)
-#define ENV_WEAVE_PULLS 3.0f
+#define ENV_WEAVE_PULLS 2.0f
 
 /* Smootherstep: its pull (second derivative) has no jumps either, so
  * the lean it gives never snaps. */
@@ -4317,7 +4328,7 @@ static void env_tie_weave_offset(int r, int chased, float t, float out[3]) {
 		env_cross(n, u, side);
 		bt_norm(side);
 	}
-	const float swing = chased ? 3.0f * env_weave(t - 0.3f) : 7.0f * env_weave(t);
+	const float swing = chased ? 5.0f * env_weave(t - 0.4f) : 15.0f * env_weave(t);
 	for (int a = 0; a < 3; ++a) {
 		out[a] = side[a] * swing * k;
 	}
@@ -4345,19 +4356,30 @@ static void env_tie_weave_pose(int r, int chased, float t, float pos[3], float n
 	env_tie_weave_offset(r, chased, t - h, o0);
 	env_tie_weave_offset(r, chased, t, o1);
 	env_tie_weave_offset(r, chased, t + h, o2);
-	float acc[3];
+	float acc[3] = { 0.0f, 0.0f, 0.0f };
 	for (int a = 0; a < 3; ++a) {
 		pos[a] = b1[a] + o1[a];
 		n[a] = (b2[a] + o2[a]) - (b0[a] + o0[a]);
-		acc[a] = (o2[a] - 2.0f * o1[a] + o0[a]) / (h * h); /* the weave's own pull */
+	}
+	/* The lean follows the weave's pull with a little lag (the pull of the
+	 * last third of a second): a heavy craft rolls into a turn and out of
+	 * it a moment behind its stick. */
+	for (int q = 0; q < 4; ++q) {
+		const float tq = t - 0.06f - 0.09f * (float)q;
+		float p0[3], p1[3], p2[3];
+		env_tie_weave_offset(r, chased, tq - h, p0);
+		env_tie_weave_offset(r, chased, tq, p1);
+		env_tie_weave_offset(r, chased, tq + h, p2);
+		for (int a = 0; a < 3; ++a) {
+			acc[a] += 0.25f * (p2[a] - 2.0f * p1[a] + p0[a]) / (h * h);
+		}
 	}
 	if (!bt_norm(n)) {
 		memcpy(n, bn, sizeof bn);
 	}
 	/* Lift toward the turn: the base attitude's up, leaned by the weave's
-	 * sideways pull (about 60 degrees at its hardest, the roll over between
-	 * the pulls taking about a quarter second). */
-	const float g = 110.0f * AERON_OPT_UNITS_PER_METER;
+	 * sideways pull (about 60 degrees at its hardest). */
+	const float g = 70.0f * AERON_OPT_UNITS_PER_METER;
 	const float an = bt_dot(acc, n);
 	for (int a = 0; a < 3; ++a) {
 		u[a] = bu[a] * g + (acc[a] - n[a] * an);
@@ -5017,11 +5039,24 @@ static void env_title_update(void) {
 		}
 	}
 	s_title.pressed = pressed;
+	/* The TIE art's startup plays to the music of a failed mission's
+	 * debriefing; the menus get theirs back with the screen. */
+	if (s_env.mode == ENV_TIEART && !s_title.go && s_title.music_saved < 0 && g_gameConfig.datapadMusicEnabled &&
+		env_float("XWA_XR_TITLE_MUSIC", 1.0f) != 0.0f) {
+		s_title.music_saved = musicState;
+		Music_SetState(ENV_MUSIC_MISSION_FAILED);
+	}
 	if (s_title.go) {
 		s_title.go_t += dt;
 		if (s_title.go_t >= ENV_TIE_REVEAL_SECONDS) {
 			s_title.done = 1;
 		}
+	}
+	if ((s_title.go || s_title.done) && s_title.music_saved >= 0) {
+		if (s_title.music_saved > 0) {
+			Music_SetState(s_title.music_saved);
+		}
+		s_title.music_saved = 0; /* given back, once */
 	}
 }
 
