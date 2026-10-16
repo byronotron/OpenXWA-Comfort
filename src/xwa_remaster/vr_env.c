@@ -248,14 +248,16 @@ static const struct {
 	int ship, chaser;
 	float lead_m, break_m, end_s, roll_s, pull_w;
 	float away[3];
+	int weave; /* jinks instead (see env_tie_weave_pose) */
 } k_tie_runners[ENV_TIE_RUNNERS] = {
-	/* The X-wing from the big Interceptor: a barrel roll short of the
-	 * viewer, then up to the right. */
-	{ 6, 0, 50.0f, 130.0f, 0.9f, 1.0f, 1.6f, { 1.0f, 0.0f, 0.65f } },
+	/* The X-wing from the big Interceptor: jinking left and right three
+	 * times ahead of it, the Interceptor correcting after it, until it is
+	 * hit and disappears in the great explosion. */
+	{ 6, 0, 50.0f, 0.0f, 0.0f, 0.0f, 0.0f, { 0.0f, 0.0f, 0.0f }, 1 },
 	/* The A-wing from the TIE fighter on the left: it holds on to the end
 	 * of the TIE's path (where the TIE will be on the cover), then curves
 	 * away out past the viewer's left. */
-	{ 7, 2, 50.0f, 0.0f, 0.02f, 0.0f, 0.8f, { -1.0f, -0.4f, 0.3f } },
+	{ 7, 2, 50.0f, 0.0f, 0.02f, 0.0f, 0.8f, { -1.0f, -0.4f, 0.3f }, 0 },
 };
 
 /* The explosion's centre behind the big Interceptor: yaw, pitch, metres,
@@ -610,6 +612,7 @@ static const float k_tie_hits[3] = { ENV_TIE_ANIM_SECONDS - 2.6f, ENV_TIE_ANIM_S
 /* The hunter's shots that miss before those. */
 static const float k_tie_misses[2] = { ENV_TIE_ANIM_SECONDS - 3.6f, ENV_TIE_ANIM_SECONDS - 3.1f };
 static void env_tie_pose(int ship, float t, float pos[3], float n[3], float u[3]);
+static void env_tie_flight_pose(int ship, float t, float pos[3], float n[3], float u[3]);
 static void env_tie_submit_bolts(AeronScene3D* scene);
 static void env_es_stop(void);
 /* The scene's sounds (see "the TIE art's sound"). */
@@ -4068,12 +4071,21 @@ static void env_tie_runner_plan(void) {
 		}
 		const float v = s_env.anim_fl[chaser].v;
 		const float lead = k_tie_runners[r].lead_m * k / v;
+		if (k_tie_runners[r].weave) {
+			rn->chaser = chaser;
+			rn->lead = lead;
+			rn->v = v;
+			rn->tb = ENV_TIE_ANIM_SECONDS;
+			rn->flyby_done = 1; /* it never comes close */
+			rn->ok = 1;
+			continue;
+		}
 		float tb = T - lead - k_tie_runners[r].end_s;
 		const float break_m = k_tie_runners[r].break_m *
 							  (r == 0 ? env_float("XWA_XR_RUNNER_BREAK_M", 130.0f) / 130.0f : 1.0f);
 		for (float t = 0.0f; break_m > 0.0f && t < tb; t += 0.02f) {
 			float p[3], nn[3], uu[3];
-			env_tie_pose(chaser, t + lead, p, nn, uu);
+			env_tie_flight_pose(chaser, t + lead, p, nn, uu);
 			if (bt_len(p) / k < break_m) {
 				tb = t;
 				break;
@@ -4085,7 +4097,7 @@ static void env_tie_runner_plan(void) {
 		rn->v = v;
 		rn->roll_time = k_tie_runners[r].roll_s;
 		rn->helix = 3.0f * k;
-		env_tie_pose(chaser, rn->tb + lead, rn->pb, rn->nb, rn->ub);
+		env_tie_flight_pose(chaser, rn->tb + lead, rn->pb, rn->nb, rn->ub);
 		const float* away = k_tie_runners[r].away;
 		const float along = bt_dot(away, rn->nb);
 		for (int a = 0; a < 3; ++a) {
@@ -4107,7 +4119,7 @@ static void env_tie_runner_pose(int r, float t, float pos[3], float n[3], float 
 		return;
 	}
 	if (t < rn->tb) {
-		env_tie_pose(rn->chaser, t + rn->lead, pos, n, u);
+		env_tie_flight_pose(rn->chaser, t + rn->lead, pos, n, u);
 		return;
 	}
 	const float v = rn->v, D1 = rn->roll_time, Rh = rn->helix;
@@ -4263,7 +4275,139 @@ static void env_tie_paths(void) {
  * pull banked b1 from level), before that the straight run in, level.
  * Rolls happen only where a turn begins: into the first turn, and from
  * its bank into the last turn's. */
+/* ---- the jinking X-wing ----------------------------------------------------
+ * It flies its chaser's path 50 m ahead of it, weaving across it: three
+ * pulls left and right, each a banked turn (the craft leans into the curve,
+ * its lift toward the turn's centre, rolling over as the turn reverses),
+ * then slides onto the great explosion's centre as it starts and is gone
+ * in it. The chaser follows its weaving a moment late, smaller. Both keep
+ * the nose along their path. */
+#define ENV_WEAVE_FROM 1.6f
+#define ENV_WEAVE_TO (ENV_TIE_BOOM_AT - 0.3f)
+#define ENV_WEAVE_PULLS 3.0f
+
+/* Smootherstep: its pull (second derivative) has no jumps either, so
+ * the lean it gives never snaps. */
+static float env_smoother(float x) {
+	x = fminf(fmaxf(x, 0.0f), 1.0f);
+	return x * x * x * (x * (6.0f * x - 15.0f) + 10.0f);
+}
+
+/* The weave's sideways swing at t, -1..1 (0 outside its window). */
+static float env_weave(float t) {
+	if (t <= ENV_WEAVE_FROM || t >= ENV_WEAVE_TO) {
+		return 0.0f;
+	}
+	const float span = ENV_WEAVE_TO - ENV_WEAVE_FROM;
+	const float in = env_smoother((t - ENV_WEAVE_FROM) / 0.6f) * (1.0f - env_smoother((t - (ENV_WEAVE_TO - 0.7f)) / 0.7f));
+	return in * sinf(2.0f * BT_PI * ENV_WEAVE_PULLS * (t - ENV_WEAVE_FROM) / span);
+}
+
+/* The offset (world units) from its base path at t: chased = 0 for the
+ * runner, 1 for its chaser. */
+static void env_tie_weave_offset(int r, int chased, float t, float out[3]) {
+	const int chaser = k_tie_runners[r].chaser;
+	const float lead = chased ? 0.0f : s_env.runner[r].lead;
+	const float k = AERON_OPT_UNITS_PER_METER;
+	float p[3], n[3], u[3], side[3];
+	env_tie_flight_pose(chaser, t + lead, p, n, u);
+	static const float z[3] = { 0.0f, 0.0f, 1.0f };
+	env_cross(n, z, side); /* the heading's right, level */
+	if (!bt_norm(side)) {
+		env_cross(n, u, side);
+		bt_norm(side);
+	}
+	const float swing = chased ? 3.0f * env_weave(t - 0.3f) : 7.0f * env_weave(t);
+	for (int a = 0; a < 3; ++a) {
+		out[a] = side[a] * swing * k;
+	}
+	if (!chased) {
+		/* Onto the explosion's centre as it starts. */
+		float b[3], at[3], an[3], au[3];
+		env_dir(k_tie_blast[0], k_tie_blast[1], b);
+		env_tie_flight_pose(chaser, ENV_TIE_BOOM_AT + lead, at, an, au);
+		const float w = env_smoother((t - (ENV_TIE_BOOM_AT - 2.2f)) / 2.2f);
+		for (int a = 0; a < 3; ++a) {
+			b[a] = s_env.view_pos[a] + b[a] * k_tie_blast[2] * k;
+			out[a] += (b[a] - at[a]) * w;
+		}
+	}
+}
+
+static void env_tie_weave_pose(int r, int chased, float t, float pos[3], float n[3], float u[3]) {
+	const int chaser = k_tie_runners[r].chaser;
+	const float lead = chased ? 0.0f : s_env.runner[r].lead;
+	const float h = 0.02f;
+	float b0[3], b1[3], b2[3], o0[3], o1[3], o2[3], bn[3], bu[3], tn[3], tu[3];
+	env_tie_flight_pose(chaser, t + lead - h, b0, tn, tu);
+	env_tie_flight_pose(chaser, t + lead, b1, bn, bu);
+	env_tie_flight_pose(chaser, t + lead + h, b2, tn, tu);
+	env_tie_weave_offset(r, chased, t - h, o0);
+	env_tie_weave_offset(r, chased, t, o1);
+	env_tie_weave_offset(r, chased, t + h, o2);
+	float acc[3];
+	for (int a = 0; a < 3; ++a) {
+		pos[a] = b1[a] + o1[a];
+		n[a] = (b2[a] + o2[a]) - (b0[a] + o0[a]);
+		acc[a] = (o2[a] - 2.0f * o1[a] + o0[a]) / (h * h); /* the weave's own pull */
+	}
+	if (!bt_norm(n)) {
+		memcpy(n, bn, sizeof bn);
+	}
+	/* Lift toward the turn: the base attitude's up, leaned by the weave's
+	 * sideways pull (about 60 degrees at its hardest, the roll over between
+	 * the pulls taking about a quarter second). */
+	const float g = 110.0f * AERON_OPT_UNITS_PER_METER;
+	const float an = bt_dot(acc, n);
+	for (int a = 0; a < 3; ++a) {
+		u[a] = bu[a] * g + (acc[a] - n[a] * an);
+	}
+	const float un = bt_dot(u, n);
+	for (int a = 0; a < 3; ++a) {
+		u[a] -= n[a] * un;
+	}
+	if (!bt_norm(u)) {
+		memcpy(u, bu, sizeof bu);
+	}
+}
+
+/* The runner whose chaser `ship` is (weaving after it), or -1. */
+static int env_tie_weave_chaser_of(int ship) {
+	for (int r = 0; r < ENV_TIE_RUNNERS; ++r) {
+		if (k_tie_runners[r].weave && k_tie_runners[r].chaser == ship && s_env.runner[r].ok) {
+			return r;
+		}
+	}
+	return -1;
+}
+
 static void env_tie_pose(int ship, float t, float pos[3], float n[3], float u[3]) {
+	if (s_env.anim_paths && ship < 8 && t < ENV_TIE_ANIM_SECONDS) {
+		const int r = env_tie_runner_of(ship);
+		if (r >= 0) {
+			if (k_tie_runners[r].weave) {
+				float rr[3];
+				env_ship_basis(ship, n, rr, u);
+				env_ship_pos(ship, pos);
+				if (s_env.runner[r].ok) {
+					env_tie_weave_pose(r, 0, t, pos, n, u);
+				}
+			} else {
+				env_tie_flight_pose(ship, t, pos, n, u);
+				env_tie_runner_pose(r, t, pos, n, u);
+			}
+			return;
+		}
+		const int c = env_tie_weave_chaser_of(ship);
+		if (c >= 0) {
+			env_tie_weave_pose(c, 1, t, pos, n, u);
+			return;
+		}
+	}
+	env_tie_flight_pose(ship, t, pos, n, u);
+}
+
+static void env_tie_flight_pose(int ship, float t, float pos[3], float n[3], float u[3]) {
 	float r[3];
 	env_ship_basis(ship, n, r, u);
 	env_ship_pos(ship, pos);
@@ -4271,8 +4415,7 @@ static void env_tie_pose(int ship, float t, float pos[3], float n[3], float u[3]
 		return;
 	}
 	if (env_tie_runner_of(ship) >= 0) {
-		env_tie_runner_pose(env_tie_runner_of(ship), t, pos, n, u);
-		return;
+		return; /* runners have no flight of their own */
 	}
 	const float T = ENV_TIE_ANIM_SECONDS;
 	const float v = s_env.anim_fl[ship].v, w = s_env.anim_fl[ship].w;
@@ -4679,7 +4822,8 @@ static void env_tie_animate(void) {
 		env_pose_matrix(n, u, pos, s_env.transform[i]);
 		/* The runner is gone by the cover's moment. */
 		const int r = env_tie_runner_of(s_env.ship_of[i]);
-		s_env.hidden[i] = r >= 0 && (t >= T || !s_env.runner[r].ok);
+		s_env.hidden[i] = r >= 0 && (t >= T || !s_env.runner[r].ok ||
+									 (k_tie_runners[r].weave && t >= ENV_TIE_BOOM_AT + 0.12f));
 	}
 	for (int r = 0; r < ENV_TIE_RUNNERS; ++r) {
 		if (s_env.runner[r].ok && !s_env.runner[r].flyby_done && t >= s_env.runner[r].tb + 0.25f && t < T) {
