@@ -28,8 +28,10 @@ int FrontendBootstrap_RunIntroAndEnterConcourse(int frameCounter) {
 		g_frontendBootstrapIntroStarted = 1;
 		g_frontendBootstrapIntroIndex = 0;
 	}
-	while (!g_movieSkipRequested &&
-		   g_frontendBootstrapIntroIndex < (int)(sizeof(introMovies) / sizeof(introMovies[0]))) {
+	/* A skip ends only the movie playing: the next one starts (the original
+	 * skipped the rest of the intro). Each movie ignores input for its first
+	 * frames (XWA_MOVIE_SKIP_GATE_FRAME), so one press skips one movie. */
+	while (g_frontendBootstrapIntroIndex < (int)(sizeof(introMovies) / sizeof(introMovies[0]))) {
 		const char* movie = introMovies[g_frontendBootstrapIntroIndex++];
 		if (Movie_Play(movie, 0)) {
 			return 0;

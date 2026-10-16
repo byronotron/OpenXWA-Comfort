@@ -99,6 +99,12 @@ void XwaVrEnv_SetBare(int bare);
 int XwaVrEnv_Bare(void);
 /* The fade in, 0 (bare) .. 1: the scene's lights scale with it. */
 float XwaVrEnv_Fade(void);
+/* Nonzero while the screen and its frame are kept out of view (the TIE
+ * Fighter box art playing out its fight). */
+int XwaVrEnv_ScreenHidden(void);
+/* The head's orientation this frame (an XR view's, LOCAL space, x y z w),
+ * for placing the scene's sounds. */
+void XwaVrEnv_SetHeadOrientation(const float q[4]);
 
 /* Frees the GPU meshes (the flight scene loads its own hangar). */
 void XwaVrEnv_Release(void);

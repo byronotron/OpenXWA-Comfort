@@ -5368,6 +5368,7 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 	float rows[9];
 	XwaVrEnv_View(base.pos, rows);
 	fl_rows_to_quat(rows, base.ori);
+	XwaVrEnv_SetHeadOrientation(xr_frame.views[0].orientation);
 	base.h_half_rad = 0.8f;
 	base.v_half_rad = 0.8f;
 	base.near_z = FL_NEAR_Z;
@@ -5411,7 +5412,9 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 					   AERON_OPT_UNITS_PER_METER * fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f));
 	/* The screen and its frame are layers over the eyes: the gloves reach in
 	 * front of them through a second, alpha-masked copy of the eyes. */
-	const int hands_over = XwaVrHandOverlay_Prepare(cmd, xr_frame.views, xr_frame.width, xr_frame.height);
+	const int screen_hidden = XwaVrEnv_ScreenHidden();
+	const int hands_over =
+		!screen_hidden && XwaVrHandOverlay_Prepare(cmd, xr_frame.views, xr_frame.width, xr_frame.height);
 
 	/* The configured hangar relight: key light + ambient cube. */
 	XwaDirLight key;
@@ -5525,7 +5528,10 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 	}
 	s_xr_eye_gain_last = s_xr_eye_gain;
 	s_xr_eye_gain = 1.0f;
-	if (ok) {
+	if (ok && screen_hidden) {
+		/* The scene alone: no screen, frame or pointer beam yet. */
+		Aeron_XrStereoCommitHuds(NULL, NULL);
+	} else if (ok) {
 		Aeron_XrStereoCommitBackdrop();
 		(void)XwaVrEnv_CommitFrameLayer(cmd, powf(s_xr_eye_gain_last, 1.0f / 2.2f));
 		if (hands_over) {

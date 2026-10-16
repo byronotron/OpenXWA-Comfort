@@ -2,6 +2,7 @@
 
 #include "aeron/aeron.h"
 #include "aeron/asset/opt_model.h"
+#include "aeron/audio.h"
 #include "aeron/log.h"
 #include "aeron/scene/billboard.h"
 #include "aeron/scene/draw_list2d.h"
@@ -10,7 +11,9 @@
 #include "aeron/xr.h"
 #include "xwa/assets/model_type.h"
 #include "xwa/assets/object_type.h"
+#include "xwa/config/game_config.h"
 #include "xwa/flight/fediskio.h"
+#include "xwa/frontend/frontend_input.h"
 #include "xwa/frontend/frontend_mission.h"
 #include "xwa_2d.h"
 #include "xwa_remaster/ship.h"
@@ -400,6 +403,9 @@ static struct {
 		int green, alive;
 	} anim_bolts[32];
 	float anim_next_shot[8];
+	int anim_hunter; /* the TIE that shoots the X-wing down (-1: none) */
+	int anim_go;     /* pressed on the title: the screen comes in */
+	float anim_go_t; /* seconds since */
 	float transform[ENV_MAX_INSTANCES][16];
 	uint8_t far[ENV_MAX_INSTANCES];
 	/* Endor sprites. */
@@ -521,12 +527,39 @@ int XwaVrEnv_Bare(void) { return s_env_bare; }
 
 float XwaVrEnv_Fade(void) { return s_env_bare ? 0.0f : s_env_fade; }
 
+/* The TIE Fighter box art plays out without the screen and its frame:
+ * the fight plays out, the X-Wing Alliance logo fades in over the cover's
+ * moment, and they come in at a button press (a press during the fight
+ * jumps to its end; XWA_XR_TIEART_HIDE_SCREEN=0 shows them throughout). */
+#define ENV_TIE_REVEAL_SECONDS 0.6f
+static float env_screen_reveal(void);
+int XwaVrEnv_ScreenHidden(void) { return !s_env_bare && env_screen_reveal() <= 0.0f; }
+
 /* The TIE Fighter box art's animation (defined below). */
 #define ENV_TIE_ANIM_SECONDS 5.0f
 #define ENV_TIE_BOOM_AT 3.6f
 #define ENV_TIE_SALVO_SECONDS 0.5f
+#define ENV_TIE_BOLT_SPEED 240.0f /* m/s */
+/* The X-wing (ship 5) is hit at these times, then blows up at BOOM_AT. */
+static const float k_tie_hits[3] = { 2.5f, 2.95f, 3.3f };
+/* The hunter's shots that miss before those. */
+static const float k_tie_misses[2] = { 1.55f, 2.05f };
 static void env_tie_pose(int ship, float t, float pos[3], float n[3], float u[3]);
 static void env_tie_submit_bolts(AeronScene3D* scene);
+static void env_es_stop(void);
+/* The scene's sounds (see "the TIE art's sound"). */
+enum { ES_TIE_LASER, ES_REBEL_LASER, ES_TIE_ENGINE, ES_TIE_FLYBY, ES_BOOM, ES_HIT0, ES_HIT1, ES_HIT2, ES_COUNT };
+static int es_is_tie(int ship);
+static void es_play(int s, const float p[3], float ref_m, float gain, float pitch);
+
+static float env_screen_reveal(void) {
+	if (s_env.mode != ENV_TIEART || !env_float("XWA_XR_TIEART_HIDE_SCREEN", 1.0f)) {
+		return 1.0f;
+	}
+	/* After the fight, the title holds until a button is pressed. */
+	const float x = fminf(fmaxf(s_env.anim_go_t / ENV_TIE_REVEAL_SECONDS, 0.0f), 1.0f);
+	return s_env.anim_go ? fmaxf(x * x * (3.0f - 2.0f * x), 1e-3f) : 0.0f;
+}
 
 /* The live battle (defined below). */
 static void bt_lighting(XwaVrEnvLighting* out, float sun);
@@ -1441,7 +1474,7 @@ static void env_frame_quad(const EnvScreen* sc, float centre[3], float size[2]) 
 /* Fallback when there is no frame layer: the frame as a scene sprite
  * (under the picture, which the compositor draws on top). */
 static void env_submit_frame(AeronScene3D* scene) {
-	if (!s_env.tex[ENV_TEX_FRAME] || s_env.frame_layer_ok) {
+	if (!s_env.tex[ENV_TEX_FRAME] || s_env.frame_layer_ok || XwaVrEnv_ScreenHidden()) {
 		return;
 	}
 	EnvScreen sc;
@@ -1465,7 +1498,7 @@ int XwaVrEnv_LayerRect(float centre[3], float size[2]) {
 	}
 	EnvScreen sc;
 	env_screen(&sc);
-	if (sc.dist <= 0.0f || sc.w <= 0.0f) {
+	if (sc.dist <= 0.0f || sc.w <= 0.0f || XwaVrEnv_ScreenHidden()) {
 		return 0;
 	}
 	if (s_env.tex[ENV_TEX_FRAME] && s_env.frame_layer_ok && !s_env_bare) {
@@ -1486,8 +1519,8 @@ int XwaVrEnv_LayerRect(float centre[3], float size[2]) {
 }
 
 int XwaVrEnv_CommitFrameLayer(AeronCommandBuffer* cmd, float brightness) {
-	if (s_env_bare) {
-		return 0; /* no frame round the startup films */
+	if (s_env_bare || XwaVrEnv_ScreenHidden()) {
+		return 0; /* no frame round the startup films, or while the TIE art plays */
 	}
 	if (!cmd || !s_env.tex[ENV_TEX_FRAME] || s_env.tex_w[ENV_TEX_FRAME] > AERON_XR_FRAME_WIDTH ||
 		s_env.tex_h[ENV_TEX_FRAME] > AERON_XR_FRAME_HEIGHT) {
@@ -1495,7 +1528,7 @@ int XwaVrEnv_CommitFrameLayer(AeronCommandBuffer* cmd, float brightness) {
 		return 0;
 	}
 	const float tint = fminf(fmaxf(brightness, 0.0f), 1.0f);
-	const float fade = s_env_fade;
+	const float fade = s_env_fade * env_screen_reveal();
 	if (!s_env.frame_drawn || fabsf(tint - s_env.frame_tint) > 0.004f || fabsf(fade - s_env.frame_fade) > 0.004f) {
 		int w = 0, h = 0;
 		AeronRenderTarget* target = Aeron_XrStereoPanelTarget(AERON_XR_PANEL_FRAME, &w, &h);
@@ -1681,26 +1714,29 @@ static void env_submit_burst(AeronScene3D* scene, int ship, float scale) {
 }
 
 /* The logo above the virtual screen and its frame. */
-static void env_submit_logo(AeronScene3D* scene) {
-	if (!s_env.tex[ENV_TEX_LOGO]) {
+/* The logo in the frame's plane: above the frame, or (title) large where
+ * the screen will be. `alpha` fades it (premultiplied). */
+static void env_submit_logo_at(AeronScene3D* scene, float alpha, int title) {
+	if (!s_env.tex[ENV_TEX_LOGO] || alpha <= 0.0f) {
 		return;
 	}
 	EnvScreen sc;
 	env_screen(&sc);
 	float c[4][3];
-	/* In the frame's plane, above it. */
 	const float f = sc.frame_scale;
-	const float lw = 0.6f * sc.pic_w * f * env_float("XWA_XR_LOGO_SCALE", 1.0f);
+	const float lw = (title ? 0.9f : 0.6f) * sc.pic_w * f * env_float("XWA_XR_LOGO_SCALE", 1.0f);
 	const float lh = lw * (float)s_env.tex_h[ENV_TEX_LOGO] / (float)s_env.tex_w[ENV_TEX_LOGO];
+	const float up = title ? sc.lift * f : (sc.lift + 0.5f * sc.pic_h + env_frame_top(&sc)) * f + 0.05f + 0.5f * lh;
 	const float center[3] = { s_env.view_pos[0], s_env.view_pos[1] + (sc.frame_dist + 0.02f) * sc.k,
-							  s_env.view_pos[2] +
-								  ((sc.lift + 0.5f * sc.pic_h + env_frame_top(&sc)) * f + 0.05f + 0.5f * lh) * sc.k };
+							  s_env.view_pos[2] + up * sc.k };
 	const float ax[3] = { 0.5f * lw * sc.k, 0.0f, 0.0f };
 	const float ay[3] = { 0.0f, 0.0f, 0.5f * lh * sc.k };
 	env_rect(center, ax, ay, c);
-	static const float tint[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+	const float tint[4] = { alpha, alpha, alpha, alpha };
 	env_quad(scene, ENV_TEX_LOGO, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, tint);
 }
+
+static void env_submit_logo(AeronScene3D* scene) { env_submit_logo_at(scene, 1.0f, 0); }
 
 static void env_submit_endor_sprites(AeronScene3D* scene) {
 	const float k = AERON_OPT_UNITS_PER_METER;
@@ -1903,7 +1939,12 @@ static void env_submit_tieart_sprites(AeronScene3D* scene) {
 		env_quad(scene, ENV_TEX_FIRE, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
 		env_facing(q, 10.0f * k, -20.0f, c);
 		env_quad(scene, ENV_TEX_BLAST, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
-		env_submit_logo(scene);
+		/* The title over the cover's moment, then (on the press) the logo
+		 * moves above the frame as the screen comes in. */
+		const float reveal = env_screen_reveal();
+		const float title = env_smooth((t - T) / env_float("XWA_XR_TITLE_FADE_SECONDS", 1.2f));
+		env_submit_logo_at(scene, title * (1.0f - reveal), 1);
+		env_submit_logo_at(scene, reveal, 0);
 		return;
 	}
 	/* The run-up: bolts in flight, the X-wing hit, then the blast; the
@@ -1914,7 +1955,7 @@ static void env_submit_tieart_sprites(AeronScene3D* scene) {
 	}
 	float xw[3], n[3], u[3], c[4][3];
 	env_tie_pose(5, t, xw, n, u);
-	static const float hits[3] = { 2.5f, 2.95f, 3.3f };
+	const float* hits = k_tie_hits;
 	for (int h = 0; h < 3; ++h) {
 		const float a = (t - hits[h]) / 0.35f;
 		if (a > 0.0f && a < 1.0f) {
@@ -1971,7 +2012,9 @@ static void env_submit_tieart_sprites(AeronScene3D* scene) {
 					 white);
 		}
 	}
-	env_submit_logo(scene);
+	if (env_screen_reveal() >= 1.0f) {
+		env_submit_logo(scene); /* the screen shown throughout */
+	}
 }
 
 /* The X-Wing vs. TIE Fighter box art: the explosion and its pillar of
@@ -3862,6 +3905,36 @@ static void env_tie_paths(void) {
 		s_env.anim_next_shot[i] = 0.5f + 0.17f * (float)i;
 	}
 	s_env.anim_paths = 1;
+	/* The X-wing's killer: a TIE fighter (any TIE when there is none), the
+	 * nearest to it while it is being hit, favouring one already headed
+	 * its way. */
+	s_env.anim_hunter = -1;
+	if (sc->count > 5) {
+		float best = -1e9f;
+		int fighters = 0;
+		for (int i = 0; i < sc->count && i < 8; ++i) {
+			fighters += i != 5 && sc->ships[i].opt && !SDL_strncasecmp(sc->ships[i].opt, "TieFighter", 10);
+		}
+		for (int i = 0; i < sc->count && i < 8; ++i) {
+			if (i == 5 || !es_is_tie(i) ||
+				(fighters && SDL_strncasecmp(sc->ships[i].opt, "TieFighter", 10))) {
+				continue;
+			}
+			float p[3], n[3], u[3], x[3], dir[3];
+			env_tie_pose(i, k_tie_hits[1], p, n, u);
+			env_tie_pose(5, k_tie_hits[1], x, dir, u);
+			for (int a = 0; a < 3; ++a) {
+				dir[a] = x[a] - p[a];
+			}
+			const float dist = bt_len(dir) / k;
+			bt_norm(dir);
+			const float score = 15.0f * bt_dot(n, dir) - dist;
+			if (score > best) {
+				best = score;
+				s_env.anim_hunter = i;
+			}
+		}
+	}
 }
 
 static void env_tie_pose(int ship, float t, float pos[3], float n[3], float u[3]) {
@@ -3886,6 +3959,24 @@ static void env_tie_pose(int ship, float t, float pos[3], float n[3], float u[3]
 		}
 		bt_norm(n);
 	}
+	if (ship == s_env.anim_hunter) {
+		/* Bearing down on the X-wing while it shoots it. */
+		const float aim = env_smooth((t - (k_tie_misses[0] - 0.7f)) / 0.6f) *
+						  (1.0f - env_smooth((t - (ENV_TIE_BOOM_AT - 0.1f)) / 0.7f));
+		if (aim > 0.0f) {
+			float x[3], xn[3], xu[3], dir[3];
+			env_tie_pose(5, t, x, xn, xu);
+			for (int a = 0; a < 3; ++a) {
+				dir[a] = x[a] - pos[a];
+			}
+			if (bt_norm(dir)) {
+				for (int a = 0; a < 3; ++a) {
+					n[a] = n[a] * (1.0f - aim) + dir[a] * aim;
+				}
+				bt_norm(n);
+			}
+		}
+	}
 	const float w = env_smooth(s);
 	float up[3];
 	for (int a = 0; a < 3; ++a) {
@@ -3897,6 +3988,296 @@ static void env_tie_pose(int ship, float t, float pos[3], float n[3], float u[3]
 	}
 	if (bt_norm(up)) {
 		memcpy(u, up, sizeof up);
+	}
+}
+
+static void env_tie_spawn_bolt(const float p[3], const float d[3], float life, int green) {
+	for (int b = 0; b < 32; ++b) {
+		if (!s_env.anim_bolts[b].alive) {
+			memcpy(s_env.anim_bolts[b].p, p, 3 * sizeof(float));
+			memcpy(s_env.anim_bolts[b].d, d, 3 * sizeof(float));
+			s_env.anim_bolts[b].life = life;
+			s_env.anim_bolts[b].green = green;
+			s_env.anim_bolts[b].alive = 1;
+			return;
+		}
+	}
+}
+
+/* The hunter's pair of bolts at the X-wing as it will be at `at` (+ a miss
+ * offset in metres), timed to arrive then; fired when its flight time
+ * before `at` has come. */
+static void env_tie_hunter_shot(float before, float t, float at, float miss_m) {
+	const int h = s_env.anim_hunter;
+	if (h < 0) {
+		return;
+	}
+	const float k = AERON_OPT_UNITS_PER_METER;
+	float hp[3], hn[3], hu[3], x[3], xn[3], xu[3];
+	env_tie_pose(5, at, x, xn, xu);
+	env_tie_pose(h, at, hp, hn, hu);
+	const float flight =
+		sqrtf((x[0] - hp[0]) * (x[0] - hp[0]) + (x[1] - hp[1]) * (x[1] - hp[1]) + (x[2] - hp[2]) * (x[2] - hp[2])) / k /
+		ENV_TIE_BOLT_SPEED;
+	const float fire = at - flight;
+	if (!(before < fire && t >= fire)) {
+		return;
+	}
+	float pos[3], n[3], u[3], r[3];
+	env_tie_pose(h, t, pos, n, u);
+	env_cross(n, u, r);
+	x[2] += miss_m * k;
+	x[0] += 0.5f * miss_m * k;
+	for (int g = -1; g <= 1; g += 2) {
+		float p[3], d[3];
+		for (int a = 0; a < 3; ++a) {
+			p[a] = pos[a] + (r[a] * (float)g * 0.7f + n[a] * 2.0f) * k;
+			d[a] = x[a] - p[a];
+		}
+		const float len = bt_len(d) / k;
+		bt_norm(d);
+		/* Gone as they strike (or fly on past for a miss). */
+		env_tie_spawn_bolt(p, d, miss_m != 0.0f ? 1.2f : len / ENV_TIE_BOLT_SPEED, 1);
+	}
+	es_play(ES_TIE_LASER, pos, 18.0f, 1.0f, 1.0f);
+}
+
+/* Any button: a key the films take for skipping, a mouse / pointer click,
+ * or a controller button. */
+static int env_tie_pressed(void) {
+	const AeronInputSnapshot* in = Aeron_InputSnapshot();
+	if (!in) {
+		return 0;
+	}
+	if (in->key_pressed[AERON_KEY_ESCAPE] || in->key_pressed[AERON_KEY_SPACE] || in->key_pressed[AERON_KEY_RETURN] ||
+		in->key_pressed[AERON_KEY_BACKSPACE] ||
+		(in->mouse.released_buttons & (AERON_MOUSE_BUTTON_LEFT | AERON_MOUSE_BUTTON_RIGHT)) != 0) {
+		return 1;
+	}
+	for (int i = 0; i < AERON_CONTROLLER_MAX; ++i) {
+		if (in->controllers[i].connected &&
+			(in->controllers[i].gamepad_pressed_buttons || in->controllers[i].raw_pressed_buttons)) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/* ---- the TIE art's sound ---------------------------------------------------
+ * The flight's own effects from wave\SfxBlastNew.lst (its line n is effect
+ * slot 4 + n, the WAVs in FE_High_Res or FE_Low_Res): the TIE and rebel
+ * lasers, the TIE engine, the TIE fly-by and the explosions. Placed by hand
+ * (gain over distance, pan to the ears of the head, doppler pitch) so the
+ * flight's 3D listener is left alone. Exterior SFX volume for the effects,
+ * engine volume for the engines; XWA_XR_SCENE_SFX_VOLUME scales both
+ * (0 = silent). */
+static const int k_es_slot[ES_COUNT] = { 20, 4, 97, 101, 36, 25, 26, 27 };
+static const int k_es_alt_slot[ES_COUNT] = { 0, 0, 0, 102, 0, 0, 0, 0 };
+
+static struct {
+	int tried;
+	AeronClip clip[ES_COUNT];
+	float base[ES_COUNT]; /* the list's volume for the effect, 0..1 */
+	AeronVoice engine[8];
+	int flyby_done[8];
+	float prev_dist[8];
+	float right[3]; /* the head's right ear, scene axes */
+	int has_head;
+} s_es;
+
+void XwaVrEnv_SetHeadOrientation(const float q[4]) {
+	if (!q) {
+		return;
+	}
+	/* (1,0,0) turned by the head (LOCAL: x right, y up, -z ahead), into the
+	 * scene's axes (x right, y ahead, z up). */
+	const float x = q[0], y = q[1], z = q[2], w = q[3];
+	const float lx = 1.0f - 2.0f * (y * y + z * z), ly = 2.0f * (x * y + w * z), lz = 2.0f * (x * z - w * y);
+	s_es.right[0] = lx;
+	s_es.right[1] = -lz;
+	s_es.right[2] = ly;
+	s_es.has_head = 1;
+}
+
+static AeronClip es_wav_clip(const uint8_t* d, size_t n) {
+	if (n < 12 || memcmp(d, "RIFF", 4) || memcmp(d + 8, "WAVE", 4)) {
+		return 0;
+	}
+	int fmt = 0, ch = 0, rate = 0, bits = 0;
+	const uint8_t* pcm = NULL;
+	size_t pcm_n = 0;
+	for (size_t at = 12; at + 8 <= n;) {
+		size_t len = (size_t)d[at + 4] | (size_t)d[at + 5] << 8 | (size_t)d[at + 6] << 16 | (size_t)d[at + 7] << 24;
+		const uint8_t* body = d + at + 8;
+		if (len > n - (at + 8)) {
+			len = n - (at + 8);
+		}
+		if (!memcmp(d + at, "fmt ", 4) && len >= 16) {
+			fmt = body[0] | body[1] << 8;
+			ch = body[2] | body[3] << 8;
+			rate = body[4] | body[5] << 8 | body[6] << 16 | body[7] << 24;
+			bits = body[14] | body[15] << 8;
+		} else if (!memcmp(d + at, "data", 4)) {
+			pcm = body;
+			pcm_n = len;
+		}
+		at += 8 + len + (len & 1);
+	}
+	if (fmt != 1 || ch < 1 || ch > 2 || rate <= 0 || (bits != 8 && bits != 16) || !pcm) {
+		return 0;
+	}
+	const size_t frames = pcm_n / (size_t)(ch * bits / 8);
+	return frames ? Aeron_AudioClipCreate(pcm, frames, rate, ch, bits == 8 ? AERON_PCM_U8 : AERON_PCM_S16) : 0;
+}
+
+static void es_load(void) {
+	s_es.tried = 1;
+	AeronVfs* vfs = Aeron_GetVfs();
+	uint8_t* list = NULL;
+	size_t size = 0;
+	if (!vfs || !AeronVfs_ReadAll(vfs, AERON_VFS_ROOT_ASSET, "wave\\SfxBlastNew.lst", 1u << 20, &list, &size)) {
+		Aeron_LogInfo("xwa.remaster", "VR environment: no sound (wave\\SfxBlastNew.lst)");
+		return;
+	}
+	/* The list's lines: name [volume [distance]]. */
+	char names[128][64];
+	int volumes[128];
+	int lines = 0;
+	size_t at = 0;
+	while (at < size && lines < 128) {
+		size_t end = at;
+		while (end < size && list[end] != '\n') {
+			++end;
+		}
+		size_t e = at;
+		while (e < end && list[e] != ' ' && list[e] != '\t' && list[e] != '\r') {
+			++e;
+		}
+		const size_t len = e - at < 63 ? e - at : 63;
+		memcpy(names[lines], list + at, len);
+		names[lines][len] = '\0';
+		volumes[lines] = -1;
+		while (e < end && (list[e] == ' ' || list[e] == '\t')) {
+			++e;
+		}
+		if (e < end && list[e] >= '0' && list[e] <= '9') {
+			volumes[lines] = atoi((const char*)list + e);
+		}
+		++lines;
+		at = end + 1;
+	}
+	free(list);
+	static const char* const dirs[2] = { "wave\\FE_High_Res\\", "wave\\FE_Low_Res\\" };
+	int loaded = 0;
+	for (int i = 0; i < ES_COUNT; ++i) {
+		for (int alt = 0; alt < 2 && !s_es.clip[i]; ++alt) {
+			const int line = (alt ? k_es_alt_slot[i] : k_es_slot[i]) - 4;
+			if (line < 0 || line >= lines || !names[line][0]) {
+				continue;
+			}
+			for (int d = 0; d < 2 && !s_es.clip[i]; ++d) {
+				char path[160];
+				snprintf(path, sizeof path, "%s%s", dirs[d], names[line]);
+				uint8_t* wav = NULL;
+				size_t wav_size = 0;
+				if (AeronVfs_Exists(vfs, AERON_VFS_ROOT_ASSET, path) &&
+					AeronVfs_ReadAll(vfs, AERON_VFS_ROOT_ASSET, path, 16u << 20, &wav, &wav_size)) {
+					s_es.clip[i] = es_wav_clip(wav, wav_size);
+					free(wav);
+				}
+			}
+			s_es.base[i] = volumes[line] > 0 ? fminf((float)volumes[line] / 127.0f, 1.0f) : 1.0f;
+		}
+		loaded += s_es.clip[i] != 0;
+	}
+	Aeron_LogInfo("xwa.remaster", "VR environment: %d of %d scene sounds", loaded, ES_COUNT);
+}
+
+static float es_master(int engine) {
+	const float v = engine ? (g_gameConfig.sfxEngineEnabled ? g_gameConfig.sfxEngineVolume : 0)
+						   : (g_gameConfig.sfxExteriorEnabled ? g_gameConfig.sfxExteriorVolume : 0);
+	return fminf(fmaxf((float)v / 10.0f, 0.0f), 1.0f) * fmaxf(env_float("XWA_XR_SCENE_SFX_VOLUME", 1.0f), 0.0f);
+}
+
+/* Gain (falling off past ref_m metres) and pan for a sound at p (world
+ * units, from the viewer). */
+static void es_place(const float p[3], float ref_m, float* gain, float* pan) {
+	const float k = AERON_OPT_UNITS_PER_METER;
+	const float d = sqrtf(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
+	*gain = fminf(1.0f, ref_m / fmaxf(d / k, 0.5f));
+	static const float ear[3] = { 1.0f, 0.0f, 0.0f };
+	const float* r = s_es.has_head ? s_es.right : ear;
+	*pan = d > 0.0f ? 0.8f * (p[0] * r[0] + p[1] * r[1] + p[2] * r[2]) / d : 0.0f;
+}
+
+static void es_play(int s, const float p[3], float ref_m, float gain, float pitch) {
+	if (!s_es.clip[s]) {
+		return;
+	}
+	float g, pan;
+	es_place(p, ref_m, &g, &pan);
+	g *= gain * s_es.base[s] * es_master(0);
+	if (g > 0.003f) {
+		(void)Aeron_AudioVoicePlay(s_es.clip[s], fminf(g, 1.0f), pan, pitch, 0);
+	}
+}
+
+static void env_es_stop(void) {
+	for (int i = 0; i < 8; ++i) {
+		if (s_es.engine[i]) {
+			Aeron_AudioVoiceStop(s_es.engine[i]);
+		}
+	}
+	memset(s_es.engine, 0, sizeof s_es.engine);
+	memset(s_es.flyby_done, 0, sizeof s_es.flyby_done);
+	memset(s_es.prev_dist, 0, sizeof s_es.prev_dist);
+}
+
+static int es_is_tie(int ship) {
+	const char* opt = env_space()->ships[ship].opt;
+	return opt && (opt[0] == 'T' || opt[0] == 't') && (opt[1] == 'I' || opt[1] == 'i');
+}
+
+/* The engines (fading out once the fight holds) and the fly-bys. */
+static void es_update_craft(float t, float dt) {
+	const EnvSpaceScene* sc = env_space();
+	const float k = AERON_OPT_UNITS_PER_METER;
+	const float T = ENV_TIE_ANIM_SECONDS;
+	const float hum = t < T ? 1.0f : 1.0f - env_smooth((t - T) / 1.5f);
+	for (int i = 0; i < sc->count && i < 8; ++i) {
+		if (!es_is_tie(i)) {
+			continue;
+		}
+		float pos[3], n[3], u[3];
+		env_tie_pose(i, t, pos, n, u);
+		const float d = sqrtf(pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]) / k;
+		const float closing = s_es.prev_dist[i] > 0.0f && dt > 0.0f ? (d - s_es.prev_dist[i]) / dt : 0.0f;
+		s_es.prev_dist[i] = d;
+		/* Doppler, a little exaggerated. */
+		const float pitch = fminf(fmaxf(300.0f / (300.0f + closing), 0.8f), 1.25f);
+		if (s_es.clip[ES_TIE_ENGINE]) {
+			float g, pan;
+			es_place(pos, 9.0f, &g, &pan);
+			g *= 0.55f * hum * s_es.base[ES_TIE_ENGINE] * es_master(1);
+			if (hum <= 0.0f) {
+				if (s_es.engine[i]) {
+					Aeron_AudioVoiceStop(s_es.engine[i]);
+					s_es.engine[i] = 0;
+				}
+			} else if (!s_es.engine[i]) {
+				s_es.engine[i] = Aeron_AudioVoicePlayFrom(s_es.clip[ES_TIE_ENGINE], fminf(g, 1.0f), pan, pitch, 1,
+														  (size_t)i * 2477u);
+			} else {
+				Aeron_AudioVoiceSetGain(s_es.engine[i], fminf(g, 1.0f));
+				Aeron_AudioVoiceSetPan(s_es.engine[i], pan);
+				Aeron_AudioVoiceSetPitch(s_es.engine[i], pitch);
+			}
+		}
+		/* The scream as one comes in close. */
+		if (!s_es.flyby_done[i] && t < T && d < 32.0f && closing < -2.0f) {
+			s_es.flyby_done[i] = 1;
+			es_play(ES_TIE_FLYBY, pos, 25.0f, 1.0f, pitch);
+		}
 	}
 }
 
@@ -3912,7 +4293,35 @@ static void env_tie_animate(void) {
 	if (!s_env.anim_paths) {
 		env_tie_paths();
 	}
+	if (!s_es.tried) {
+		es_load();
+	}
 	const float T = ENV_TIE_ANIM_SECONDS;
+	/* A press during the fight jumps to the cover's moment; on the title it
+	 * brings in the screen. Until then presses go no further (the menu
+	 * behind is not shown yet). */
+	if (env_float("XWA_XR_TIEART_HIDE_SCREEN", 1.0f) && !s_env.anim_go) {
+		const int pressed = env_tie_pressed();
+		if (pressed && s_env.anim_t >= T + 0.4f) {
+			s_env.anim_go = 1;
+		} else if (pressed && s_env.anim_t > 0.5f && s_env.anim_t < T) {
+			if (s_env.anim_t < ENV_TIE_BOOM_AT) {
+				/* Jumped past the blast: still heard. */
+				float p[3];
+				env_dir(k_tie_blast[0], k_tie_blast[1], p);
+				for (int a = 0; a < 3; ++a) {
+					p[a] *= k_tie_blast[2] * AERON_OPT_UNITS_PER_METER;
+				}
+				es_play(ES_BOOM, p, 60.0f, 1.0f, 1.0f);
+			}
+			s_env.anim_t = T;
+		}
+		Keyboard_FlushCharBuffer();
+		FrontendMouse_ClearClicks();
+	}
+	if (s_env.anim_go) {
+		s_env.anim_go_t += dt;
+	}
 	const float before = s_env.anim_t;
 	s_env.anim_t = fminf(s_env.anim_t + dt, T + 60.0f);
 	const float t = s_env.anim_t;
@@ -3927,8 +4336,9 @@ static void env_tie_animate(void) {
 	static const int shooters[5] = { 1, 2, 3, 0, 5 };
 	for (int si = 0; si < 5 && t < T - ENV_TIE_SALVO_SECONDS - 0.1f; ++si) {
 		const int ship = shooters[si];
-		if (ship == 5 && t > ENV_TIE_BOOM_AT) {
-			continue;
+		if ((ship == 5 && t > ENV_TIE_BOOM_AT) ||
+			(ship == s_env.anim_hunter && t > k_tie_misses[0] - 0.8f && t < ENV_TIE_BOOM_AT)) {
+			continue; /* the hunter's shots at the X-wing are its own */
 		}
 		if (before < s_env.anim_next_shot[ship] && t >= s_env.anim_next_shot[ship]) {
 			float pos[3], n[3], u[3], r[3];
@@ -3936,21 +4346,23 @@ static void env_tie_animate(void) {
 			env_cross(n, u, r);
 			const int green = ship != 5;
 			const float spread = green ? 0.7f : 5.2f;
+			es_play(green ? ES_TIE_LASER : ES_REBEL_LASER, pos, 18.0f, 0.8f, 0.96f + 0.08f * (float)(si & 1));
 			for (int g = -1; g <= 1; g += 2) {
-				for (int b = 0; b < 32; ++b) {
-					if (!s_env.anim_bolts[b].alive) {
-						for (int a = 0; a < 3; ++a) {
-							s_env.anim_bolts[b].p[a] = pos[a] + (r[a] * (float)g * spread + n[a] * 2.0f) * k;
-						}
-						memcpy(s_env.anim_bolts[b].d, n, sizeof n);
-						s_env.anim_bolts[b].life = 1.2f;
-						s_env.anim_bolts[b].green = green;
-						s_env.anim_bolts[b].alive = 1;
-						break;
-					}
+				float p[3];
+				for (int a = 0; a < 3; ++a) {
+					p[a] = pos[a] + (r[a] * (float)g * spread + n[a] * 2.0f) * k;
 				}
+				env_tie_spawn_bolt(p, n, 1.2f, green);
 			}
 			s_env.anim_next_shot[ship] = t + 0.42f + 0.06f * (float)si;
+		}
+	}
+	/* The hunter: two misses, then the three hits on the X-wing. */
+	if (t < ENV_TIE_BOOM_AT) {
+		env_tie_hunter_shot(before, t, k_tie_misses[0], 6.0f);
+		env_tie_hunter_shot(before, t, k_tie_misses[1], -4.0f);
+		for (int h = 0; h < 3; ++h) {
+			env_tie_hunter_shot(before, t, k_tie_hits[h], 0.0f);
 		}
 	}
 	for (int b = 0; b < 32; ++b) {
@@ -3959,10 +4371,41 @@ static void env_tie_animate(void) {
 		}
 		s_env.anim_bolts[b].life -= dt;
 		for (int a = 0; a < 3; ++a) {
-			s_env.anim_bolts[b].p[a] += s_env.anim_bolts[b].d[a] * 240.0f * k * dt;
+			s_env.anim_bolts[b].p[a] += s_env.anim_bolts[b].d[a] * ENV_TIE_BOLT_SPEED * k * dt;
 		}
 		s_env.anim_bolts[b].alive = s_env.anim_bolts[b].life > 0.0f && t < T;
 	}
+	/* The cover's salvos, the X-wing's hits, the blast. */
+	const float k_m = AERON_OPT_UNITS_PER_METER;
+	const float salvo_at = T - ENV_TIE_SALVO_SECONDS;
+	if (before < salvo_at && t >= salvo_at) {
+		const EnvSpaceScene* sc = env_space();
+		for (int si = 0; si < sc->salvo_count; ++si) {
+			float pos[3], n[3], u[3];
+			env_tie_pose(sc->salvos[si].shooter, t, pos, n, u);
+			const EnvGuns g = sc->salvos[si].guns;
+			es_play(g == ENV_GUNS_TIE || g == ENV_GUNS_INTERCEPTOR ? ES_TIE_LASER : ES_REBEL_LASER, pos, 18.0f, 1.0f,
+					1.0f);
+		}
+	}
+	const float* hits = k_tie_hits;
+	for (int h = 0; h < 3; ++h) {
+		if (before < hits[h] && t >= hits[h]) {
+			float pos[3], n[3], u[3];
+			env_tie_pose(5, t, pos, n, u);
+			es_play(ES_HIT0 + h, pos, 30.0f, 0.8f, 1.0f);
+		}
+	}
+	if (before < ENV_TIE_BOOM_AT && t >= ENV_TIE_BOOM_AT) {
+		float p[3];
+		env_dir(k_tie_blast[0], k_tie_blast[1], p);
+		for (int a = 0; a < 3; ++a) {
+			p[a] *= k_tie_blast[2] * k_m;
+		}
+		es_play(ES_BOOM, p, 60.0f, 1.0f, 1.0f);
+		es_play(ES_HIT2, p, 60.0f, 0.7f, 0.8f);
+	}
+	es_update_craft(t, dt);
 }
 
 static void env_tie_submit_bolts(AeronScene3D* scene) {
@@ -4023,6 +4466,7 @@ void XwaVrEnv_Submit(AeronScene3D* scene) {
 }
 
 void XwaVrEnv_Release(void) {
+	env_es_stop();
 	for (int i = 0; i < s_env.mesh_count; ++i) {
 		if (s_env.meshes[i].mesh) {
 			AeronScene_MeshDestroy(s_env.meshes[i].mesh);
