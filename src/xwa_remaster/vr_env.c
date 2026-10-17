@@ -576,7 +576,8 @@ void XwaVrEnv_SetBare(int bare) {
 	if (bare || !env_ready()) {
 		s_env_bare = 1;
 		s_env_fade_t = 0.0f;
-		(void)Aeron_XrTakeMenuXPressed(); /* no stale X (from flight) on the way in */
+		(void)Aeron_XrTakeMenuXPressed(); /* no stale X or Y (from flight) on the way in */
+		(void)Aeron_XrTakeMenuYPressed();
 	} else {
 		s_env_bare = 0;
 		s_env_fade_t = fminf(1.0f, s_env_fade_t + fminf(dt, 0.1f) / env_float("XWA_XR_ENV_FADE_SECONDS", 1.5f));
@@ -617,13 +618,29 @@ int Music_SetState(int state);
 #define ENV_MUSIC_MISSION_FAILED 1280 /* MUSIC_STATE_FRONTEND_1280: the failed mission's debriefing */
 
 /* X in the menus puts the screen away: it fades out (with its frame and
- * logo) and nothing reaches the menus until A or the trigger brings it
- * back. */
+ * logo), the X-Wing Alliance logo fades in large where it was (as at the
+ * startup title), and nothing reaches the menus until X, A or the trigger
+ * brings it back. */
 static struct {
 	int away;    /* put away (input blocked at once) */
 	float level; /* 1 shown .. 0 gone */
-} s_dismiss = { 0, 1.0f };
+	float logo;  /* the large logo meanwhile, 0 .. 1 */
+} s_dismiss = { 0, 1.0f, 0.0f };
 #define ENV_DISMISS_SECONDS 0.4f
+
+/* Y in the menus (or the VR options' Menu Scene) swaps the scene in place:
+ * while the next one loads (bare: stars only) the screen stays shown or put
+ * away, and the frame, logos and button hints stay up. Set until the
+ * environment is released (flight). */
+static int s_env_swapped;
+
+/* The screen's state (put away or not) counts: menus with a scene, not the
+ * startup films. */
+static int env_dismiss_applies(void) { return s_env.mode != ENV_OFF && (!s_env_bare || s_env_swapped); }
+
+/* Opacity of the frame, logos and hints: they fade in with the scene the
+ * first time; after a swap they stay. */
+static float env_chrome_fade(void) { return s_env_swapped ? 1.0f : s_env_fade; }
 
 static int env_title_active(void) {
 	return !s_title.done && s_env.mode != ENV_OFF && env_float("XWA_XR_TITLE", 1.0f) != 0.0f;
@@ -631,11 +648,10 @@ static int env_title_active(void) {
 
 static float env_screen_reveal(void);
 static void env_title_text(AeronCommandBuffer* cmd);
-int XwaVrEnv_ScreenHidden(void) { return !s_env_bare && s_env.mode != ENV_OFF && env_screen_reveal() <= 0.0f; }
-int XwaVrEnv_InputBlocked(void) {
-	return XwaVrEnv_ScreenHidden() || (!s_env_bare && s_env.mode != ENV_OFF && s_dismiss.away);
-}
-float XwaVrEnv_ScreenFade(void) { return s_env_bare || s_env.mode == ENV_OFF ? 1.0f : env_screen_reveal(); }
+static void env_hint_text(AeronCommandBuffer* cmd);
+int XwaVrEnv_ScreenHidden(void) { return env_dismiss_applies() && env_screen_reveal() <= 0.0f; }
+int XwaVrEnv_InputBlocked(void) { return XwaVrEnv_ScreenHidden() || (env_dismiss_applies() && s_dismiss.away); }
+float XwaVrEnv_ScreenFade(void) { return env_dismiss_applies() ? env_screen_reveal() : 1.0f; }
 
 /* The TIE Fighter box art's animation (defined below). */
 #define ENV_TIE_ANIM_SECONDS 7.0f
@@ -1354,13 +1370,46 @@ static int env_load_sprites(AeronCommandBuffer* cmd) {
 	return 0;
 }
 
+/* Another scene in place of this one (Y, or the VR options): everything of
+ * the old scene goes, but the frame and logo images (the same for every
+ * scene) and the screen's state stay. */
+static void env_swap_release(void) {
+	static const int keep[] = { ENV_TEX_LOGO, ENV_TEX_FRAME };
+	AeronTexture* tex[2];
+	int w[2], h[2], tried[2];
+	const int away = s_dismiss.away;
+	const float level = s_dismiss.level, logo = s_dismiss.logo;
+	for (int i = 0; i < 2; ++i) {
+		tex[i] = s_env.tex[keep[i]];
+		w[i] = s_env.tex_w[keep[i]];
+		h[i] = s_env.tex_h[keep[i]];
+		tried[i] = s_env.tex_tried[keep[i]];
+		s_env.tex[keep[i]] = NULL; /* not destroyed with the rest */
+	}
+	XwaVrEnv_Release();
+	for (int i = 0; i < 2; ++i) {
+		s_env.tex[keep[i]] = tex[i];
+		s_env.tex_w[keep[i]] = w[i];
+		s_env.tex_h[keep[i]] = h[i];
+		s_env.tex_tried[keep[i]] = tex[i] ? tried[i] : 0;
+	}
+	s_dismiss.away = away;
+	s_dismiss.level = level;
+	s_dismiss.logo = logo;
+	s_env_swapped = 1;
+}
+
 int XwaVrEnv_Prepare(AeronCommandBuffer* cmd) {
 	if (!cmd) {
 		return 0;
 	}
 	const EnvMode mode = env_mode();
 	if (mode != s_env.mode) {
-		XwaVrEnv_Release();
+		if (s_env.mode != ENV_OFF && mode != ENV_OFF) {
+			env_swap_release();
+		} else {
+			XwaVrEnv_Release();
+		}
 		s_env.mode = mode;
 	}
 	if (mode == ENV_OFF) {
@@ -1369,6 +1418,8 @@ int XwaVrEnv_Prepare(AeronCommandBuffer* cmd) {
 	env_list();
 	if (env_title_active()) {
 		env_title_text(cmd);
+	} else {
+		env_hint_text(cmd);
 	}
 	/* One OPT (or sprite) per frame. */
 	int busy = 0;
@@ -1436,6 +1487,11 @@ void XwaVrEnv_View(float pos[3], float rows[9]) {
 
 /* ---- billboards --------------------------------------------------------- */
 
+/* The fade quads get: the scene's, or the frame / logo / hints' own while
+ * those are drawn (s_quad_chrome). */
+static int s_quad_chrome;
+static float env_quad_fade(void) { return s_quad_chrome ? env_chrome_fade() : s_env_fade; }
+
 /* Queue a quad: corners (world units) bottom-left, bottom-right, top-right,
  * top-left; tint linear RGBA (HDR allowed). */
 static void env_quad_tex(AeronScene3D* scene, AeronTexture* tex, AeronSceneBillboardStage stage,
@@ -1456,9 +1512,9 @@ static void env_quad_tex(AeronScene3D* scene, AeronTexture* tex, AeronSceneBillb
 		/* The scene's fade in: PMA fades its opacity (colour with it),
 		 * additive its light. */
 		for (int k = 0; k < 3; ++k) {
-			d.colors[v][k] = tint[k] * (blend == AERON_SCENE_BILLBOARD_BLEND_PMA ? tint[3] : 1.0f) * s_env_fade;
+			d.colors[v][k] = tint[k] * (blend == AERON_SCENE_BILLBOARD_BLEND_PMA ? tint[3] : 1.0f) * env_quad_fade();
 		}
-		d.colors[v][3] = tint[3] * (blend == AERON_SCENE_BILLBOARD_BLEND_PMA ? s_env_fade : 1.0f);
+		d.colors[v][3] = tint[3] * (blend == AERON_SCENE_BILLBOARD_BLEND_PMA ? env_quad_fade() : 1.0f);
 	}
 	AeronScene_AddBillboard(scene, &d);
 }
@@ -1636,7 +1692,7 @@ int XwaVrEnv_LayerRect(float centre[3], float size[2]) {
 	if (sc.dist <= 0.0f || sc.w <= 0.0f || XwaVrEnv_ScreenHidden()) {
 		return 0;
 	}
-	if (s_env.tex[ENV_TEX_FRAME] && s_env.frame_layer_ok && !s_env_bare) {
+	if (s_env.tex[ENV_TEX_FRAME] && s_env.frame_layer_ok && (!s_env_bare || s_env_swapped)) {
 		float q[3];
 		env_frame_quad(&sc, q, size);
 		centre[0] = q[0];
@@ -1654,7 +1710,7 @@ int XwaVrEnv_LayerRect(float centre[3], float size[2]) {
 }
 
 int XwaVrEnv_CommitFrameLayer(AeronCommandBuffer* cmd, float brightness) {
-	if (s_env_bare || XwaVrEnv_ScreenHidden()) {
+	if ((s_env_bare && !s_env_swapped) || XwaVrEnv_ScreenHidden()) {
 		return 0; /* no frame round the startup films, or while the TIE art plays */
 	}
 	if (!cmd || !s_env.tex[ENV_TEX_FRAME] || s_env.tex_w[ENV_TEX_FRAME] > AERON_XR_FRAME_WIDTH ||
@@ -1663,7 +1719,7 @@ int XwaVrEnv_CommitFrameLayer(AeronCommandBuffer* cmd, float brightness) {
 		return 0;
 	}
 	const float tint = fminf(fmaxf(brightness, 0.0f), 1.0f);
-	const float fade = s_env_fade * env_screen_reveal();
+	const float fade = env_chrome_fade() * env_screen_reveal();
 	if (!s_env.frame_drawn || fabsf(tint - s_env.frame_tint) > 0.004f || fabsf(fade - s_env.frame_fade) > 0.004f) {
 		int w = 0, h = 0;
 		AeronRenderTarget* target = Aeron_XrStereoPanelTarget(AERON_XR_PANEL_FRAME, &w, &h);
@@ -1855,6 +1911,7 @@ static void env_submit_logo_at(AeronScene3D* scene, float alpha, int title) {
 	if (!s_env.tex[ENV_TEX_LOGO] || alpha <= 0.0f) {
 		return;
 	}
+	s_quad_chrome = 1;
 	EnvScreen sc;
 	env_screen(&sc);
 	float c[4][3];
@@ -1869,6 +1926,7 @@ static void env_submit_logo_at(AeronScene3D* scene, float alpha, int title) {
 	env_rect(center, ax, ay, c);
 	const float tint[4] = { alpha, alpha, alpha, alpha };
 	env_quad(scene, ENV_TEX_LOGO, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, tint);
+	s_quad_chrome = 0;
 }
 
 /* Above the frame; hidden behind the startup title until the screen comes. */
@@ -5111,20 +5169,24 @@ static void env_tie_submit_bolts(AeronScene3D* scene) {
 
 /* ---- the startup title ------------------------------------------------- */
 
-/* "Press A to Continue" into a texture of its own (once). */
-static void env_title_text(AeronCommandBuffer* cmd) {
-	if (s_title.text_rt || s_title.font_state < 0 || !cmd) {
-		return;
-	}
-	if (s_title.font_state == 0) {
+/* The font of the title's prompt and the button hints (loaded once). */
+static int env_font(AeronCommandBuffer* cmd) {
+	if (s_title.font_state == 0 && cmd) {
 		s_title.font_state = -1;
 		if (AeronFontAtlas_LoadVfs(&s_title.font, cmd, Aeron_GetVfs(), AERON_VFS_ROOT_RESOURCE, "fonts/setup",
 								   4u * 1024u * 1024u)) {
 			s_title.font_state = 1;
 		} else {
-			Aeron_LogWarn("xwa.remaster", "VR environment: no font for the title's prompt");
-			return;
+			Aeron_LogWarn("xwa.remaster", "VR environment: no font for the title's prompt and button hints");
 		}
+	}
+	return s_title.font_state > 0;
+}
+
+/* "Press A to Continue" into a texture of its own (once). */
+static void env_title_text(AeronCommandBuffer* cmd) {
+	if (s_title.text_rt || !cmd || !env_font(cmd)) {
+		return;
 	}
 	s_title.text_w = 1024;
 	s_title.text_h = 128;
@@ -5154,6 +5216,142 @@ static void env_title_text(AeronCommandBuffer* cmd) {
 	AeronDrawList_Render(s_title.text_list, cmd);
 }
 
+/* ---- the button hints under the screen ----------------------------------- */
+
+/* Two lines in small type under the frame, shown with the screen and when
+ * it is put away: the button (tinted) and what it does. */
+static struct {
+	AeronRenderTarget* rt;
+	AeronDrawList2D* list;
+	int w, h;
+	int failed;
+} s_hint;
+
+static const char* const k_hint_lines[2][2] = {
+	{ "X", "Toggle 2D screen" },
+	{ "Y", "Change VR environment" },
+};
+
+static void env_hint_text(AeronCommandBuffer* cmd) {
+	if (s_hint.rt || s_hint.failed || !cmd || !env_font(cmd)) {
+		return;
+	}
+	s_hint.w = 1024;
+	s_hint.h = 224; /* two lines of 112 */
+	s_hint.rt = Aeron_CreateRenderTarget(
+		&(AeronRenderTargetDesc) { .width = s_hint.w, .height = s_hint.h, .format = AERON_TEXTURE_FORMAT_RGBA8_UNORM });
+	s_hint.list = AeronDrawList_Create(64);
+	if (!s_hint.rt || !s_hint.list) {
+		s_hint.failed = 1;
+		return;
+	}
+	AeronTextStyle style;
+	memset(&style, 0, sizeof style);
+	style.font = &s_title.font;
+	style.filter = AERON_BLIT2D_FILTER_LINEAR;
+	style.scale = 1.0f;
+	/* The button letters in a column, the actions after a gap; the block
+	 * centred, as wide as the texture allows, lines at most 75 % of their
+	 * 112 px. */
+	const float line = AeronText_LineHeight(&style);
+	float key_w = 0.0f, text_w = 0.0f;
+	for (int i = 0; i < 2; ++i) {
+		key_w = fmaxf(key_w, AeronText_MeasureWidth(&style, k_hint_lines[i][0], -1));
+		text_w = fmaxf(text_w, AeronText_MeasureWidth(&style, k_hint_lines[i][1], -1));
+	}
+	const float gap = 0.7f * line;
+	const float block = key_w + gap + text_w;
+	const float slot = 0.5f * (float)s_hint.h;
+	style.scale = fminf(block > 0.0f ? 0.96f * (float)s_hint.w / block : 1.0f, line > 0.0f ? 0.75f * slot / line : 1.0f);
+	const float x0 = 0.5f * ((float)s_hint.w - block * style.scale);
+	AeronDrawList_Begin(s_hint.list, s_hint.rt, s_hint.w, s_hint.h, AERON_DRAWLIST2D_CLEAR, NULL);
+	{
+		/* A dark, soft-edged plate: readable over a bright explosion too. */
+		AeronDrawList2DRRect plate;
+		memset(&plate, 0, sizeof plate);
+		const float pad = 0.45f * line * style.scale;
+		plate.dst_x = fmaxf(x0 - pad, 2.0f);
+		plate.dst_w = fminf(block * style.scale + 2.0f * pad, (float)s_hint.w - 4.0f);
+		plate.dst_y = 4.0f;
+		plate.dst_h = (float)s_hint.h - 8.0f;
+		plate.radius_px = 28.0f;
+		plate.soft_px = 10.0f;
+		for (int k = 0; k < 3; ++k) {
+			plate.fill_top[k] = plate.fill_bottom[k] = 0.0f;
+		}
+		plate.fill_top[3] = plate.fill_bottom[3] = 0.5f;
+		AeronDrawList_AddRRect(s_hint.list, &plate);
+	}
+	for (int i = 0; i < 2; ++i) {
+		const float y = slot * (float)i + 0.5f * (slot - line * style.scale);
+		/* The letter in the menu beam's blue, the action in white. */
+		style.tint[0] = 0.55f;
+		style.tint[1] = 0.8f;
+		style.tint[2] = 1.0f;
+		style.tint[3] = 1.0f;
+		AeronText_Draw(s_hint.list, &style, x0, y, AERON_TEXT_LEFT, k_hint_lines[i][0], -1, NULL);
+		style.tint[0] = style.tint[1] = style.tint[2] = 0.92f;
+		AeronText_Draw(s_hint.list, &style, x0 + (key_w + gap) * style.scale, y, AERON_TEXT_LEFT, k_hint_lines[i][1],
+					   -1, NULL);
+	}
+	AeronDrawList_Render(s_hint.list, cmd);
+}
+
+/* Lower edge of the frame's bezel (image rows; transparent below). */
+#define ENV_FRAME_BEZEL_BOTTOM 1032.0f
+
+/* The hints, centred under the frame (or the bare screen), in the frame's
+ * plane. */
+static void env_submit_hints(AeronScene3D* scene) {
+	if (!s_hint.rt || env_title_active() || env_float("XWA_XR_BUTTON_HINTS", 1.0f) == 0.0f) {
+		return;
+	}
+	EnvScreen sc;
+	env_screen(&sc);
+	const float f = sc.frame_scale;
+	const float below = s_env.tex[ENV_TEX_FRAME]
+							? (ENV_FRAME_BEZEL_BOTTOM - k_frame_opening[3]) * sc.pic_w /
+								  (k_frame_opening[2] - k_frame_opening[0])
+							: 0.0f;
+	/* Lines about 7.5 cm tall at the screen's 3.2 m (about 1.3 degrees). */
+	const float th = 0.2f * env_float("XWA_XR_BUTTON_HINT_SCALE", 1.0f) * sc.dist / 3.2f;
+	const float tw = th * (float)s_hint.w / (float)s_hint.h;
+	const float up = (sc.lift - 0.5f * sc.pic_h - below) * f - 0.03f - 0.5f * th;
+	const float center[3] = { s_env.view_pos[0], s_env.view_pos[1] + (sc.frame_dist + 0.02f) * sc.k,
+							  s_env.view_pos[2] + up * sc.k };
+	const float ax[3] = { 0.5f * tw * sc.k, 0.0f, 0.0f };
+	const float ay[3] = { 0.0f, 0.0f, 0.5f * th * sc.k };
+	float c[4][3];
+	env_rect(center, ax, ay, c);
+	static const float tint[4] = { 1.0f, 1.0f, 1.0f, 0.85f };
+	s_quad_chrome = 1;
+	env_quad_tex(scene, Aeron_RenderTargetGetTexture(s_hint.rt), AERON_SCENE_BILLBOARD_STAGE_OVERLAY,
+				 AERON_SCENE_BILLBOARD_BLEND_PMA, c, tint);
+	s_quad_chrome = 0;
+}
+
+/* Y: the next scene, for this run (the VR options' Menu Scene saves one).
+ * XwaVrEnv_Prepare swaps it in. */
+static void env_next_scene(void) {
+	static const struct {
+		EnvMode mode;
+		const char* name;
+	} order[] = {
+		{ ENV_ENDOR, "endor" }, { ENV_BOXART, "xwing" }, { ENV_TIEART, "tiefighter" },
+		{ ENV_XVTART, "xvt" },  { ENV_BATTLE, "battle" },
+	};
+	const int n = (int)(sizeof order / sizeof order[0]);
+	int at = -1;
+	for (int i = 0; i < n; ++i) {
+		if (order[i].mode == s_env.mode) {
+			at = i;
+		}
+	}
+	const int next = (at + 1) % n;
+	SDL_setenv_unsafe("XWA_XR_ENVIRONMENT", order[next].name, 1);
+	Aeron_LogInfo("xwa.remaster", "VR environment: %s (Y)", order[next].name);
+}
+
 /* Once a frame (the scene up): the title's clock and its A. */
 static void env_title_update(void) {
 	const uint64_t now = SDL_GetPerformanceCounter();
@@ -5162,9 +5360,13 @@ static void env_title_update(void) {
 	dt = fminf(fmaxf(dt, 0.0f), 0.1f);
 	s_title.pressed = 0;
 	if (!env_title_active()) {
-		/* X puts the screen away; A or the trigger brings it back. */
-		if (Aeron_XrTakeMenuXPressed() && !s_dismiss.away) {
-			s_dismiss.away = 1;
+		/* X puts the screen away and brings it back (so do A and the
+		 * trigger); Y swaps the scene. */
+		if (Aeron_XrTakeMenuXPressed()) {
+			s_dismiss.away = !s_dismiss.away;
+		}
+		if (Aeron_XrTakeMenuYPressed()) {
+			env_next_scene();
 		}
 		if (s_dismiss.away) {
 			const AeronInputSnapshot* in = Aeron_InputSnapshot();
@@ -5176,10 +5378,18 @@ static void env_title_update(void) {
 		}
 		const float step = dt / ENV_DISMISS_SECONDS;
 		s_dismiss.level = s_dismiss.away ? fmaxf(s_dismiss.level - step, 0.0f) : fminf(s_dismiss.level + step, 1.0f);
+		/* The logo comes in as slowly as at the title, goes with the screen's
+		 * return. */
+		s_dismiss.logo = s_dismiss.away
+							 ? fminf(s_dismiss.logo + dt / env_float("XWA_XR_TITLE_FADE_SECONDS", 1.2f), 1.0f)
+							 : fmaxf(s_dismiss.logo - step, 0.0f);
 		return;
 	}
 	const AeronInputSnapshot* in = Aeron_InputSnapshot();
 	int pressed = Aeron_XrTakeAPressed() || (in && (in->key_pressed[AERON_KEY_RETURN] || in->key_pressed[AERON_KEY_SPACE]));
+	/* The title waits for A only. */
+	(void)Aeron_XrTakeMenuXPressed();
+	(void)Aeron_XrTakeMenuYPressed();
 	/* Nothing reaches the hidden menu meanwhile. */
 	Keyboard_FlushCharBuffer();
 	FrontendMouse_ClearClicks();
@@ -5246,8 +5456,22 @@ static void env_submit_title(AeronScene3D* scene) {
 				 AERON_SCENE_BILLBOARD_BLEND_PMA, c, tint);
 }
 
+/* The screen put away (X): the logo large where it was, as at the title. */
+static void env_submit_dismissed(AeronScene3D* scene) {
+	if (env_title_active() || s_dismiss.logo <= 0.0f) {
+		return;
+	}
+	env_submit_logo_at(scene, env_smooth(s_dismiss.logo) * (1.0f - env_screen_reveal()), 1);
+}
+
 void XwaVrEnv_Submit(AeronScene3D* scene) {
 	if (s_env_bare) {
+		if (s_env_swapped) {
+			/* The next scene loading (Y): the screen's surroundings stay. */
+			env_submit_logo_at(scene, env_screen_reveal(), 0);
+			env_submit_dismissed(scene);
+			env_submit_hints(scene);
+		}
 		return; /* the startup films: empty space */
 	}
 	env_title_update();
@@ -5288,6 +5512,8 @@ void XwaVrEnv_Submit(AeronScene3D* scene) {
 		env_submit_xvtart_sprites(scene);
 	}
 	env_submit_title(scene);
+	env_submit_dismissed(scene);
+	env_submit_hints(scene);
 	env_submit_frame(scene);
 }
 
@@ -5297,6 +5523,8 @@ void XwaVrEnv_Release(void) {
 	Aeron_XrSetScreenFade(1.0f);
 	s_dismiss.away = 0;
 	s_dismiss.level = 1.0f;
+	s_dismiss.logo = 0.0f;
+	s_env_swapped = 0;
 	for (int i = 0; i < s_env.mesh_count; ++i) {
 		if (s_env.meshes[i].mesh) {
 			AeronScene_MeshDestroy(s_env.meshes[i].mesh);
