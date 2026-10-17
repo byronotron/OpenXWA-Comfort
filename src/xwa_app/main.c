@@ -7,6 +7,7 @@
 #include "vr_keyboard.h"
 #include "vr_voice.h"
 #include "window_icon.h"
+#include "xr_tier.h"
 #include "xwa/config/game_config.h"
 #include "xwa_remaster/vr_cockpit_hud.h"
 #include "xwa_remaster/vr_lap_console.h"
@@ -348,8 +349,15 @@ static void android_load_settings(void) {
 		f = fopen(path, "w");
 		if (f) {
 			fputs("# OpenXWA Quest settings. Remove the leading '#' to change a value.\n"
+				  "# Headset class, picked from the GPU (low: Quest 2, Pico 4; mid: Quest 3,\n"
+				  "# Pico 4 Ultra; high: Steam Frame); it sets the defaults of the eye\n"
+				  "# pixel budget, refresh rate and foveation below. Force it with:\n"
+				  "#XWA_XR_TIER=mid\n"
 				  "# Per-eye render resolution (lower = faster):\n"
 				  "#AERON_XR_RESOLUTION_SCALE=1.1\n"
+				  "# Per-eye pixel budget: caps the resolution above (low 2300000,\n"
+				  "# mid 3700000, high 4600000):\n"
+				  "#AERON_XR_EYE_PIXELS=3700000\n"
 				  "# Size cap of the three HUD images, as a fraction of the recommended eye\n"
 				  "# size (a higher eye resolution then costs no extra HUD work):\n"
 				  "#AERON_XR_HUD_RESOLUTION=0.9\n"
@@ -541,6 +549,9 @@ static void android_xr_defaults(void) {
 	if (profile && profile[0] == '0') {
 		return;
 	}
+	/* Per headset: eye pixel budget, refresh rate, foveation (before the
+	 * foveation shim is set up below). */
+	XwaXrTier_ApplyDefaults();
 	if (!SDL_getenv("AERON_XR_RESOLUTION_SCALE")) {
 		SDL_setenv_unsafe("AERON_XR_RESOLUTION_SCALE", "1.1", 1);
 	}
@@ -606,6 +617,26 @@ static void android_xr_defaults(void) {
 		if (opt && opt[0] == '0' && !SDL_getenv("AERON_XR_PERF_LEVEL")) {
 			SDL_setenv_unsafe("AERON_XR_PERF_LEVEL", "0", 1);
 		}
+	}
+}
+
+/* After the GPU device exists: a runtime that created the Vulkan device with
+ * the system loader went around the shim, so there is no foveation and the
+ * ASTC feature was never enabled (textures stay uncompressed). */
+static void android_shim_check(void) {
+	int (*seen)(void) = NULL;
+	void* shim;
+	if (!g_shim_take_log) {
+		return; /* not using the shim */
+	}
+	shim = dlopen("libopenxwa_vkshim.so", RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD);
+	if (shim) {
+		*(void**)&seen = dlsym(shim, "OpenXWA_VkShim_DeviceSeen");
+	}
+	if (seen && !seen()) {
+		SDL_setenv_unsafe("AERON_TEXTURE_ASTC", "0", 1);
+		Aeron_LogWarn("xwa.config", "the OpenXR runtime created the Vulkan device without the shim: no foveation, "
+									"no ASTC textures");
 	}
 }
 
@@ -778,6 +809,7 @@ int main(int argc, char** argv) {
 		Aeron_SetFatalErrorHandler(ingame_fatal_error);
 	}
 #if defined(SDL_PLATFORM_ANDROID)
+	android_shim_check();
 	android_default_game_data(&launch);
 #endif
 	if (!XwaHostConfig_Load(Aeron_GetVfs(), &host_config, config_error, sizeof config_error)) {

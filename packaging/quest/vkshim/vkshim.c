@@ -1140,7 +1140,12 @@ static int shim_add_astc(VkPhysicalDevice phys, VkDeviceCreateInfo* mine, const 
 }
 
 /* Tells the game whether ASTC textures may be used (AERON_TEXTURE_ASTC). */
+/* Set once a device was created through the shim (some runtimes create it
+ * with the system loader's vkCreateDevice instead: no foveation, no ASTC). */
+static volatile int g_device_seen;
+
 static void shim_astc_result(int enabled) {
+	g_device_seen = 1;
 	LOGI("ASTC texture compression %s", enabled ? "enabled" : "unavailable");
 	if (!enabled) {
 		setenv("AERON_TEXTURE_ASTC", "0", 1);
@@ -1546,3 +1551,6 @@ SHIM_EXPORT void OpenXWA_VkShim_FrameMark(void) {
 
 /* For the game: 1 when the eye framebuffers are being foveated. */
 SHIM_EXPORT int OpenXWA_VkShim_Foveating(void) { return g_eye.view != VK_NULL_HANDLE; }
+
+/* For the game: 1 once the Vulkan device was created through the shim. */
+SHIM_EXPORT int OpenXWA_VkShim_DeviceSeen(void) { return g_device_seen; }

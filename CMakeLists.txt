@@ -354,6 +354,7 @@ set(XWA_APP_SOURCES
     src/xwa_app/crash_report.c
     src/xwa_app/voice_core.c
     src/xwa_app/vr_voice.c
+    src/xwa_app/xr_tier.c
 )
 
 if(ANDROID)
@@ -379,7 +380,8 @@ target_link_libraries(xwa
 )
 target_include_directories(xwa PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}/src/xwa_app
-	${CMAKE_CURRENT_SOURCE_DIR})
+	${CMAKE_CURRENT_SOURCE_DIR}
+	${CMAKE_CURRENT_SOURCE_DIR}/third_party/vulkan-headers) # xr_tier.c's GPU probe
 if(UNIX)
     target_link_libraries(xwa PRIVATE ${CMAKE_DL_LIBS})
 endif()

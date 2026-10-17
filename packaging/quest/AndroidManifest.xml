@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- OpenXWA for Meta Quest (standalone OpenXR). Values in @...@ are filled in by build_apk.py. -->
+<!-- OpenXWA for standalone OpenXR headsets (Meta Quest, Pico, Steam Frame). Values in @...@ are filled in by build_apk.py. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="@PACKAGE@"
     android:versionCode="@VERSION_CODE@"
@@ -49,6 +49,14 @@
 
         <meta-data android:name="com.oculus.supportedDevices" android:value="quest2|questpro|quest3|quest3s" />
         <meta-data android:name="com.oculus.handtracking.frequency" android:value="HIGH" />
+        <!-- Meta Quest OS loading splash (assets/vr_splash.png, not in the repo) -->
+        <meta-data android:name="com.oculus.ossplash" android:value="true" />
+        <!-- Other headsets, same APK (the Khronos loader finds each runtime):
+             Pico (Neo 3, 4, 4 Ultra) starts it as a VR app, not a 2D panel;
+             Play For Dream likewise. Steam Frame needs nothing beyond the
+             MAIN/LAUNCHER filter on the activity itself. -->
+        <meta-data android:name="pvr.app.type" android:value="vr" />
+        <meta-data android:name="com.yvr.intent.category.VR" android:value="vr_only" />
         <!-- SDL: keep running when the headset's system UI takes focus -->
         <meta-data android:name="SDL_ENV.SDL_ANDROID_BLOCK_ON_PAUSE" android:value="0" />
 

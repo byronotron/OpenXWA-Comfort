@@ -82,3 +82,18 @@ Known limits
     (the Quest GPU can't sample BC formats) and capped at 2048 px. That
     makes loading slower and uses more memory.
   * Runs at the Quest default of 72 Hz.
+
+Other headsets (same APK, from 0.0.17-quest100)
+  The APK also runs on Pico (Neo 3, 4, 4 Ultra) and Steam Frame. Steps 1-6
+  are the same with adb; only developer mode and the library differ:
+  * Pico: Settings -> General -> About -> tap "Software Version" until
+    developer mode appears; turn on USB debugging there. The app is under
+    Library -> Unknown sources. Android/data can usually be reached from
+    Windows Explorer as well.
+  * Steam Frame: turn on developer mode (Steam settings), start "Lepton
+    Development", connect adb, then install as above and start it from the
+    headset's Android apps. Copy the game files with adb push as in step 3.
+  The game picks its defaults from the GPU (see the log's "device tier"
+  line): Quest 2 and Pico 4 render fewer pixels at 72 Hz with stronger
+  foveation; Quest 3 is unchanged; Steam Frame gets a larger pixel budget.
+  Voice commands need the Quest controllers' thumb rests (not on Pico yet).
