@@ -88,7 +88,15 @@ typedef struct VcButton {
 	int danger;
 	int level; /* level cell: >0 when the cell is at or below the current level */
 	int hyper; /* the HYPERSPACE button: pulses orange-red while the jump is ready */
+	float font_size; /* 0: the default for its height */
+	float radius;    /* corner radius, 0: the default */
+	float border_px; /* 0: the default */
 } VcButton;
+
+/* The console's own buttons (not game actions): its help page. */
+#define VC_LOCAL_HELP ((XwaVrConsoleAction)1000)
+#define VC_LOCAL_BACK ((XwaVrConsoleAction)1001)
+#define VC_LOCAL_CARD ((XwaVrConsoleAction)1002) /* arg: the card to show or hide */
 
 typedef struct VcLabel {
 	float x, y;
@@ -196,7 +204,45 @@ static struct {
 	float clock; /* seconds, for pulsing */
 	/* The console's colours from the HUD colour (vc_hud_colors). */
 	float hud[3], hud_dark[3], hud_pale[3];
+	/* The help page ("?"): two big buttons that show or hide the cards. */
+	int help;
+	int card_override[VC_CARDS]; /* 0 the setting, 1 shown, 2 hidden */
+	/* Last frame's grip_capture (another panel or the stick had the grip:
+	 * squeezing it there is a grab, not the quick wheel). */
+	int grip_capture_prev[2];
 } s_vc;
+
+/* The quick wheel (see XwaVrConsole_CardFrame): held open with the grip of
+ * the hand that has the game's LEFT controls, steered by where that hand
+ * points, its trigger picks. Drawn on the voice card's layer while open
+ * (the console and both cards are hidden meanwhile). */
+#define VW_MAX_ITEMS 10
+#define VW_CENTER (-2) /* hover: the centre button */
+static struct {
+	int open;
+	int hand;      /* physical hand (0 left, 1 right) */
+	int grip_held; /* its grip, with hysteresis */
+	int level;     /* 0 the four categories, else 1 + the category */
+	int hover;     /* item, VW_CENTER or -1 */
+	int armed;     /* the trigger was let go since the last pick */
+	int center_lock; /* just went back: the centre does nothing until left */
+	int drawn;     /* updated this frame (the flight renderer ran) */
+	float anim;    /* 0..1 grow-in after opening or changing level */
+	float fwd[3];  /* smoothed head-yaw forward, level */
+	float center[3], ax[3], ay[3], az[3], q[4];
+	int hit;       /* the aim ray meets the wheel */
+	float hit_px, hit_py;
+	float ray_start[3], ray_end[3];
+	VcButton items[VW_MAX_ITEMS];
+	int item_count;
+	VcButton center_button;
+	float flash[VW_MAX_ITEMS + 1]; /* [VW_MAX_ITEMS]: the centre */
+	AeronDrawList2D* list[2];
+	uint64_t hash;
+	int hash_valid;
+	int logged;
+} s_vw;
+static void vw_close(void);
 
 /* ---- Small math ------------------------------------------------------- */
 
@@ -362,7 +408,27 @@ static void vc_pose(AeronXrPanel* out, float axis_x[3], float axis_y[3], float a
 
 /* ---- Actions ---------------------------------------------------------- */
 
+static int vc_card_visible(int card);
+static void vc_grab_end(VcPlace* pl);
+
 static void vc_push(XwaVrConsoleAction action, int arg) {
+	if (action == VC_LOCAL_HELP || action == VC_LOCAL_BACK) {
+		s_vc.help = action == VC_LOCAL_HELP;
+		return;
+	}
+	if (action == VC_LOCAL_CARD) {
+		if (arg >= 0 && arg < VC_CARDS) {
+			const int show = !vc_card_visible(arg);
+			s_vc.card_override[arg] = show ? 1 : 2;
+			if (show) {
+				/* Back at its spot beside the player, bright. */
+				vc_grab_end(&s_vc.cards[arg].place);
+				s_vc.cards[arg].place.custom = 0;
+				s_vc.cards[arg].awake = 1;
+			}
+		}
+		return;
+	}
 	if (action == XWA_VRC_NONE || s_vc.queue_count >= VC_ACTION_QUEUE) {
 		return;
 	}
@@ -461,6 +527,29 @@ static void vc_layout(void) {
 	s_vc.button_count = 0;
 	s_vc.label_count = 0;
 
+	if (s_vc.help) {
+		/* Help: the two reference cards, on two big buttons; BACK where the
+		 * "?" was. */
+		vc_label(34.0f, 22.0f, "HELP", 28, 0, 1, 0);
+		VcButton* back = vc_button(VC_W - 34.0f - 150.0f, 14.0f, 150.0f, 52.0f, "BACK", VC_LOCAL_BACK, 0);
+		back->font_size = 24.0f;
+		static const char* const l[2] = { "LIST OF VOICE\nRECOGNITION COMMANDS", "SHOW VR-CONTROLLER\nMAPPING" };
+		static const int card[2] = { VC_CARD_VOICE, VC_CARD_BUTTONS };
+		const float top = 84.0f, gap = 30.0f, w = (VC_W - 68.0f - gap) * 0.5f, h = VC_H - top - 34.0f;
+		for (int i = 0; i < 2; ++i) {
+			VcButton* b = vc_button(34.0f + (w + gap) * (float)i, top, w, h, l[i], VC_LOCAL_CARD, card[i]);
+			b->font_size = 40.0f;
+			b->lit = vc_card_visible(card[i]);
+			b->sub = b->lit ? "shown beside you - press to hide" : "press to show it beside you";
+		}
+		return;
+	}
+	{
+		/* Help ("?"), top right. */
+		VcButton* help = vc_button(VC_W - 34.0f - 64.0f, 14.0f, 64.0f, 44.0f, "?", VC_LOCAL_HELP, 0);
+		help->font_size = 30.0f;
+	}
+
 	/* Energy */
 	{
 		const float x = 34.0f, w = 470.0f;
@@ -494,11 +583,12 @@ static void vc_layout(void) {
 		const float x = 538.0f, w = 460.0f;
 		vc_label(x, 22.0f, "TARGET COMPUTER", 28, 0, 1, 0);
 		{
-			static const char* const l[3] = { "LOCK NEAREST\nENEMY", "LOCK ENEMY\nATTACKING ME", "MATCH SPEED" };
-			static const XwaVrConsoleAction a[3] = { XWA_VRC_TARGET_NEAREST_ENEMY, XWA_VRC_TARGET_ATTACKER,
-													 XWA_VRC_MATCH_SPEED };
-			vc_row(x, 62.0f, w, 66.0f, 3, l, a, row);
-			row[2]->enabled = st->has_target;
+			static const char* const l[4] = { "NEAREST\nENEMY", "ATTACKING\nME", "ATTACKING\nMY TARGET",
+											  "MATCH\nSPEED" };
+			static const XwaVrConsoleAction a[4] = { XWA_VRC_TARGET_NEAREST_ENEMY, XWA_VRC_TARGET_ATTACKER,
+													 XWA_VRC_TARGET_TARGETS_ATTACKER, XWA_VRC_MATCH_SPEED };
+			vc_row(x, 62.0f, w, 66.0f, 4, l, a, row);
+			row[2]->enabled = row[3]->enabled = st->has_target;
 		}
 		{
 			static const char* const l[3] = { "FRIENDLY", "NEUTRAL", "ENEMY" };
@@ -529,11 +619,11 @@ static void vc_layout(void) {
 			}
 		}
 		{
-			static const char* const l[3] = { "NEWEST", "OBJECTIVE", "CLEAR" };
-			static const XwaVrConsoleAction a[3] = { XWA_VRC_TARGET_NEWEST, XWA_VRC_TARGET_OBJECTIVE,
-													 XWA_VRC_TARGET_CLEAR };
-			vc_row(x, 304.0f, w, 48.0f, 3, l, a, row);
-			row[2]->enabled = st->has_target;
+			static const char* const l[4] = { "NEWEST", "OBJECTIVE", "INCOMING", "CLEAR" };
+			static const XwaVrConsoleAction a[4] = { XWA_VRC_TARGET_NEWEST, XWA_VRC_TARGET_OBJECTIVE,
+													 XWA_VRC_TARGET_INCOMING, XWA_VRC_TARGET_CLEAR };
+			vc_row(x, 304.0f, w, 48.0f, 4, l, a, row);
+			row[3]->enabled = st->has_target;
 		}
 		/* Weapons: its own section under the targeting computer. */
 		{
@@ -578,10 +668,16 @@ static void vc_layout(void) {
 			vc_row(x, 326.0f, w, 52.0f, 4, l, a, NULL);
 		}
 		{
-			static const char* const l[4] = { "GUNNER", "AUTO-GUN", "FLARE", "HYPERSPACE" };
-			static const XwaVrConsoleAction a[4] = { XWA_VRC_GUNNER, XWA_VRC_AUTO_GUNNER, XWA_VRC_COUNTERMEASURE,
+			static const char* const l[4] = { "GUNNER", "GUNNERS", "FLARE", "HYPERSPACE" };
+			static const XwaVrConsoleAction a[4] = { XWA_VRC_GUNNER, XWA_VRC_GUNNER_ATTACK, XWA_VRC_COUNTERMEASURE,
 													 XWA_VRC_HYPERSPACE };
 			vc_row(x, 388.0f, w, 52.0f, 4, l, a, row);
+			/* Gunners: at my target; held, the game's own toggle (back to
+			 * defending the ship when they are on it). */
+			row[1]->enabled = st->has_turrets;
+			row[1]->hold_action = XWA_VRC_AUTO_GUNNER;
+			row[1]->sub = !st->has_turrets ? NULL : st->gunners_on_target ? "on target" : "my target";
+			row[1]->lit = st->gunners_on_target;
 			/* Away from a hyperspace buoy the button finds one (the N key). */
 			row[3]->hyper = st->hyper_ready;
 			if (st->hyper_ready) {
@@ -866,6 +962,12 @@ void XwaVrConsole_CaptureGrip(int hand) {
 }
 
 int XwaVrConsole_RayBeam(int hand, float start[3], float end[3]) {
+	if (s_vw.open && s_vw.drawn && hand == s_vw.hand) {
+		/* The quick wheel's pointer: bright. */
+		memcpy(start, s_vw.ray_start, sizeof s_vw.ray_start);
+		memcpy(end, s_vw.ray_end, sizeof s_vw.ray_end);
+		return 2;
+	}
 	if (hand < 0 || hand > 1 || !s_vc.drawn || !s_vc.awake || s_vc.hands[hand].cursor != 2) {
 		return 0;
 	}
@@ -961,6 +1063,9 @@ static void vc_hud_colors(void) {
 /* Hyperspace ready: orange-red. */
 #define VC_HYPER 1.0f, 0.42f, 0.16f
 
+/* A button's look: `hold` (0..1) fills a danger button while it is held. */
+static void vc_draw_button_look(const VcButton* b, int hover, int pressed, float flash, float hold);
+
 static void vc_draw_button(int i) {
 	const VcButton* b = &s_vc.buttons[i];
 	int hover = 0, pressed = 0;
@@ -968,7 +1073,14 @@ static void vc_draw_button(int i) {
 		hover |= s_vc.hands[h].over_button == i;
 		pressed |= s_vc.hands[h].press_button == i;
 	}
-	const float flash = s_vc.flash[i] > 0.0f ? 1.0f : 0.0f;
+	const float hold = pressed && b->danger && b->hold_action != XWA_VRC_NONE
+						   ? fminf(1.0f, s_vc.hands[0].press_button == i ? s_vc.hands[0].press_time / VC_EJECT_HOLD_S
+																		  : s_vc.hands[1].press_time / VC_EJECT_HOLD_S)
+						   : 0.0f;
+	vc_draw_button_look(b, hover, pressed, s_vc.flash[i] > 0.0f ? 1.0f : 0.0f, hold);
+}
+
+static void vc_draw_button_look(const VcButton* b, int hover, int pressed, float flash, float hold) {
 	float fill[4], border[4];
 	const int hyper_ready = b->hyper && s_vc.state.hyper_ready;
 	/* Ready to jump: a slow orange-red pulse (about one per 1.2 s). */
@@ -980,10 +1092,6 @@ static void vc_draw_button(int i) {
 		vc_pma(fill, VC_HYPER, 0.22f + 0.38f * pulse + 0.1f * hover + 0.2f * (pressed || flash));
 		vc_pma(border, VC_HYPER, 0.75f + 0.25f * pulse);
 	} else if (b->danger) {
-		const float hold = pressed && b->hold_action != XWA_VRC_NONE
-							   ? fminf(1.0f, s_vc.hands[0].press_button == i ? s_vc.hands[0].press_time / VC_EJECT_HOLD_S
-																			  : s_vc.hands[1].press_time / VC_EJECT_HOLD_S)
-							   : 0.0f;
 		vc_pma(fill, VC_AMBER, 0.12f + 0.45f * hold + 0.1f * hover);
 		vc_pma(border, VC_AMBER, 0.85f);
 	} else {
@@ -995,24 +1103,25 @@ static void vc_draw_button(int i) {
 			vc_pma(border, VC_HUD, b->lit ? 1.0f : 0.62f);
 		}
 	}
+	const float radius = b->radius > 0.0f ? b->radius : 7.0f;
 	if (hyper_ready) {
 		float glow[4];
 		const float transparent[4] = { 0, 0, 0, 0 };
 		vc_pma(glow, VC_HYPER, 0.25f + 0.5f * pulse);
-		vc_rrect(b->x - 8.0f, b->y - 8.0f, b->w + 16.0f, b->h + 16.0f, 13.0f, 8.0f, 14.0f, transparent, glow);
-	} else if (b->enabled && (b->lit || hover || pressed)) {
+		vc_rrect(b->x - 8.0f, b->y - 8.0f, b->w + 16.0f, b->h + 16.0f, radius + 6.0f, 8.0f, 14.0f, transparent, glow);
+	} else if (b->enabled && (b->lit || hover || pressed || flash > 0.0f)) {
 		float glow[4];
 		const float transparent[4] = { 0, 0, 0, 0 };
 		vc_pma(glow, VC_HUD, b->lit ? 0.45f : hover ? 0.55f : 0.3f);
-		vc_rrect(b->x - 6.0f, b->y - 6.0f, b->w + 12.0f, b->h + 12.0f, 12.0f, 6.0f, 10.0f, transparent, glow);
+		vc_rrect(b->x - 6.0f, b->y - 6.0f, b->w + 12.0f, b->h + 12.0f, radius + 5.0f, 6.0f, 10.0f, transparent, glow);
 	}
-	vc_rrect(b->x, b->y, b->w, b->h, 7.0f, 2.0f, 1.0f, fill, border);
+	vc_rrect(b->x, b->y, b->w, b->h, radius, b->border_px > 0.0f ? b->border_px : 2.0f, 1.0f, fill, border);
 
 	const float tr = !b->enabled ? 0.45f : hyper_ready ? 1.0f : b->danger ? 1.0f : 0.85f;
 	const float tg = !b->enabled ? 0.52f : hyper_ready ? 0.90f : b->danger ? 0.92f : 0.97f;
 	const float tb = !b->enabled ? 0.55f : hyper_ready ? 0.78f : b->danger ? 0.80f : 1.0f;
 	const float text_a = b->lit || pressed ? 1.0f : 0.9f;
-	float size = b->h >= 60.0f ? 22.0f : 20.0f;
+	float size = b->font_size > 0.0f ? b->font_size : b->h >= 60.0f ? 22.0f : 20.0f;
 	/* "LINE ONE\nLINE TWO": two centred lines. */
 	char line1[48], line2[48];
 	const char* nl = strchr(b->label, '\n');
@@ -1034,7 +1143,12 @@ static void vc_draw_button(int i) {
 			size *= (b->w - 14.0f) / width;
 		}
 	}
-	if (line2[0]) {
+	if (line2[0] && b->sub) {
+		vc_text(b->x + b->w * 0.5f, b->y + b->h * 0.5f - size * 1.5f, line1, size, 1, tr, tg, tb, text_a);
+		vc_text(b->x + b->w * 0.5f, b->y + b->h * 0.5f - size * 0.45f, line2, size, 1, tr, tg, tb, text_a);
+		vc_text(b->x + b->w * 0.5f, b->y + b->h * 0.5f + size * 0.9f, b->sub, fmaxf(15.0f, size * 0.5f), 1, tr, tg, tb,
+				0.65f);
+	} else if (line2[0]) {
 		vc_text(b->x + b->w * 0.5f, b->y + b->h * 0.5f - size * 1.05f, line1, size, 1, tr, tg, tb, text_a);
 		vc_text(b->x + b->w * 0.5f, b->y + b->h * 0.5f + size * 0.02f, line2, size, 1, tr, tg, tb, text_a);
 	} else if (b->sub) {
@@ -1471,7 +1585,9 @@ static void vc_draw(void) {
 	vc_pma(border, VC_HUD, 0.6f);
 	vc_rrect(10.0f, 10.0f, VC_W - 20.0f, VC_H - 20.0f, 26.0f, 2.0f, 1.0f, fill, border);
 	vc_draw_handles(&s_vc.lap);
-	vc_draw_energy(34.0f, 406.0f, 470.0f);
+	if (!s_vc.help) {
+		vc_draw_energy(34.0f, 406.0f, 470.0f);
+	}
 	/* Scan lines, fixed to the panel. */
 	for (float y = 14.0f; y < VC_H - 14.0f; y += 6.0f) {
 		float line[4];
@@ -1479,7 +1595,7 @@ static void vc_draw(void) {
 		AeronDrawList_AddFill(s_vc.cur_list, 14.0f, y, VC_W - 28.0f, 2.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
 	}
 	/* Column dividers. */
-	for (int i = 0; i < 2; ++i) {
+	for (int i = 0; i < 2 && !s_vc.help; ++i) {
 		float line[4];
 		vc_pma(line, VC_HUD, 0.35f);
 		const float x = i == 0 ? 520.0f : 1015.0f;
@@ -1487,7 +1603,7 @@ static void vc_draw(void) {
 	}
 	/* Rules between the stacked sections (targeting / weapons, wingmen /
 	 * ship). */
-	{
+	if (!s_vc.help) {
 		float line[4];
 		vc_pma(line, VC_HUD, 0.35f);
 		AeronDrawList_AddFill(s_vc.cur_list, 538.0f, s_vc.divider_y, 460.0f, 2.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
@@ -1536,17 +1652,20 @@ static void vc_console_overlay(void) {
 static int vc_ensure(void);
 static int vc_enabled(void);
 static int vc_card_enabled(void);
+static int vw_enabled(void);
 
 void XwaVrConsole_BeginFrame(float dt_seconds) {
 	s_vc.dt = dt_seconds > 0.0f && dt_seconds < 0.25f ? dt_seconds : 0.0f;
 	s_vc.clock = fmodf(s_vc.clock + s_vc.dt, 1000.0f);
 	s_vc.drawn = 0;
+	s_vw.drawn = 0;
 	for (int c = 0; c < VC_CARDS; ++c) {
 		s_vc.cards[c].drawn = 0;
 	}
 	/* Load the font here, between frames, rather than while the flight
 	 * renderer is recording its command buffer. */
-	if (s_vc.state.valid && s_vc.font_state == 0 && (vc_enabled() || vc_card_enabled()) && Aeron_XrIsPresenting()) {
+	if (s_vc.state.valid && s_vc.font_state == 0 && (vc_enabled() || vc_card_enabled() || vw_enabled()) &&
+		Aeron_XrIsPresenting()) {
 		vc_ensure();
 	}
 }
@@ -1773,6 +1892,9 @@ int XwaVrConsole_Frame(AeronCommandBuffer* cmd, int width, int height, const Aer
 		s_vc.font_state == 0 || !vc_ensure()) {
 		return 0; /* the font loads in BeginFrame first */
 	}
+	if (s_vw.open) {
+		return 0; /* hidden while the quick wheel is open */
+	}
 	s_vc.drawn = 1;
 	if (!s_vc.logged) {
 		Aeron_LogInfo("xwa.remaster", "lap console: %dx%d layer, %.0f deg down, %.2f m", width, height,
@@ -1857,12 +1979,516 @@ int XwaVrConsole_Frame(AeronCommandBuffer* cmd, int width, int height, const Aer
 }
 
 
+/* ---- Quick wheel ------------------------------------------------------- */
+
+/* Held open with the grip of the hand that has the game's LEFT controls
+ * (squeezed away from a panel's handle or the flight stick). It sits
+ * VW_AHEAD_M in front of that controller, level and facing the player's
+ * head yaw, and follows the controller's position but not its turning:
+ * where the controller points (a beam) picks a slice, the trigger takes
+ * it and the wheel stays open for the next one; letting go of the grip
+ * closes it. Level 1: four categories round CONFIRM (Space); a category
+ * opens its commands round BACK. Drawn on the voice card's layer (the
+ * card's 1024 x 768 image, the wheel a circle in it). */
+#define VW_W 1024.0f
+#define VW_H 768.0f
+#define VW_H_M 0.26f
+#define VW_W_M (VW_H_M * VW_W / VW_H)
+#define VW_PX_PER_M (VW_H / VW_H_M)
+#define VW_AHEAD_M 0.15f
+#define VW_PLATE_R 370.0f     /* px */
+#define VW_CENTER_R 84.0f     /* px: the centre button, also where it is picked */
+#define VW_SELECT_MAX_M 0.40f /* farther from the centre: nothing is picked */
+#define VW_HYST_DEG 5.0f      /* a slice is kept this far past its edge */
+#define VW_TRIGGER_ON 0.6f
+#define VW_TRIGGER_OFF 0.3f
+#define VW_GROW_S 0.09f
+#define VW_PI 3.14159265f
+
+enum { VW_CAT_SHIP, VW_CAT_ENERGY, VW_CAT_TARGETING, VW_CAT_WINGMEN, VW_CATS };
+static const char* const k_vw_cat_label[VW_CATS] = { "SHIP &\nWEAPONS", "ENERGY", "TARGETING", "WINGMEN" };
+static const char* const k_vw_cat_name[VW_CATS] = { "ship & weapons", "energy", "targeting", "wingmen" };
+static const char* const k_vw_levels[5] = { "off", "low", "normal", "high", "max" };
+static const char* const k_vw_balance[3] = { "front", "even", "rear" };
+
+static int vw_enabled(void) {
+	const char* env = getenv("XWA_XR_WHEEL");
+	return !(env && (env[0] == '0' || env[0] == 'o' || env[0] == 'O'));
+}
+
+static void vw_close(void) {
+	if (s_vw.open) {
+		s_vw.open = 0;
+		/* The voice card's image showed the wheel: draw the card again. */
+		s_vc.cards[VC_CARD_VOICE].hash_valid = 0;
+	}
+	s_vw.hover = -1;
+	s_vw.hit = 0;
+}
+
+static VcButton* vw_item(const char* label, XwaVrConsoleAction action, int arg) {
+	if (s_vw.item_count >= VW_MAX_ITEMS) {
+		static VcButton spare;
+		memset(&spare, 0, sizeof spare);
+		return &spare;
+	}
+	VcButton* b = &s_vw.items[s_vw.item_count++];
+	memset(b, 0, sizeof *b);
+	b->label = label;
+	b->action = action;
+	b->arg = arg;
+	b->enabled = 1;
+	return b;
+}
+
+static int vw_clamp_level(int level) { return level < 0 ? 0 : level > 4 ? 4 : level; }
+
+/* The current level's items with their live state, laid out round the
+ * centre: the first at 12 o'clock, then clockwise. */
+static void vw_layout(void) {
+	const XwaVrConsoleState* st = &s_vc.state;
+	VcButton* b;
+	s_vw.item_count = 0;
+	switch (s_vw.level) {
+		case 0:
+			for (int c = 0; c < VW_CATS; ++c) {
+				b = vw_item(k_vw_cat_label[c], XWA_VRC_NONE, c);
+				b->font_size = 30.0f;
+			}
+			/* At a buoy with the jump ready: the ship slice pulses. */
+			s_vw.items[VW_CAT_SHIP].hyper = st->hyper_ready;
+			s_vw.items[VW_CAT_SHIP].sub = st->hyper_ready ? "hyperspace ready" : NULL;
+			break;
+		case 1 + VW_CAT_SHIP:
+			b = vw_item("MATCH\nSPEED", XWA_VRC_MATCH_SPEED, 0);
+			b->enabled = st->has_target;
+			vw_item("CYCLE\nWARHEADS", XWA_VRC_CYCLE_WARHEAD, 0);
+			vw_item("FIRE-LINK", XWA_VRC_FIRE_LINK, 0);
+			vw_item("FLARE", XWA_VRC_COUNTERMEASURE, 0);
+			b = vw_item("HYPERSPACE", XWA_VRC_HYPERSPACE, 0);
+			b->hyper = st->hyper_ready;
+			if (st->hyper_ready) {
+				b->sub = "ready";
+			} else {
+				/* Away from a buoy: find one (the N key), as on the console. */
+				b->label = "NAV BUOY";
+				b->action = XWA_VRC_TARGET_NAV;
+				b->sub = "target next";
+			}
+			b = vw_item("GUNNERS", XWA_VRC_GUNNER_ATTACK, 0);
+			b->enabled = st->has_turrets;
+			b->sub = !st->has_turrets ? NULL : st->gunners_on_target ? "on target" : "attack my target";
+			b->lit = st->gunners_on_target;
+			b = vw_item("BEAM\nWEAPON", XWA_VRC_BEAM_TOGGLE, 0);
+			b->enabled = st->has_beam;
+			b = vw_item("S-FOILS", XWA_VRC_SFOILS, 0);
+			b->enabled = st->has_sfoils;
+			b->sub = !st->has_sfoils ? NULL : st->sfoils_closed ? "closed" : "open";
+			b->lit = st->has_sfoils && !st->sfoils_closed;
+			break;
+		case 1 + VW_CAT_ENERGY:
+			/* Recharge rates step up one level a pick (MAX wraps to OFF, as
+			 * the keys do). */
+			b = vw_item("LASERS >\nSHIELDS", XWA_VRC_LASERS_TO_SHIELDS, 0);
+			b->enabled = st->has_shields;
+			b = vw_item("LASER\nRECHARGE", XWA_VRC_LASER_LEVEL, (vw_clamp_level(st->laser_level) + 1) % 5);
+			b->sub = k_vw_levels[vw_clamp_level(st->laser_level)];
+			b = vw_item("SHIELD\nRECHARGE", XWA_VRC_SHIELD_LEVEL, (vw_clamp_level(st->shield_level) + 1) % 5);
+			b->enabled = st->has_shields;
+			b->sub = st->has_shields ? k_vw_levels[vw_clamp_level(st->shield_level)] : NULL;
+			b = vw_item("BEAM\nRECHARGE", XWA_VRC_BEAM_LEVEL, (vw_clamp_level(st->beam_level) + 1) % 5);
+			b->enabled = st->has_beam;
+			b->sub = st->has_beam ? k_vw_levels[vw_clamp_level(st->beam_level)] : NULL;
+			b = vw_item("SHIELD\nBALANCE", XWA_VRC_SHIELD_BALANCE,
+						((st->shield_balance < 0 || st->shield_balance > 2 ? 1 : st->shield_balance) + 1) % 3);
+			b->enabled = st->has_shields;
+			b->sub = st->has_shields && st->shield_balance >= 0 && st->shield_balance <= 2
+						 ? k_vw_balance[st->shield_balance]
+						 : NULL;
+			vw_item("ENERGY\nPRESET 1", XWA_VRC_PRESET_RECALL, 0);
+			vw_item("ENERGY\nPRESET 2", XWA_VRC_PRESET_RECALL, 1);
+			b = vw_item("SHIELDS >\nLASERS", XWA_VRC_SHIELDS_TO_LASERS, 0);
+			b->enabled = st->has_shields;
+			break;
+		case 1 + VW_CAT_TARGETING:
+			vw_item("NEAREST\nENEMY", XWA_VRC_TARGET_NEAREST_ENEMY, 0);
+			vw_item("NEXT\nTARGET", XWA_VRC_TARGET_NEXT, 0);
+			vw_item("ATTACKING\nME", XWA_VRC_TARGET_ATTACKER, 0);
+			b = vw_item("ATTACKING\nMY TARGET", XWA_VRC_TARGET_TARGETS_ATTACKER, 0);
+			b->enabled = st->has_target;
+			vw_item("INCOMING\nMISSILE", XWA_VRC_TARGET_INCOMING, 0);
+			vw_item("OBJECTIVE", XWA_VRC_TARGET_OBJECTIVE, 0);
+			vw_item("NEWEST", XWA_VRC_TARGET_NEWEST, 0);
+			b = vw_item("NEXT\nSUBSYSTEM", XWA_VRC_SUBSYSTEM_NEXT, 0);
+			b->enabled = st->has_target;
+			vw_item("NAV BUOY", XWA_VRC_TARGET_NAV, 0);
+			vw_item("PREVIOUS\nTARGET", XWA_VRC_TARGET_PREV, 0);
+			break;
+		case 1 + VW_CAT_WINGMEN:
+			b = vw_item("ATTACK\nMY TARGET", XWA_VRC_WING_ATTACK, 0);
+			b->enabled = st->has_target;
+			vw_item("COVER ME", XWA_VRC_WING_COVER, 0);
+			vw_item("EVADE", XWA_VRC_WING_EVADE, 0);
+			vw_item("WAIT", XWA_VRC_WING_WAIT, 0);
+			vw_item("GO AHEAD", XWA_VRC_WING_GO_AHEAD, 0);
+			vw_item("RETURN\nHOME", XWA_VRC_WING_HOME, 0);
+			vw_item("REINFORCE", XWA_VRC_WING_REINFORCE, 0);
+			b = vw_item("IGNORE\nMY TARGET", XWA_VRC_WING_IGNORE, 0);
+			b->enabled = st->has_target;
+			break;
+		default:
+			s_vw.level = 0;
+			break;
+	}
+	const int n = s_vw.item_count;
+	const float ring = n <= 4 ? 222.0f : n <= 8 ? 266.0f : 278.0f;
+	const float bw = n <= 4 ? 232.0f : n <= 8 ? 172.0f : 148.0f;
+	const float bh = n <= 4 ? 124.0f : n <= 8 ? 90.0f : 80.0f;
+	for (int i = 0; i < n; ++i) {
+		const float a = (float)i * 2.0f * VW_PI / (float)n;
+		VcButton* it = &s_vw.items[i];
+		it->x = VW_W * 0.5f + ring * sinf(a) - bw * 0.5f;
+		it->y = VW_H * 0.5f - ring * cosf(a) - bh * 0.5f;
+		it->w = bw;
+		it->h = bh;
+		it->radius = 12.0f;
+		if (it->font_size <= 0.0f) {
+			it->font_size = n <= 8 ? 24.0f : 22.0f;
+		}
+	}
+	VcButton* c = &s_vw.center_button;
+	memset(c, 0, sizeof *c);
+	c->x = VW_W * 0.5f - VW_CENTER_R;
+	c->y = VW_H * 0.5f - VW_CENTER_R;
+	c->w = c->h = 2.0f * VW_CENTER_R;
+	c->radius = VW_CENTER_R;
+	c->enabled = 1;
+	c->font_size = 28.0f;
+	if (s_vw.level == 0) {
+		c->label = "CONFIRM";
+		c->sub = "space";
+		c->action = XWA_VRC_CONFIRM;
+	} else {
+		c->label = "BACK";
+		c->sub = k_vw_cat_name[s_vw.level - 1];
+	}
+}
+
+/* The slice the ray picks at (u, v) metres from the centre (+u right, +v
+ * up), the centre, or -1. Keeps the current pick a little past its edge. */
+static int vw_pick(float u, float v) {
+	const float r = sqrtf(u * u + v * v);
+	const float center_m = VW_CENTER_R / VW_PX_PER_M;
+	if (r < (s_vw.hover == VW_CENTER ? center_m * 1.2f : center_m)) {
+		return VW_CENTER;
+	}
+	const int n = s_vw.item_count;
+	if (r > VW_SELECT_MAX_M || n <= 0) {
+		return -1;
+	}
+	const float step = 360.0f / (float)n;
+	float a = atan2f(u, v) * 180.0f / VW_PI;
+	if (a < 0.0f) {
+		a += 360.0f;
+	}
+	int pick = (int)floorf((a + 0.5f * step) / step) % n;
+	if (s_vw.hover >= 0 && s_vw.hover < n && pick != s_vw.hover) {
+		float d = fmodf(fabsf(a - step * (float)s_vw.hover), 360.0f);
+		if (d > 180.0f) {
+			d = 360.0f - d;
+		}
+		if (d < 0.5f * step + VW_HYST_DEG) {
+			pick = s_vw.hover;
+		}
+	}
+	return pick;
+}
+
+/* The trigger on the current pick. */
+static void vw_activate(void) {
+	const int hand = s_vw.hand;
+	if (s_vw.hover == VW_CENTER) {
+		if (s_vw.center_lock) {
+			return; /* just came back here: point away first */
+		}
+		if (s_vw.level == 0) {
+			vc_push(XWA_VRC_CONFIRM, 0);
+			s_vw.flash[VW_MAX_ITEMS] = VC_FLASH_S;
+			Aeron_XrHapticPulse(hand, 0.6f, 30);
+		} else {
+			s_vw.level = 0;
+			s_vw.anim = fminf(s_vw.anim, 0.6f);
+			s_vw.center_lock = 1;
+			Aeron_XrHapticPulse(hand, 0.4f, 25);
+		}
+		return;
+	}
+	if (s_vw.hover < 0 || s_vw.hover >= s_vw.item_count) {
+		return;
+	}
+	const VcButton* b = &s_vw.items[s_vw.hover];
+	if (s_vw.level == 0) {
+		s_vw.level = 1 + b->arg;
+		s_vw.anim = fminf(s_vw.anim, 0.6f);
+		s_vw.hover = -1;
+		Aeron_XrHapticPulse(hand, 0.4f, 25);
+		return;
+	}
+	if (!b->enabled || b->action == XWA_VRC_NONE) {
+		Aeron_XrHapticPulse(hand, 0.1f, 10);
+		return;
+	}
+	vc_push(b->action, b->arg);
+	s_vw.flash[s_vw.hover] = VC_FLASH_S;
+	Aeron_XrHapticPulse(hand, 0.6f, 30);
+}
+
+/* Once a frame (from the voice card's frame, after the console and the
+ * button card had their turn with the grips): opens, steers and closes. */
+static void vw_update(const AeronXrView views[2]) {
+	static const float minus_z[3] = { 0.0f, 0.0f, -1.0f };
+	const int hand = Aeron_XrLeftHanded() ? 1 : 0;
+	AeronXrHand xh;
+	memset(&xh, 0, sizeof xh);
+	const int tracked = Aeron_XrGetHand(hand, &xh);
+	s_vw.drawn = 1;
+	if (s_vw.open && s_vw.hand != hand) {
+		vw_close();
+	}
+	const int was_held = s_vw.grip_held;
+	s_vw.grip_held = tracked && (was_held ? xh.grip > VC_GRIP_OFF : xh.grip >= VC_GRIP_ON);
+	if (!s_vc.state.valid || !vw_enabled() || s_vc.font_state != 1 || !tracked) {
+		vw_close();
+		return;
+	}
+	if (!s_vw.open) {
+		if (!s_vw.grip_held || was_held) {
+			return;
+		}
+		/* A squeeze on a panel's handle or at the flight stick is theirs. */
+		int owned = s_vc.grip_capture[hand] || s_vc.grip_capture_prev[hand] || s_vc.lap.grab_hand == hand + 1 ||
+					s_vc.lap.hover_side[hand];
+		for (int c = 0; c < VC_CARDS; ++c) {
+			owned |= s_vc.cards[c].place.grab_hand == hand + 1 || s_vc.cards[c].place.hover_side[hand];
+		}
+		if (owned) {
+			return;
+		}
+		s_vw.open = 1;
+		s_vw.hand = hand;
+		s_vw.level = 0;
+		s_vw.hover = -1;
+		s_vw.armed = xh.trigger < VW_TRIGGER_OFF; /* a held trigger must be let go first */
+		s_vw.center_lock = 0;
+		s_vw.anim = 0.0f;
+		s_vw.fwd[0] = s_vw.fwd[1] = s_vw.fwd[2] = 0.0f;
+		memset(s_vw.flash, 0, sizeof s_vw.flash);
+		s_vw.hash_valid = 0;
+		Aeron_XrHapticPulse(hand, 0.3f, 20);
+		if (!s_vw.logged) {
+			Aeron_LogInfo("xwa.remaster", "quick wheel: %s grip, %.2f m ahead, %.2f m wide", hand ? "right" : "left",
+						  (double)VW_AHEAD_M, (double)(2.0f * VW_PLATE_R / VW_PX_PER_M));
+			s_vw.logged = 1;
+		}
+	} else if (!s_vw.grip_held) {
+		vw_close();
+		return;
+	}
+	s_vw.anim = s_vc.dt > 0.0f ? fminf(1.0f, s_vw.anim + s_vc.dt / VW_GROW_S) : 1.0f;
+	for (int i = 0; i <= VW_MAX_ITEMS; ++i) {
+		if (s_vw.flash[i] > 0.0f) {
+			s_vw.flash[i] -= s_vc.dt;
+		}
+	}
+
+	/* Facing the head's yaw (level), eased so a glance does not swing it. */
+	{
+		float f[3];
+		vc_rotate(views[0].orientation, minus_z, f);
+		const float len = sqrtf(f[0] * f[0] + f[2] * f[2]);
+		const int fresh = s_vw.fwd[0] == 0.0f && s_vw.fwd[2] == 0.0f;
+		if (len > 0.2f) {
+			f[0] /= len;
+			f[2] /= len;
+			const float k = fresh || s_vc.dt <= 0.0f ? 1.0f : fminf(1.0f, s_vc.dt / 0.12f);
+			s_vw.fwd[0] += (f[0] - s_vw.fwd[0]) * k;
+			s_vw.fwd[2] += (f[2] - s_vw.fwd[2]) * k;
+		} else if (fresh) {
+			s_vw.fwd[2] = -1.0f; /* looking straight down: straight ahead */
+		}
+		const float l = sqrtf(s_vw.fwd[0] * s_vw.fwd[0] + s_vw.fwd[2] * s_vw.fwd[2]);
+		if (l > 1e-4f) {
+			s_vw.fwd[0] /= l;
+			s_vw.fwd[2] /= l;
+		} else {
+			s_vw.fwd[0] = 0.0f;
+			s_vw.fwd[2] = -1.0f;
+		}
+		s_vw.fwd[1] = 0.0f;
+	}
+	const float az[3] = { -s_vw.fwd[0], 0.0f, -s_vw.fwd[2] }; /* towards the player */
+	const float ax[3] = { az[2], 0.0f, -az[0] };
+	const float ay[3] = { 0.0f, 1.0f, 0.0f };
+	memcpy(s_vw.az, az, sizeof az);
+	memcpy(s_vw.ax, ax, sizeof ax);
+	memcpy(s_vw.ay, ay, sizeof ay);
+	vc_basis_quat(ax, ay, az, s_vw.q);
+	for (int k = 0; k < 3; ++k) {
+		s_vw.center[k] = xh.position[k] + s_vw.fwd[k] * VW_AHEAD_M;
+	}
+
+	/* Where the controller points. */
+	vw_layout();
+	float d[3];
+	vc_rotate(xh.orientation, minus_z, d);
+	for (int k = 0; k < 3; ++k) {
+		s_vw.ray_start[k] = xh.position[k] + d[k] * VC_TIP_M;
+	}
+	int hover = -1;
+	s_vw.hit = 0;
+	const float dn = vc_dot(d, az);
+	if (dn < -0.15f) {
+		const float rel[3] = { s_vw.center[0] - xh.position[0], s_vw.center[1] - xh.position[1],
+							   s_vw.center[2] - xh.position[2] };
+		const float t = vc_dot(rel, az) / dn;
+		if (t > 0.0f && t < 1.5f) {
+			float off[3];
+			for (int k = 0; k < 3; ++k) {
+				s_vw.ray_end[k] = xh.position[k] + d[k] * t;
+				off[k] = s_vw.ray_end[k] - s_vw.center[k];
+			}
+			const float u = vc_dot(off, ax), v = vc_dot(off, ay);
+			s_vw.hit = 1;
+			s_vw.hit_px = (u / VW_W_M + 0.5f) * VW_W;
+			s_vw.hit_py = (0.5f - v / VW_H_M) * VW_H;
+			hover = vw_pick(u, v);
+		}
+	}
+	if (!s_vw.hit) {
+		for (int k = 0; k < 3; ++k) {
+			s_vw.ray_end[k] = s_vw.ray_start[k] + d[k] * 0.25f;
+		}
+	}
+	if (hover != s_vw.hover) {
+		if (hover != -1) {
+			Aeron_XrHapticPulse(hand, 0.25f, 25); /* a tick per slice */
+		}
+		s_vw.hover = hover;
+	}
+	if (s_vw.hover != VW_CENTER) {
+		s_vw.center_lock = 0;
+	}
+
+	/* The trigger picks; it must be let go before it picks again. */
+	if (!s_vw.armed) {
+		s_vw.armed = xh.trigger < VW_TRIGGER_OFF;
+	} else if (xh.trigger >= VW_TRIGGER_ON) {
+		s_vw.armed = 0;
+		vw_activate();
+	}
+	vw_layout(); /* the level may have changed */
+}
+
+static void vw_draw(void) {
+	const float cx = VW_W * 0.5f, cy = VW_H * 0.5f, R = VW_PLATE_R;
+	const float transparent[4] = { 0, 0, 0, 0 };
+	float fill[4], border[4], glow[4], line[4];
+	vc_hud_colors();
+	/* The lap console's plate, round. */
+	vc_pma(glow, VC_HUD, 0.25f);
+	vc_rrect(cx - R - 6.0f, cy - R - 6.0f, 2.0f * R + 12.0f, 2.0f * R + 12.0f, R + 6.0f, 8.0f, 12.0f, transparent, glow);
+	vc_pma(fill, VC_HUD_DARK, 0.16f);
+	vc_pma(border, VC_HUD, 0.6f);
+	vc_rrect(cx - R, cy - R, 2.0f * R, 2.0f * R, R, 2.0f, 1.0f, fill, border);
+	vc_pma(line, VC_HUD, 0.025f);
+	for (float y = cy - R + 10.0f; y < cy + R - 10.0f; y += 6.0f) {
+		const float dy = y + 1.0f - cy;
+		const float half = sqrtf(fmaxf(0.0f, (R - 8.0f) * (R - 8.0f) - dy * dy));
+		if (half > 4.0f) {
+			AeronDrawList_AddFill(s_vc.cur_list, cx - half, y, 2.0f * half, 2.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
+		}
+	}
+	/* A faint track inside the rim, lit along the picked slice. */
+	const float track = R - 16.0f;
+	vc_pma(border, VC_HUD, 0.25f);
+	vc_rrect(cx - track - 1.0f, cy - track - 1.0f, 2.0f * track + 2.0f, 2.0f * track + 2.0f, track + 1.0f, 2.0f, 1.0f,
+			 transparent, border);
+	const int n = s_vw.item_count;
+	if (s_vw.hover >= 0 && s_vw.hover < n) {
+		const float step = 2.0f * VW_PI / (float)n;
+		const float a0 = ((float)s_vw.hover - 0.5f) * step + 0.02f, a1 = ((float)s_vw.hover + 0.5f) * step - 0.02f;
+		const int segs = 24;
+		vc_pma(line, VC_HUD, 0.9f);
+		for (int i = 0; i < segs; ++i) {
+			const float b0 = a0 + (a1 - a0) * (float)i / (float)segs;
+			const float b1 = a0 + (a1 - a0) * (float)(i + 1) / (float)segs;
+			AeronDrawList_AddLine(s_vc.cur_list, cx + track * sinf(b0), cy - track * cosf(b0), cx + track * sinf(b1),
+								  cy - track * cosf(b1), 9.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
+		}
+	}
+	for (int i = 0; i < n; ++i) {
+		vc_draw_button_look(&s_vw.items[i], s_vw.hover == i, 0, s_vw.flash[i] > 0.0f ? 1.0f : 0.0f, 0.0f);
+	}
+	vc_draw_button_look(&s_vw.center_button, s_vw.hover == VW_CENTER && !s_vw.center_lock, 0,
+						s_vw.flash[VW_MAX_ITEMS] > 0.0f ? 1.0f : 0.0f, 0.0f);
+}
+
+/* Per eye: where the beam lands, then the gloves cut out (the hand is in
+ * front of the wheel). */
+static void vw_overlay(void) {
+	vc_hud_colors();
+	if (s_vw.hit) {
+		float c[4], ring[4];
+		vc_pma(c, 1.0f, 1.0f, 1.0f, 0.95f);
+		vc_pma(ring, VC_HUD, 0.9f);
+		vc_rrect(s_vw.hit_px - 10.0f, s_vw.hit_py - 10.0f, 20.0f, 20.0f, 10.0f, 3.0f, 1.5f, c, ring);
+	}
+	vc_cut_gloves();
+}
+
+static int vw_frame(AeronCommandBuffer* cmd, int width, int height, const AeronXrView views[2],
+					AeronXrPanel out[2]) {
+	if (!vc_ensure()) {
+		return 0;
+	}
+	for (int e = 0; e < 2; ++e) {
+		if (!s_vw.list[e] && !(s_vw.list[e] = AeronDrawList_Create(0))) {
+			return 0;
+		}
+	}
+	/* Grows in (and pops on a level change). */
+	const float t = s_vw.anim;
+	const float ease = t * t * (3.0f - 2.0f * t);
+	const float scale = 0.7f + 0.3f * ease;
+	memset(out, 0, sizeof *out);
+	memcpy(out->position, s_vw.center, sizeof s_vw.center);
+	memcpy(out->orientation, s_vw.q, sizeof s_vw.q);
+	out->size[0] = VW_W_M * scale;
+	out->size[1] = VW_H_M * scale;
+	s_vc.pose = *out;
+	memcpy(s_vc.ax, s_vw.ax, sizeof s_vw.ax);
+	memcpy(s_vc.ay, s_vw.ay, sizeof s_vw.ay);
+	memcpy(s_vc.az, s_vw.az, sizeof s_vw.az);
+	s_vc.cur_place = NULL;
+	s_vc.cur_w_m = out->size[0];
+	s_vc.cur_h_m = out->size[1];
+	s_vc.cur_w_px = (float)width;
+	s_vc.cur_h_px = (float)height;
+	const float lap_alpha = s_vc.alpha;
+	s_vc.alpha = 0.3f + 0.7f * ease;
+	s_vc.cards[VC_CARD_VOICE].hash_valid = 0; /* its layer shows the wheel now */
+	const int n = vc_render_panel(cmd, AERON_XR_PANEL_CARD2, s_vw.list, vw_draw, vw_overlay, views, out, width, height,
+								  out->size[0], out->size[1], &s_vw.hash, &s_vw.hash_valid);
+	s_vc.alpha = lap_alpha;
+	return n;
+}
+
 /* ---- Button card ------------------------------------------------------- */
 
 /* The controller layout in flight: Quest Touch controllers in outline,
  * three-quarter view from above, each control labelled. The labels come
  * from the VR bindings (xwa_runtime/runtime/vr_buttons.c), so they follow a
- * changed binding. "grip+" = with the left grip held. */
+ * changed binding. */
 
 /* Outline paths of the LEFT controller, in card pixels around the top
  * face's centre (y down); the right one is its mirror image. */
@@ -1903,7 +2529,7 @@ static const VcCardLabel k_card_left[] = {
 	{ CTL_UPPER, AERON_XR_BUTTON_Y, NULL, NULL, 168.0f },
 	{ CTL_LOWER, AERON_XR_BUTTON_X, NULL, NULL, 232.0f },
 	{ CTL_MENU, -1, "Pause / menu", NULL, 296.0f },
-	{ CTL_GRIP, -1, "Hold: grip+ layer", "on a panel or the stick: move it", 380.0f },
+	{ CTL_GRIP, -1, "Hold: quick wheel", "on a panel or the stick: move it", 380.0f },
 	{ CTL_TRIGGER, AERON_XR_BUTTON_LEFT_TRIGGER, NULL, NULL, 452.0f },
 };
 
@@ -1934,7 +2560,7 @@ static const VcCardLabel k_card_right_lh[] = {
 	{ CTL_UPPER, AERON_XR_BUTTON_Y, NULL, NULL, 168.0f },
 	{ CTL_LOWER, AERON_XR_BUTTON_X, NULL, NULL, 232.0f },
 	{ CTL_MENU, -1, "Meta: system menu", NULL, 296.0f },
-	{ CTL_GRIP, -1, "Hold: grip+ layer", "on the flight stick: fly with it", 380.0f },
+	{ CTL_GRIP, -1, "Hold: quick wheel", "on the flight stick: fly with it", 380.0f },
 	{ CTL_TRIGGER, AERON_XR_BUTTON_LEFT_TRIGGER, NULL, NULL, 452.0f },
 };
 
@@ -2118,8 +2744,8 @@ static void vc_card_draw(void) {
 	}
 	vc_text(44.0f, 30.0f, "CONTROLS", 30.0f, 0, VC_CYAN, 1.0f);
 	const int lh = Aeron_XrLeftHanded();
-	vc_text(W - 44.0f, 38.0f, lh ? "grip+ = while holding the RIGHT grip" : "grip+ = while holding the LEFT grip", 18.0f,
-			2, 0.62f, 0.85f, 0.92f, 0.9f);
+	vc_text(W - 44.0f, 38.0f, lh ? "hold the RIGHT grip: quick wheel" : "hold the LEFT grip: quick wheel", 18.0f, 2,
+			0.62f, 0.85f, 0.92f, 0.9f);
 	const float cy = 222.0f;
 	const VcCardLabel* left = lh ? k_card_left_lh : k_card_left;
 	const VcCardLabel* right = lh ? k_card_right_lh : k_card_right;
@@ -2135,40 +2761,27 @@ static void vc_card_draw(void) {
 			1, 0.85f, 0.97f, 1.0f, 0.95f);
 	vc_text(W * 0.5f, H - 132.0f, "Voice: double-tap a thumb rest, then say e.g. \"attack my target\", \"nearest enemy\"",
 			17.0f, 1, 0.85f, 0.97f, 1.0f, 0.95f);
-	{
-		/* The right stick's flicks (grip held), from their bindings. */
-		char f[4][64], line[2][160];
-		static const AeronXrButton flicks[4] = { AERON_XR_BUTTON_FLICK_UP, AERON_XR_BUTTON_FLICK_DOWN,
-												 AERON_XR_BUTTON_FLICK_LEFT, AERON_XR_BUTTON_FLICK_RIGHT };
-		for (int i = 0; i < 4; ++i) {
-			const uint16_t key = XwaVrButtons_Binding(flicks[i])->shifted;
-			if (key) {
-				vc_card_key_text(f[i], sizeof f[i], key, i >= 2);
-			} else {
-				snprintf(f[i], sizeof f[i], "-");
-			}
-		}
-		snprintf(line[0], sizeof line[0], "%s stick flicks, grip+:  up  %s    down  %s", lh ? "Left" : "Right", f[0],
-				 f[1]);
-		snprintf(line[1], sizeof line[1], "left  %s    right  %s", f[2], f[3]);
-		vc_text(W * 0.5f, H - 104.0f, line[0], 17.0f, 1, 0.62f, 0.85f, 0.92f, 0.9f);
-		vc_text(W * 0.5f, H - 78.0f, line[1], 17.0f, 1, 0.62f, 0.85f, 0.92f, 0.9f);
-	}
+	vc_text(W * 0.5f, H - 104.0f,
+			lh ? "Quick wheel: hold the RIGHT grip, point at a command, pull the right trigger"
+			   : "Quick wheel: hold the LEFT grip, point at a command, pull the left trigger",
+			17.0f, 1, 0.62f, 0.85f, 0.92f, 0.9f);
 }
 
 /* The voice command list (left card). Keep in step with the command table
  * in xwa_app/voice_core.c: one phrase per command; close wordings work too. */
-static const char* const k_voice_wing[] = { "attack my target", "cover me",       "ignore my target",
-											"evade",            "wait",           "go ahead",
-											"return to base",   "report in",      "call resupply",
-											"call reinforcements" };
-static const char* const k_voice_target[] = { "nearest enemy",      "next target",      "previous target",
-											  "target my attacker", "target objective", "newest target",
-											  "next subsystem",     "clear target",     "nav buoy" };
+static const char* const k_voice_wing[] = { "attack my target",  "cover me",       "ignore my target",
+											"evade",             "wait",           "go ahead",
+											"return to base",    "report in",      "call resupply",
+											"call reinforcements", "gunner attack my target" };
+static const char* const k_voice_target[] = { "nearest enemy",       "next target",           "previous target",
+											  "target my attacker",  "who is attacking my target",
+											  "target incoming missile", "target objective", "newest target",
+											  "next subsystem",      "clear target",          "nav buoy" };
 static const char* const k_voice_ship[] = { "match speed",       "countermeasures",   "s-foils",
 											"lasers to shields", "shields to lasers", "fire link",
 											"convergence",       "map",               "dock",
-											"pick up",           "release cargo",     "hyperspace" };
+											"pick up",           "release cargo",     "hyperspace",
+											"confirm" };
 
 static void vc_voice_column(float x, const char* title, const char* const* lines, int count) {
 	float rule[4];
@@ -2178,7 +2791,7 @@ static void vc_voice_column(float x, const char* title, const char* const* lines
 	for (int i = 0; i < count; ++i) {
 		char text[64];
 		snprintf(text, sizeof text, "\"%s\"", lines[i]);
-		vc_text(x, 176.0f + 41.0f * (float)i, text, 21.0f, 0, 0.85f, 0.97f, 1.0f, 1.0f);
+		vc_text(x, 176.0f + 38.0f * (float)i, text, 20.0f, 0, 0.85f, 0.97f, 1.0f, 1.0f);
 	}
 }
 
@@ -2221,14 +2834,33 @@ static int vc_card_enabled_kind(int card) {
 	return !(env && env[0] == '0');
 }
 
-static int vc_card_enabled(void) {
-	return vc_card_enabled_kind(VC_CARD_BUTTONS) || vc_card_enabled_kind(VC_CARD_VOICE);
+/* Shown: as the setting says, unless the help page showed or hid it. */
+static int vc_card_visible(int card) {
+	if (card < 0 || card >= VC_CARDS) {
+		return 0;
+	}
+	if (s_vc.card_override[card]) {
+		return s_vc.card_override[card] == 1;
+	}
+	return vc_card_enabled_kind(card);
 }
+
+static int vc_card_enabled(void) { return vc_card_visible(VC_CARD_BUTTONS) || vc_card_visible(VC_CARD_VOICE); }
 
 int XwaVrConsole_CardFrame(AeronCommandBuffer* cmd, int card, int width, int height, const AeronXrView views[2],
 						   AeronXrPanel out[2]) {
+	/* The quick wheel takes the voice card's layer; both cards are hidden
+	 * while it is open. */
+	if (card == VC_CARD_VOICE && cmd && width > 0 && height > 0 && views && out) {
+		vw_update(views);
+		if (s_vw.open) {
+			return vw_frame(cmd, width, height, views, out);
+		}
+	} else if (s_vw.open) {
+		return 0;
+	}
 	if (card < 0 || card >= VC_CARDS || !cmd || width <= 0 || height <= 0 || !views || !out || !s_vc.state.valid ||
-		!vc_card_enabled_kind(card) || s_vc.font_state == 0 || !vc_ensure()) {
+		!vc_card_visible(card) || s_vc.font_state == 0 || !vc_ensure()) {
 		return 0;
 	}
 	VcCard* cd = &s_vc.cards[card];
@@ -2310,10 +2942,16 @@ int XwaVrConsole_CardFrame(AeronCommandBuffer* cmd, int card, int width, int hei
 								  width, height,
 								  VC_CARD_W_M, VC_CARD_H_M, &cd->hash, &cd->hash_valid);
 	s_vc.alpha = lap_alpha;
+	if (card == VC_CARD_VOICE && n > 0) {
+		s_vw.hash_valid = 0; /* the shared layer shows the card again */
+	}
 	return n;
 }
 
 void XwaVrConsole_EndFrame(void) {
+	if (!s_vw.drawn) {
+		vw_close(); /* not in flight this frame (paused, a menu) */
+	}
 	if (!s_vc.drawn) {
 		for (int h = 0; h < 2; ++h) {
 			if (s_vc.hands[h].captured || s_vc.hands[h].poke_down || s_vc.hands[h].trigger_down) {
@@ -2340,8 +2978,14 @@ void XwaVrConsole_EndFrame(void) {
 		}
 	}
 	for (int h = 0; h < 2; ++h) {
-		Aeron_XrCaptureGrip(h, s_vc.grip_capture[h]);
+		s_vc.grip_capture_prev[h] = s_vc.grip_capture[h];
+		Aeron_XrCaptureGrip(h, s_vc.grip_capture[h] || (s_vw.open && h == s_vw.hand));
 		s_vc.grip_capture[h] = 0;
+	}
+	/* The quick wheel's trigger picks: the game does not see it (W). The
+	 * console or this function above lets it go once the wheel closes. */
+	if (s_vw.open) {
+		Aeron_XrCaptureTrigger(s_vw.hand, 1);
 	}
 }
 
@@ -2359,6 +3003,12 @@ void XwaVrConsole_Shutdown(void) {
 	if (s_vc.list_r) {
 		AeronDrawList_Destroy(s_vc.list_r);
 	}
+	for (int e = 0; e < 2; ++e) {
+		if (s_vw.list[e]) {
+			AeronDrawList_Destroy(s_vw.list[e]);
+		}
+	}
+	memset(&s_vw, 0, sizeof s_vw);
 	for (int i = 0; i < AERON_XR_PANEL_COUNT; ++i) {
 		if (s_base[i].list) {
 			AeronDrawList_Destroy(s_base[i].list);

@@ -413,6 +413,8 @@ static void android_load_settings(void) {
 				  "#XWA_XR_CONSOLE_DISTANCE=0.52\n"
 				  "# Where you put it with the grip handles (Reset in the VR options):\n"
 				  "#XWA_XR_CONSOLE_POSE=\n"
+				  "# Quick wheel: hold the left grip, point, pull the left trigger (0 = off):\n"
+				  "#XWA_XR_WHEEL=1\n"
 				  "# Controls reference card on your right at mission start (0 = off):\n"
 				  "#XWA_XR_BUTTON_CARD=1\n"
 				  "# HUD panels you move with the grip are kept per cockpit as\n"

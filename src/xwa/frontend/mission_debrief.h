@@ -58,6 +58,10 @@ int MissionDebrief_DrawMissionHintsPage(void);
 /* XWA_MODERN builds: the debriefing of a mission that was not completed is
  * on screen. */
 int MissionDebrief_ShowingFailure(void);
+/* XWA_MODERN builds, in flight: the current mission's debriefing hints
+ * (the Mission Hints tab's text, colour markup converted) into outHints.
+ * Returns nonzero when the mission has any. */
+int MissionDebrief_ReadFlightHints(char* outHints, int size);
 
 #ifdef __cplusplus
 }

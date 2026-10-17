@@ -67,6 +67,13 @@ typedef enum XwaVrConsoleAction {
 	XWA_VRC_TARGET_PREV,
 	XWA_VRC_HYPERSPACE, /* jump from a hyperspace buoy (confirms its prompt) */
 	XWA_VRC_TARGET_NAV, /* next navigation (hyperspace) buoy, the N key */
+	/* Console, voice and the quick wheel. */
+	XWA_VRC_TARGET_TARGETS_ATTACKER, /* the craft attacking my target (A) */
+	XWA_VRC_TARGET_INCOMING,         /* a warhead homing on me (I) */
+	XWA_VRC_GUNNER_ATTACK,           /* turrets attack my target (F, never toggling it off) */
+	XWA_VRC_CYCLE_WARHEAD,           /* W */
+	XWA_VRC_BEAM_TOGGLE,             /* the beam weapon on / off (B) */
+	XWA_VRC_CONFIRM,                 /* Space: the game's "press Space" prompts */
 	XWA_VRC_COUNT
 } XwaVrConsoleAction;
 
@@ -81,6 +88,10 @@ typedef struct XwaVrConsoleState {
 	int memory_set[3]; /* 0 empty, 1 set, 2 set in another region (kept over hyperspace) */
 	/* At a hyperspace buoy with a working hyperdrive: the jump is a press away. */
 	int hyper_ready;
+	/* Turrets (gunner seats or auto-firing turrets), and whether they are
+	 * attacking the current target. */
+	int has_turrets;
+	int gunners_on_target;
 	/* Changes when a new mission starts (the button card returns to its
 	 * spot on the right). */
 	unsigned int mission_serial;

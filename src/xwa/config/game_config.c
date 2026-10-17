@@ -44,6 +44,7 @@
 #include "xwa_runtime/config/modern_vr_options_screen.h"
 #include "xwa_runtime/runtime/flight_checkpoints.h"
 #include "xwa_runtime/config/modern_vr_credits_screen.h"
+#include "xwa_runtime/config/modern_mission_hints_screen.h"
 #include "xwa_runtime/input/controller_mapping.h"
 #endif
 
@@ -171,6 +172,11 @@ static int Config_CheckpointRowCount(void) {
 #endif
 }
 
+#ifdef XWA_MODERN
+/* The pause menu's "Mission Hints" row, to come back to from its page. */
+static int s_configMissionHintsRow;
+#endif
+
 /* A main menu row as the original numbers it, with Performance Options
  * (row 1) left out in VR. */
 static int Config_MainRow(int row) { return row > 1 && Config_VrPortMenus() ? row - 1 : row; }
@@ -215,6 +221,7 @@ int Config_MainMenuScreen(void) {
 	if (g_configRestrictedOptionsModalActive && g_configExitMissionAvailable) {
 		++rowCount;
 		rowCount += Config_CheckpointRowCount();
+		rowCount += XwaModernMissionHintsScreen_Available() != 0;
 	}
 	if (Config_VrPortMenus()) {
 		--rowCount; /* no Performance Options */
@@ -473,6 +480,31 @@ int Config_MainMenuScreen(void) {
 	}
 	y += 25;
 	++rowIndex;
+
+	if (g_configRestrictedOptionsModalActive && g_configExitMissionAvailable && XwaModernMissionHintsScreen_Available()) {
+		/* The debriefing's hints for this mission, on a page of their own. */
+		text = "Mission Hints";
+		titleWidth = FrontendText_MeasureWidth(text, 20);
+		textX = g_configMenuCenterX - (int)(titleWidth >> 1);
+		buttonPressed = FrontendButton_DrawMenuButton(textX, y, text, 20, g_colorPaleBlue, 36, 0, "settingsound");
+		if (g_menuCursorRow == rowIndex) {
+			FrontendText_Draw(20, text, textX, y, g_colorGreen);
+			if (keyState == CONFIG_KEY_ENTER) {
+				FrontendSound_PlayUISound("settingsound", 1, 0, 255, 12 * g_gameConfig.sfxDatapadVolume, 63);
+				Keyboard_FlushCharBuffer();
+				keyState = 0;
+				buttonPressed = 1;
+			}
+		}
+		if (buttonPressed) {
+			s_configMissionHintsRow = rowIndex;
+			XwaModernMissionHintsScreen_Reset();
+			g_pendingMenuScreen = 25;
+			g_menuCursorRow = 0;
+		}
+		y += 25;
+		++rowIndex;
+	}
 
 	if (g_configRestrictedOptionsModalActive && g_configExitMissionAvailable && XwaFlightCheckpoints_Available()) {
 		/* In-mission save states (xwa_runtime/runtime/flight_checkpoints.c):
@@ -2657,6 +2689,13 @@ int Config_OptionsDatapadUpdate(int frameState) {
 			if (XwaModernVrOptionsScreen_Update(g_configMenuCenterX, &g_menuCursorRow)) {
 				g_pendingMenuScreen = 2;
 				g_menuCursorRow = 0;
+			}
+			done = 0;
+			break;
+		case 25:
+			if (XwaModernMissionHintsScreen_Update(g_configMenuCenterX, &g_menuCursorRow)) {
+				g_pendingMenuScreen = 0;
+				g_menuCursorRow = s_configMissionHintsRow;
 			}
 			done = 0;
 			break;

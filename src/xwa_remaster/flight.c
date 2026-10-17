@@ -5304,8 +5304,9 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 				int beam_count = 0;
 				for (int hand = 0; hand < 2; ++hand) {
 					float from[3], to[3];
-					if (XwaVrConsole_RayBeam(hand, from, to) &&
-						XwaVrBeam_Pose(from, to, xr_frame.views, 1, xr_frame.beam_height, &beams[beam_count])) {
+					const int beam = XwaVrConsole_RayBeam(hand, from, to); /* 2: the quick wheel's, bright */
+					if (beam &&
+						XwaVrBeam_Pose(from, to, xr_frame.views, beam == 1, xr_frame.beam_height, &beams[beam_count])) {
 						beam_count++;
 					}
 				}

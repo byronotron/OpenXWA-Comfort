@@ -19,7 +19,8 @@
 
 enum {
 	CP_OFFER_DELAY_US = 1500000,  /* the craft's last moments first */
-	CP_OFFER_REPEAT_US = 5000000, /* the message pane forgets */
+	CP_OFFER_REPEAT_US = 30000000, /* the line written again now and then (its "ago") */
+	CP_OFFER_HOLD_TICKS = 600,     /* the message pane's timer, kept above this */
 	CP_OFFER_TIMEOUT_US = 45000000,
 };
 
@@ -183,7 +184,15 @@ static void cp_handle_offer(void) {
 		s_cp.offer_answer = -1;
 		return;
 	}
-	if (!s_cp.offer_shown_us || now_us - s_cp.offer_shown_us >= CP_OFFER_REPEAT_US) {
+	/* Shown until answered: the message pane's timer is kept from running
+	 * out, and the line is put back if something else took its place. */
+	if (s_cp.offer_shown_us && g_readyMessagePaneQueue[0].stateOrMessageId != 0xffff) {
+		if (g_playerFlightTransientTimers[g_localPlayer].readyMessagePaneTimer < CP_OFFER_HOLD_TICKS) {
+			g_playerFlightTransientTimers[g_localPlayer].readyMessagePaneTimer = CP_OFFER_HOLD_TICKS;
+		}
+	}
+	if (!s_cp.offer_shown_us || g_readyMessagePaneQueue[0].stateOrMessageId == 0xffff ||
+		now_us - s_cp.offer_shown_us >= CP_OFFER_REPEAT_US) {
 		char line[96];
 		const int ago = s_cp.quick ? cp_mission_seconds() - FlightSaveState_MissionSeconds(s_cp.quick) : 0;
 		s_cp.offer_shown_us = now_us;

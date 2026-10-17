@@ -35,6 +35,16 @@ void XwaVrConsole_SetState(const XwaVrConsoleState* state);
 int XwaVrConsole_Frame(AeronCommandBuffer* cmd, int width, int height, const AeronXrView views[2],
 					   AeronXrPanel out[2]);
 
+/* Quick wheel (XWA_XR_WHEEL=0 turns it off): held open with the grip of
+ * the hand that has the game's left controls (the right one when
+ * left-handed), away from a panel's handle or the flight stick. It floats
+ * in front of that controller; pointing picks a slice, the trigger takes
+ * it (the wheel stays open), letting go of the grip closes it. Four
+ * categories (ship & weapons, energy, targeting, wingmen) round CONFIRM
+ * (Space); each opens its commands round BACK. Drawn on the voice card's
+ * layer by CardFrame(1); the console and both cards are hidden while it
+ * is open, and its picks come out of PollAction like the console's. */
+
 /* Reference cards (`card` 0: the controller layout, on the player's right;
  * 1: the voice commands, on the left), each a panel layer of its own
  * (AERON_XR_PANEL_CARD / _CARD2) handled like the console. They appear at
@@ -49,7 +59,8 @@ int XwaVrConsole_CardFrame(AeronCommandBuffer* cmd, int card, int width, int hei
 void XwaVrConsole_CaptureGrip(int hand);
 
 /* While hand 0/1 points its ray at the console: the beam from the hand to
- * where the ray lands (LOCAL space), for a faint pointer beam. */
+ * where the ray lands (LOCAL space), for a faint pointer beam (returns 1);
+ * the quick wheel's pointer, a bright one (returns 2). 0: no beam. */
 int XwaVrConsole_RayBeam(int hand, float start[3], float end[3]);
 
 /* Releases the trigger when the console was not shown this frame. */

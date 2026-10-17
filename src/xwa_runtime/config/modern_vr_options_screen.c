@@ -34,6 +34,7 @@ enum {
 	VR_POINT_LIGHTS,
 	VR_SHADOWS,
 	VR_CONSOLE,
+	VR_WHEEL,
 	VR_GLOVES,
 	VR_FLIGHT_STICK,
 	VR_STICK_TWIST,
@@ -96,6 +97,8 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "XWA_POINT_LIGHTS", "Dynamic Lights", k_toggle_texts, k_toggle_values, 2, 0, 84, 1 },
 	{ "XWA_XR_SHADOWS", "Cockpit Shadows", k_toggle_texts, k_toggle_values, 2, 0, 85, 1 },
 	{ "XWA_XR_CONSOLE", "Lap Console", k_toggle_texts, k_toggle_values, 2, 1, 88, 0 },
+	/* Held open with the grip of the hand that has the left controls. */
+	{ "XWA_XR_WHEEL", "Quick Wheel (grip)", k_toggle_texts, k_toggle_values, 2, 1, 67, 0 },
 	{ "XWA_XR_GLOVES", "Pilot Gloves", k_toggle_texts, k_toggle_values, 2, 1, 89, 0 },
 	{ "XWA_XR_FLIGHT_STICK", "Flight Stick", k_toggle_texts, k_toggle_values, 2, 1, 94, 0 },
 	{ "XWA_XR_STICK_TWIST", "Stick Twist Rolls", k_toggle_texts, k_toggle_values, 2, 0, 96, 0 },

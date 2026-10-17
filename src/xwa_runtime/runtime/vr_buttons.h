@@ -28,7 +28,8 @@
 extern "C" {
 #endif
 
-/* Flight: a Touch button's plain and shifted (left grip held) game key. */
+/* Flight: a Touch button's game key (`shifted` is unused since the left
+ * grip opens the quick wheel; always KEY_NONE). */
 typedef struct XwaVrButtonBinding {
 	uint16_t plain;
 	uint16_t shifted;

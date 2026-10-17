@@ -8,6 +8,7 @@
 #include "xwa/audio/music.h"
 #include "xwa/config/game_config.h"
 #include "xwa/flight/flight.h"
+#include "xwa/flight/mission/mission.h"
 #include "xwa/frontend/briefing_room.h"
 #include "xwa/frontend/briefing_script.h"
 #include "xwa/frontend/concourse.h"
@@ -3393,6 +3394,91 @@ int MissionDebrief_DrawMissionHintsPage(void) {
 }
 
 #ifdef XWA_MODERN
+/* '[..]' colour markup to the in-band bytes, as MissionDebrief_BuildText
+ * does it: '[' becomes 0x06, ']' is dropped and the end marked with 0x01. */
+static void MissionDebrief_ConvertMarkup(char* text, int size) {
+	for (int i = 0; i < size && text[i]; ++i) {
+		if (text[i] == '[') {
+			int j = i;
+			text[i] = 6;
+			while (j < size && text[j] && text[j] != ']') {
+				++j;
+			}
+			if (j + 1 < size && text[j] == ']') {
+				text[j] = text[j + 1];
+				text[j + 1] = 1;
+			}
+		}
+	}
+}
+
+int MissionDebrief_ReadFlightHints(char* outHints, int size) {
+	char baseName[128];
+	char fileBuffer[4096];
+	char keyBuffer[4096 + 160];
+	const char* name;
+	const char* resolved;
+	XwaFile* stream;
+	int16_t fileMarker = 0;
+	int pos;
+	int ext;
+
+	if (outHints == NULL || size <= 1) {
+		return 0;
+	}
+	outHints[0] = 0;
+	/* The debriefing's hints: campaign and single missions only (as the
+	 * Mission Hints tab), not skirmishes or quick starts. */
+	if (!g_currentMissionFile[0] || g_pilotData.missionDirectoryId == 2 ||
+		g_missionHeader.body.missionType == XWA_MISSION_TYPE_SKIRMISH ||
+		g_missionHeader.body.missionType == XWA_MISSION_TYPE_QUICK_START || g_missionHeader.body.goalsUnimportant) {
+		return 0;
+	}
+	name = g_currentMissionFile;
+	for (const char* c = g_currentMissionFile; *c; ++c) {
+		if (*c == '\\' || *c == '/') {
+			name = c + 1;
+		}
+	}
+	snprintf(baseName, sizeof baseName, "%s", name);
+	for (ext = (int)strlen(baseName) - 1; ext > 0 && baseName[ext] != '.'; --ext) {
+	}
+	if (ext > 0) {
+		baseName[ext] = 0;
+	}
+
+	stream = File_Open(AERON_VFS_ROOT_ASSET, g_currentMissionFile, "rb");
+	if (stream == NULL) {
+		return 0;
+	}
+	memset(fileBuffer, 0, sizeof fileBuffer);
+	File_ReadWord(stream, &fileMarker);
+	if (fileMarker == 18) {
+		/* The trailing text block: the failure text, '#', then the hints. */
+		File_Seek(stream, -8192, SEEK_END);
+		File_ReadCount(stream, fileBuffer, sizeof fileBuffer - 1);
+		fileBuffer[sizeof fileBuffer - 1] = 0;
+		for (pos = 0; fileBuffer[pos] && fileBuffer[pos] != '#'; ++pos) {
+		}
+		if (fileBuffer[pos] == '#') {
+			++pos;
+			while (fileBuffer[pos] == '$') {
+				++pos;
+			}
+			if (fileBuffer[pos]) {
+				snprintf(keyBuffer, sizeof keyBuffer, "!%s_L00!%s", baseName, &fileBuffer[pos]);
+				resolved = Linez_ResolveString(keyBuffer);
+				if (resolved) {
+					snprintf(outHints, (size_t)size, "%s", resolved);
+				}
+			}
+		}
+	}
+	File_Close(stream);
+	MissionDebrief_ConvertMarkup(outHints, size);
+	return outHints[0] != 0;
+}
+
 int MissionDebrief_ShowingFailure(void) {
 	/* The debriefing's screen anywhere on the stack (a dialog may be over
 	 * it), after a mission that was not completed. */

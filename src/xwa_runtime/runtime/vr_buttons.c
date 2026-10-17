@@ -6,24 +6,21 @@
 #include <stdio.h>
 #include <string.h>
 
-/* VR controller buttons in flight. Each Touch button has a plain and a
- * shifted (left grip held) action; the right stick flicks only exist
- * shifted. Left-handed controls swap the controllers under these
- * (Aeron_XrLeftHanded), so the table stays as it is. Fire, target-in-sights (right grip), steering, roll and the
- * throttle lever stay on the virtual gamepad. */
+/* VR controller buttons in flight, one action each (the left grip opens the
+ * quick wheel, src/xwa_remaster/vr_quick_wheel.c; there is no shifted layer
+ * any more). Left-handed controls swap the controllers under these
+ * (Aeron_XrLeftHanded), so the table stays as it is. Fire,
+ * target-in-sights (right grip), steering, roll and the throttle lever stay
+ * on the virtual gamepad. */
 static const XwaVrButtonBinding k_bindings[AERON_XR_BUTTON_COUNT] = {
-	[AERON_XR_BUTTON_A]            = { KEY_R, KEY_O },
-	[AERON_XR_BUTTON_B]            = { KEY_T, KEY_Y },
-	[AERON_XR_BUTTON_X]            = { KEY_C, KEY_SPACE },
-	[AERON_XR_BUTTON_Y]            = { KEY_ENTER, KEY_SHIFT_P },
-	[AERON_XR_BUTTON_LEFT_TRIGGER] = { KEY_W, KEY_SHIFT_D },
-	[AERON_XR_BUTTON_LEFT_STICK]   = { KEY_X, KEY_SHIFT_R },
-	[AERON_XR_BUTTON_RIGHT_STICK]  = { KEY_E, KEY_A },
-	[AERON_XR_BUTTON_RIGHT_GRIP]   = { KEY_NONE, KEY_I },
-	[AERON_XR_BUTTON_FLICK_UP]     = { KEY_NONE, KEY_APOSTROPHE },
-	[AERON_XR_BUTTON_FLICK_DOWN]   = { KEY_NONE, KEY_SEMICOLON },
-	[AERON_XR_BUTTON_FLICK_LEFT]   = { KEY_NONE, KEY_S },
-	[AERON_XR_BUTTON_FLICK_RIGHT]  = { KEY_NONE, KEY_N },
+	[AERON_XR_BUTTON_A]            = { KEY_R, KEY_NONE },
+	[AERON_XR_BUTTON_B]            = { KEY_T, KEY_NONE },
+	[AERON_XR_BUTTON_X]            = { KEY_C, KEY_NONE },
+	[AERON_XR_BUTTON_Y]            = { KEY_ENTER, KEY_NONE },
+	[AERON_XR_BUTTON_LEFT_TRIGGER] = { KEY_W, KEY_NONE },
+	[AERON_XR_BUTTON_LEFT_STICK]   = { KEY_X, KEY_NONE },
+	[AERON_XR_BUTTON_RIGHT_STICK]  = { KEY_E, KEY_NONE },
+	[AERON_XR_BUTTON_RIGHT_GRIP]   = { KEY_NONE, KEY_NONE },
 };
 
 /* The lap console's buttons (and the voice commands, which use them) that
@@ -66,6 +63,11 @@ static const uint16_t k_console_keys[XWA_VRC_COUNT] = {
 	[XWA_VRC_TARGET_NEXT]          = KEY_T,
 	[XWA_VRC_TARGET_PREV]          = KEY_Y,
 	[XWA_VRC_TARGET_NAV]           = KEY_N,
+	[XWA_VRC_TARGET_TARGETS_ATTACKER] = KEY_A,
+	[XWA_VRC_TARGET_INCOMING]      = KEY_I,
+	[XWA_VRC_CYCLE_WARHEAD]        = KEY_W,
+	[XWA_VRC_BEAM_TOGGLE]          = KEY_B,
+	[XWA_VRC_CONFIRM]              = KEY_SPACE,
 };
 
 /* Keys the console's multi-press buttons send (laser / shield / beam
@@ -95,10 +97,6 @@ const char* XwaVrButtons_ButtonName(AeronXrButton button, int compact) {
 		[AERON_XR_BUTTON_LEFT_STICK]   = { "left stick click", "L-stick click" },
 		[AERON_XR_BUTTON_RIGHT_STICK]  = { "right stick click", "R-stick click" },
 		[AERON_XR_BUTTON_RIGHT_GRIP]   = { "right grip", "R-grip" },
-		[AERON_XR_BUTTON_FLICK_UP]     = { "flick up", "flick up" },
-		[AERON_XR_BUTTON_FLICK_DOWN]   = { "flick down", "flick down" },
-		[AERON_XR_BUTTON_FLICK_LEFT]   = { "flick left", "flick left" },
-		[AERON_XR_BUTTON_FLICK_RIGHT]  = { "flick right", "flick right" },
 	};
 	/* Left-handed: the control on the other controller (aeron.h). */
 	static const char* const mirrored[AERON_XR_BUTTON_COUNT][2] = {
@@ -110,10 +108,6 @@ const char* XwaVrButtons_ButtonName(AeronXrButton button, int compact) {
 		[AERON_XR_BUTTON_LEFT_STICK]   = { "right stick click", "R-stick click" },
 		[AERON_XR_BUTTON_RIGHT_STICK]  = { "left stick click", "L-stick click" },
 		[AERON_XR_BUTTON_RIGHT_GRIP]   = { "left grip", "L-grip" },
-		[AERON_XR_BUTTON_FLICK_UP]     = { "flick up", "flick up" },
-		[AERON_XR_BUTTON_FLICK_DOWN]   = { "flick down", "flick down" },
-		[AERON_XR_BUTTON_FLICK_LEFT]   = { "flick left", "flick left" },
-		[AERON_XR_BUTTON_FLICK_RIGHT]  = { "flick right", "flick right" },
 	};
 	if ((int)button < 0 || (int)button >= AERON_XR_BUTTON_COUNT) {
 		return "?";
@@ -139,6 +133,10 @@ const char* XwaVrButtons_KeyLabel(uint16_t key, int compact) {
 	static char label[48];
 	if (key == KEY_NONE) {
 		return NULL;
+	}
+	if (key == KEY_SPACE) {
+		/* The quick wheel's centre (and the voice command "confirm"). */
+		return "wheel > Confirm";
 	}
 	/* A plain press wins over a shifted one. */
 	for (int shifted = 0; shifted < 2; ++shifted) {
@@ -213,6 +211,12 @@ const char* XwaVrButtons_KeyAction(uint16_t key) {
 			return "release";
 		case KEY_E:
 			return "my attacker";
+		case KEY_A:
+			return "my target's attacker";
+		case KEY_I:
+			return "incoming missile";
+		case KEY_B:
+			return "beam weapon";
 		case KEY_APOSTROPHE:
 			return "lasers > shields";
 		case KEY_SEMICOLON:

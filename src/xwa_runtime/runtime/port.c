@@ -324,8 +324,8 @@ static void XwaPort_UpdateVrFlightButtons(int enabled) {
 		if ((int)button < 0 || (int)button >= AERON_XR_BUTTON_COUNT) {
 			continue;
 		}
-		/* The craft is lost and a retry from a checkpoint is offered: A
-		 * retries, B carries on to the mission's end. */
+		/* The craft is lost and loading the quick save is offered: A loads
+		 * it, B carries on to the mission's end. */
 		if (!shifted && (button == AERON_XR_BUTTON_A || button == AERON_XR_BUTTON_B) &&
 			XwaFlightCheckpoints_OfferAnswer(button == AERON_XR_BUTTON_A)) {
 			XwaPort_VrButtonTick();
@@ -406,6 +406,16 @@ void XwaPort_GetVrConsoleState(XwaVrConsoleState* out) {
 		const int slot = player->targetPresetSlot[i];
 		if (slot >= 0 && (uint32_t)slot < g_objectTableSlotCount && g_objectTable[slot].objectType != OBJ_None) {
 			out->memory_set[i] = Player_ObjectInPlayerRegion(g_localPlayer, slot) ? 1 : 2;
+		}
+	}
+	for (unsigned slot = 0; slot < craft->laserSlotCount; ++slot) {
+		const WarheadInventoryEntry* weapon = &craft->warheadData[slot];
+		if (weapon->weaponType >= 4u) {
+			out->has_turrets = 1;
+			if (player->turretAutoFireState == 2 && player->currentTargetObjectIdx != 0xffffu &&
+				weapon->turretTargetObjIdx == player->currentTargetObjectIdx) {
+				out->gunners_on_target = 1;
+			}
 		}
 	}
 	out->hyper_ready = player->hyperspacePhase == 0 && (craft->systemFlags & 0x80u) &&
@@ -498,6 +508,26 @@ void XwaPort_VrConsoleAction(XwaVrConsoleAction action, int arg) {
 				XwaPort_QueueFlightActionKey((uint16_t)(KEY_SHIFT_F5 + arg));
 			}
 			return;
+		case XWA_VRC_GUNNER_ATTACK: {
+			/* The game's F toggles: on the current (hostile) target, or back to
+			 * defending the ship when they are already on it. This one only
+			 * ever sends them at the target. */
+			const PlayerData* player = &g_players[g_localPlayer];
+			XwaVrConsoleState st;
+			XwaPort_GetVrConsoleState(&st);
+			if (!st.has_turrets) {
+				XwaPort_ShowFlightNote("[Gunners] This craft has no turrets");
+			} else if (player->currentSeatIdx != 0) {
+				XwaPort_ShowFlightNote("[Gunners] You are in a gunner seat");
+			} else if (player->currentTargetObjectIdx == 0xffffu) {
+				XwaPort_ShowFlightNote("[Gunners] Target something first");
+			} else if (st.gunners_on_target) {
+				XwaPort_ShowFlightNote("[Gunners] Already attacking your target");
+			} else {
+				XwaPort_QueueFlightActionKey(KEY_F);
+			}
+			return;
+		}
 		case XWA_VRC_HYPERSPACE: {
 			/* The game offers the jump while the craft is at a hyperspace buoy
 			 * ("Hyperspace to ...?") and Space confirms it; the button works for
@@ -532,8 +562,8 @@ void XwaPort_VrConsoleAction(XwaVrConsoleAction action, int arg) {
 /* The game's own key hints (strings.txt) rewritten for the Touch
  * controllers, applied once the headset presents. Every control named comes
  * from the bindings in vr_buttons.c, so a changed binding changes these
- * texts too. In flight Space is left grip + X, landing and hyperspace also
- * take both triggers; the hangar menus run on the thumbstick, A (Enter),
+ * texts too. In flight Space is the quick wheel's Confirm (or the voice
+ * command "confirm"), landing and hyperspace also take both triggers; the hangar menus run on the thumbstick, A (Enter),
  * B (back) and X (Space). */
 static char g_vrHintText[40][96];
 static int g_vrHintCount;

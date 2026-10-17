@@ -153,7 +153,7 @@ typedef struct XvCommand {
 	int action;
 	int arg;
 	const char* label;      /* the confirmation */
-	const char* phrases[6]; /* what can be said, lower case */
+	const char* phrases[8]; /* what can be said, lower case */
 } XvCommand;
 
 static const XvCommand k_commands[] = {
@@ -180,6 +180,10 @@ static const XvCommand k_commands[] = {
 	{ XWA_VRC_WING_REINFORCE, 0, "Call for reinforcements",
 	  { "call reinforcements", "request reinforcements", "reinforcements", "need backup", "send backup",
 		"call for backup" } },
+	/* Turrets (gunner seats, auto-firing turrets). */
+	{ XWA_VRC_GUNNER_ATTACK, 0, "Gunners: attack my target",
+	  { "gunner attack my target", "turret attack my target", "gunner attack", "turret attack",
+		"gunner engage my target", "turret engage", "gunner fire at my target", "turret open fire" } },
 	/* Targeting. */
 	{ XWA_VRC_TARGET_NEAREST_ENEMY, 0, "Target nearest enemy",
 	  { "nearest enemy", "target nearest enemy", "closest enemy", "target closest enemy", "nearest fighter",
@@ -192,7 +196,14 @@ static const XvCommand k_commands[] = {
 	  { "target my attacker", "my attacker", "who is attacking me", "who is shooting at me", "who is shooting me",
 		"target attacker" } },
 	{ XWA_VRC_TARGET_OBJECTIVE, 0, "Target objective",
-	  { "target objective", "objective", "nearest objective", "mission objective", "mission target" } },
+	  { "target objective", "objective", "nearest objective", "mission objective", "mission target",
+		"target mission critical objective", "mission critical", "target mission critical" } },
+	{ XWA_VRC_TARGET_TARGETS_ATTACKER, 0, "Target my target's attacker",
+	  { "who is attacking my target", "target my target attacker", "my target attacker", "attacker of my target",
+		"who is shooting my target", "who is shooting at my target", "target attacker of my target" } },
+	{ XWA_VRC_TARGET_INCOMING, 0, "Target incoming missile",
+	  { "target incoming missile", "target incoming", "incoming missile", "incoming torpedo", "incoming warhead",
+		"incoming", "target missile", "missile lock" } },
 	{ XWA_VRC_TARGET_NEWEST, 0, "Target newest craft",
 	  { "newest target", "newest craft", "new arrival", "newest", "new target", "latest arrival" } },
 	{ XWA_VRC_TARGET_CLEAR, 0, "Target cleared",
@@ -223,7 +234,15 @@ static const XvCommand k_commands[] = {
 	{ XWA_VRC_DOCK, 0, "Dock", { "dock", "begin docking", "start docking", "board", "land" } },
 	{ XWA_VRC_PICKUP, 0, "Pick up", { "pick up", "pick it up", "grab it", "pick up cargo", "tow it" } },
 	{ XWA_VRC_RELEASE, 0, "Release", { "release cargo", "release", "drop cargo", "drop it", "let it go" } },
+	/* The game's "press Space" prompts (end the mission, confirm a request,
+	 * a wingman's "attack my target"). */
+	{ XWA_VRC_CONFIRM, 0, "Confirm", { "confirm", "accept", "affirmative", "acknowledge", "yes" } },
 };
+
+/* Words that settle which command it is: when one is heard, only commands
+ * with that word in a phrase are considered ("gunner, attack my target" is
+ * not the wingmen's "attack my target"). */
+static const char* const k_marker_words[] = { "gunner", "turret", "incoming", "critical", "who", "attacker" };
 
 /* Heard words that mean the same to us, and words that change nothing
  * ("please", "the", who is addressed). Applied to the phrases too. */
@@ -243,6 +262,8 @@ static const char* const k_same[][2] = {
 	{ "maneuver", "maneuvers" }, { "manoeuvres", "maneuvers" }, { "rtb", "return to base" },
 	{ "shooting", "shooting" }, { "whos", "who is" },       { "who's", "who is" },
 	{ "its", "it" },            { "speeds", "speed" },
+	{ "gunners", "gunner" },    { "turrets", "turret" },    { "target's", "target" },
+	{ "missiles", "missile" },  { "torpedoes", "torpedo" }, { "warheads", "warhead" },
 	/* How the recognizer tends to spell "s-foils". */
 	{ "sfoils", "foils" },      { "spoils", "foils" },      { "espoils", "foils" },
 	{ "aspoils", "foils" },     { "foyles", "foils" },      { "foyle", "foils" },
@@ -385,20 +406,40 @@ int XwaVoice_Match(const char* heard, int* action, int* arg, const char** label)
 	if (nh == 0) {
 		return 0;
 	}
-	float best = 9.0f, second = 9.0f;
+	/* A marker word heard (or close to it): only commands that use it. */
+	const char* marker = NULL;
+	for (size_t m = 0; m < sizeof k_marker_words / sizeof k_marker_words[0] && !marker; ++m) {
+		for (int w = 0; w < nh; ++w) {
+			if (xv_word_cost(words[w], k_marker_words[m]) <= 0.2f) {
+				marker = k_marker_words[m];
+				break;
+			}
+		}
+	}
+	float cost_of[XV_COMMANDS];
+	float best = 9.0f;
 	int best_i = -1;
 	for (int i = 0; i < XV_COMMANDS; ++i) {
 		float cost = 9.0f;
-		for (int k = 0; k < 6 && k_commands[i].phrases[k]; ++k) {
+		int has_marker = marker == NULL;
+		for (int k = 0; k < 8 && k_commands[i].phrases[k]; ++k) {
 			const float c = xv_phrase_cost(words, nh, k_commands[i].phrases[k]);
 			cost = c < cost ? c : cost;
+			if (marker && strstr(k_commands[i].phrases[k], marker)) {
+				has_marker = 1;
+			}
 		}
-		if (cost < best) {
-			second = best;
-			best = cost;
+		cost_of[i] = has_marker ? cost : 9.0f;
+		if (cost_of[i] < best) {
+			best = cost_of[i];
 			best_i = i;
-		} else if (cost < second) {
-			second = cost;
+		}
+	}
+	/* The runner-up among the other actions. */
+	float second = 9.0f;
+	for (int i = 0; i < XV_COMMANDS; ++i) {
+		if (best_i >= 0 && k_commands[i].action != k_commands[best_i].action && cost_of[i] < second) {
+			second = cost_of[i];
 		}
 	}
 	/* Close enough, and clearly closer than any other command. */
