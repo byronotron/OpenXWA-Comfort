@@ -3318,6 +3318,8 @@ static int vc_card_visible(int card) {
 
 static int vc_card_enabled(void) { return vc_card_visible(VC_CARD_BUTTONS) || vc_card_visible(VC_CARD_VOICE); }
 
+int XwaVrConsole_WheelOpen(void) { return s_vw.open; }
+
 int XwaVrConsole_CardFrame(AeronCommandBuffer* cmd, int card, int width, int height, const AeronXrView views[2],
 						   AeronXrPanel out[2]) {
 	/* The quick wheel takes the voice card's layer; both cards are hidden

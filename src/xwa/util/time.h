@@ -16,6 +16,9 @@ uint32_t GetTickCount(void);
 void Time_ResetFrameDeltaClocks(void);
 uint32_t Time_GetFrameDelta(void);
 uint32_t Time_GetSimStepDelta(void);
+/* OpenXWA: the sim's speed through Time_GetFrameDelta (1 = classic; the VR
+ * quick wheel's slow motion). */
+void Time_SetFrameDeltaScale(float scale);
 
 #ifdef __cplusplus
 }

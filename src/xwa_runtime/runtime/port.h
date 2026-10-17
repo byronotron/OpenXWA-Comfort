@@ -35,6 +35,9 @@ void XwaPort_VrConsoleAction(XwaVrConsoleAction action, int arg);
 int XwaPort_VrInFlight(void);
 /* In VR, the local player has the flight map open. */
 int XwaPort_VrInMap(void);
+/* Sim speed for this frame on (1 = normal): the quick wheel's slow motion.
+ * Only in single-player VR flight; the sound effects follow, partly. */
+void XwaPort_SetSimTimeScale(float scale);
 /* Shows `text` (up to 70 characters) in the in-flight message pane. */
 void XwaPort_ShowFlightNote(const char* text);
 /* Latched release of the flight mouse capture (Ctrl+Alt+M), so the pointer

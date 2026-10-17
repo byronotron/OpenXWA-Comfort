@@ -23,6 +23,7 @@
 
 #include <SDL3/SDL_hints.h>
 #include <dlfcn.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -415,6 +416,8 @@ static void android_load_settings(void) {
 				  "#XWA_XR_CONSOLE_POSE=\n"
 				  "# Quick wheel: hold the left grip, point, pull the left trigger (0 = off):\n"
 				  "#XWA_XR_WHEEL=1\n"
+				  "# The game runs at 30 % speed while the wheel is open (0 = off):\n"
+				  "#XWA_XR_WHEEL_SLOWMO=1\n"
 				  "# Controls reference card on your right at mission start (0 = off):\n"
 				  "#XWA_XR_BUTTON_CARD=1\n"
 				  "# HUD panels you move with the grip are kept per ship as\n"
@@ -1011,6 +1014,18 @@ int main(int argc, char** argv) {
 				}
 				/* Voice commands (push-to-talk on the thumb rests). */
 				XwaVrVoice_Update();
+				/* Slow motion (30 %) while the quick wheel is open, eased in
+				 * and out; the game decides where it applies. */
+				{
+					static float slow;
+					const char* slow_env = SDL_getenv("XWA_XR_WHEEL_SLOWMO");
+					const int slow_on = !(slow_env && slow_env[0] == '0');
+					const float dt = (float)delta_us * 1e-6f;
+					const int want = XwaVrConsole_WheelOpen() && slow_on;
+					slow = want ? fminf(1.0f, slow + dt / 0.15f) : fmaxf(0.0f, slow - dt / 0.25f);
+					const float k = slow * slow * (3.0f - 2.0f * slow);
+					XwaPort_SetSimTimeScale(1.0f - 0.7f * k);
+				}
 				XwaPort_Tick(delta_us);
 			}
 			{

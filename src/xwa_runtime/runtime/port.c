@@ -7,6 +7,7 @@
 
 #include "aeron/aeron.h"
 #include "aeron/compat/ddraw.h"
+#include "aeron/compat/dsound.h"
 #include "aeron/compat/host.h"
 #include "xwa/assets/file_io.h"
 #include "xwa/assets/linez.h"
@@ -31,6 +32,7 @@
 #include "xwa/input/forcefeedback.h"
 #include "xwa/render/renderer.h"
 #include "xwa/util/memory.h"
+#include "xwa/util/time.h"
 #include "xwa/xwa_options.h"
 #include "xwa_runtime/config/modern_controller_options_screen.h"
 #include "xwa_runtime/config/modern_input_options.h"
@@ -429,6 +431,19 @@ void XwaPort_GetVrConsoleState(XwaVrConsoleState* out) {
 int XwaPort_VrInFlight(void) { return XwaPort_VrConsoleCraft() != NULL; }
 
 int XwaPort_VrInMap(void) { return Aeron_XrIsPresenting() && XwaPort_VrMapOpen(); }
+
+/* Slow motion while the VR quick wheel is open: the sim through its frame
+ * delta, single player only (multiplayer runs in lockstep). The sound
+ * effects are pitched down only part of the way (a full 0.3 would be some
+ * 21 semitones: rumble, not sound) and the music stays at speed, quieter. */
+void XwaPort_SetSimTimeScale(float scale) {
+	if (!(scale > 0.0f) || scale > 1.0f || g_flightPlayerCount > 1 || !XwaPort_VrInFlight()) {
+		scale = 1.0f;
+	}
+	Time_SetFrameDeltaScale(scale);
+	const float k = scale < 0.3f ? 1.0f : (1.0f - scale) / 0.7f; /* 0 normal .. 1 at 30 % */
+	DSoundCompat_SetTimeEffect(1.0f - 0.28f * k, 1.0f - 0.45f * k);
+}
 
 /* The two-trigger chord is on offer: landing in a hangar (the game's
  * pending "Space" action 2 near a mothership's bay) or a hyperspace jump

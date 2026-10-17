@@ -35,6 +35,7 @@ enum {
 	VR_SHADOWS,
 	VR_CONSOLE,
 	VR_WHEEL,
+	VR_WHEEL_SLOWMO,
 	VR_HANDS,
 	VR_CONTROLLER_LABELS,
 	VR_FLIGHT_STICK,
@@ -102,6 +103,8 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "XWA_XR_CONSOLE", "Lap Console", k_toggle_texts, k_toggle_values, 2, 1, 88, 0 },
 	/* Held open with the grip of the hand that has the left controls. */
 	{ "XWA_XR_WHEEL", "Quick Wheel (grip)", k_toggle_texts, k_toggle_values, 2, 1, 67, 0 },
+	/* The game at 30 % speed while the wheel is open (single player). */
+	{ "XWA_XR_WHEEL_SLOWMO", "Wheel Slow Motion", k_toggle_texts, k_toggle_values, 2, 1, 70, 0 },
 	/* What your hands are: the gloves or the controllers (with labels of
 	 * what their buttons do when you look at them). */
 	{ "XWA_XR_HANDS", "Hands", k_hands_texts, k_hands_values, 3, 1, 89, 0 },
@@ -384,7 +387,8 @@ static void vr_draw_settings(XwaModernOptionsMenu* menu, int page) {
 		}
 		/* The helmet HUD size only applies to the helmet layout. */
 		const int disabled = (i == VR_HUD_SIZE && g_vr.index[VR_HUD_LAYOUT] != 1) ||
-							 (i == VR_STICK_TWIST && g_vr.index[VR_FLIGHT_STICK] == 0);
+							 (i == VR_STICK_TWIST && g_vr.index[VR_FLIGHT_STICK] == 0) ||
+							 (i == VR_WHEEL_SLOWMO && g_vr.index[VR_WHEEL] == 0);
 		uint8_t value = g_vr.index[i];
 		if (XwaModernOptionsMenu_DrawCycleU8(menu, &value, setting->label, setting->texts, setting->count,
 											 setting->button_id, disabled) &&

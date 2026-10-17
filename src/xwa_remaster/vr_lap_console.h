@@ -43,7 +43,10 @@ int XwaVrConsole_Frame(AeronCommandBuffer* cmd, int width, int height, const Aer
  * categories (ship & weapons, energy, targeting, wingmen) round CONFIRM
  * (Space); each opens its commands round BACK. Drawn on the voice card's
  * layer by CardFrame(1); the console and both cards are hidden while it
- * is open, and its picks come out of PollAction like the console's. */
+ * is open, and its picks come out of PollAction like the console's.
+ * While it is open the game runs in slow motion (XWA_XR_WHEEL_SLOWMO=0
+ * turns that off; main.c eases the speed through XwaPort_SetSimTimeScale). */
+int XwaVrConsole_WheelOpen(void);
 
 /* Reference cards (`card` 0: the controller layout, on the player's right;
  * 1: the voice commands, on the left), each a panel layer of its own
