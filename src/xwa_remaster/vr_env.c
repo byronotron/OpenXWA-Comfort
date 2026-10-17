@@ -410,6 +410,7 @@ typedef enum EnvMode { ENV_OFF = 0, ENV_ENDOR, ENV_HANGAR, ENV_BOXART, ENV_TIEAR
 
 #define ENV_MAX_MESHES 24
 #define ENV_MAX_INSTANCES 40
+#define ENV_TIE_BOLTS 64
 /* InsideHangar hardpoint: the hangar floor (classic launch base). */
 #define ENV_HARDPOINT_INSIDE_HANGAR 25
 /* Floor below the launch reference when the hardpoint is missing (the
@@ -451,7 +452,7 @@ static struct {
 	struct {
 		float p[3], d[3], life;
 		int green, alive;
-	} anim_bolts[32];
+	} anim_bolts[ENV_TIE_BOLTS];
 	float anim_next_shot[8];
 	struct {
 		int ok, chaser;
@@ -4257,7 +4258,9 @@ static void env_tie_paths(void) {
 	float best = -1e9f;
 	int best_h = -1, best_hc = 0, best_xc = 0;
 	for (int h = 0; h < count; ++h) {
-		if (h == 5 || !es_is_tie(h) || (fighters && SDL_strncasecmp(sc->ships[h].opt, "TieFighter", 10))) {
+		/* The TIE fighter on the right (any TIE when there is none). */
+		if (h == 5 || !es_is_tie(h) || (fighters && SDL_strncasecmp(sc->ships[h].opt, "TieFighter", 10)) ||
+			(fighters > 1 && sc->ships[h].yaw <= 0.0f)) {
 			continue;
 		}
 		for (int hj = 0; hj < TOP; ++hj) {
@@ -4317,15 +4320,21 @@ static void env_tie_paths(void) {
  * Rolls happen only where a turn begins: into the first turn, and from
  * its bank into the last turn's. */
 /* ---- the jinking X-wing ----------------------------------------------------
- * It flies its chaser's path 50 m ahead of it, weaving across it: three
- * slow, heavy pulls, left, right, left (as the viewer sees it), each a banked turn (the craft leans into the curve,
+ * It flies its chaser's path 50 m ahead of it and breaks off it in three
+ * long, smooth banked turns, left, right, left (as the viewer sees it): a
+ * sweep out to the left, back across, and straightening onto the path
+ * again. Each turn rolls in smoothly and then holds its bank and turn rate,
+ * like the A-wing's pull away, each a banked turn (the craft leans into the curve,
  * its lift toward the turn's centre, rolling over as the turn reverses),
  * then slides onto the great explosion's centre as it starts and is gone
  * in it. The chaser follows its weaving a moment late, smaller. Both keep
  * the nose along their path. */
 #define ENV_WEAVE_FROM 1.6f
 #define ENV_WEAVE_TO (ENV_TIE_BOOM_AT - 0.3f)
-#define ENV_WEAVE_PULLS 1.5f /* left, right, left */
+#define ENV_WEAVE_SWING_M 40.0f   /* how far out the sweep goes */
+#define ENV_WEAVE_ROLL_S 0.6f     /* rolling from one turn into the next */
+#define ENV_WEAVE_BANK_DEG 65.0f  /* the bank held through a turn */
+#define ENV_WEAVE_SAMPLES 512
 
 /* Smootherstep: its pull (second derivative) has no jumps either, so
  * the lean it gives never snaps. */
@@ -4334,14 +4343,53 @@ static float env_smoother(float x) {
 	return x * x * x * (x * (6.0f * x - 15.0f) + 10.0f);
 }
 
-/* The weave's sideways swing at t, -1..1 (0 outside its window). */
+/* The weave's sideways swing at t, 0..1 (0 outside its window): flown
+ * from its turn rate, +1 for the first quarter (the turn out), -1 for the
+ * middle half (the long turn back), +1 for the last quarter (onto the path
+ * again), each change a smooth roll. Even about the middle with no net
+ * turn, so it ends on the path, heading along it. */
+static float s_weave_acc_max; /* the swing's hardest pull, 1/s^2 */
+
 static float env_weave(float t) {
+	static float table[ENV_WEAVE_SAMPLES + 1];
+	static int built;
+	const float span = ENV_WEAVE_TO - ENV_WEAVE_FROM;
+	if (!built) {
+		const float q = 0.25f * span, w = ENV_WEAVE_ROLL_S, ds = span / (float)ENV_WEAVE_SAMPLES;
+		float rate[ENV_WEAVE_SAMPLES + 1], pos = 0.0f, neg = 0.0f;
+		for (int i = 0; i <= ENV_WEAVE_SAMPLES; ++i) {
+			const float x = (float)i * ds;
+			const float in = env_smoother(x / w) * env_smoother((span - x) / w);
+			rate[i] = in * (1.0f - 2.0f * env_smoother((x - q) / w + 0.5f) +
+							2.0f * env_smoother((x - 3.0f * q) / w + 0.5f));
+			pos += fmaxf(rate[i], 0.0f);
+			neg += fmaxf(-rate[i], 0.0f);
+		}
+		float heading = 0.0f, side = 0.0f, peak = 1e-6f;
+		for (int i = 0; i <= ENV_WEAVE_SAMPLES; ++i) {
+			table[i] = side;
+			peak = fmaxf(peak, fabsf(side));
+			heading += (rate[i] < 0.0f ? rate[i] * pos / neg : rate[i]) * ds;
+			side += heading * ds;
+		}
+		for (int i = 0; i <= ENV_WEAVE_SAMPLES; ++i) {
+			table[i] /= peak;
+		}
+		for (int i = 1; i < ENV_WEAVE_SAMPLES; ++i) {
+			s_weave_acc_max =
+				fmaxf(s_weave_acc_max, fabsf(table[i + 1] - 2.0f * table[i] + table[i - 1]) / (ds * ds));
+		}
+		built = 1;
+	}
 	if (t <= ENV_WEAVE_FROM || t >= ENV_WEAVE_TO) {
 		return 0.0f;
 	}
-	const float span = ENV_WEAVE_TO - ENV_WEAVE_FROM;
-	const float in = env_smoother((t - ENV_WEAVE_FROM) / 0.6f) * (1.0f - env_smoother((t - (ENV_WEAVE_TO - 0.7f)) / 0.7f));
-	return in * sinf(2.0f * BT_PI * ENV_WEAVE_PULLS * (t - ENV_WEAVE_FROM) / span);
+	const float f = (t - ENV_WEAVE_FROM) / span * (float)ENV_WEAVE_SAMPLES;
+	const int i = (int)f;
+	if (i >= ENV_WEAVE_SAMPLES) {
+		return table[ENV_WEAVE_SAMPLES];
+	}
+	return table[i] + (table[i + 1] - table[i]) * (f - (float)i);
 }
 
 /* The offset (world units) from its base path at t: chased = 0 for the
@@ -4358,7 +4406,8 @@ static void env_tie_weave_offset(int r, int chased, float t, float out[3]) {
 		env_cross(n, u, side);
 		bt_norm(side);
 	}
-	const float swing = chased ? 5.0f * env_weave(t - 0.4f) : 15.0f * env_weave(t);
+	/* The Interceptor follows its turns a moment late, cutting inside them. */
+	const float swing = chased ? 0.55f * ENV_WEAVE_SWING_M * env_weave(t - 0.45f) : ENV_WEAVE_SWING_M * env_weave(t);
 	for (int a = 0; a < 3; ++a) {
 		out[a] = side[a] * swing * k;
 	}
@@ -4391,11 +4440,11 @@ static void env_tie_weave_pose(int r, int chased, float t, float pos[3], float n
 		pos[a] = b1[a] + o1[a];
 		n[a] = (b2[a] + o2[a]) - (b0[a] + o0[a]);
 	}
-	/* The lean follows the weave's pull with a little lag (the pull of the
-	 * last third of a second): a heavy craft rolls into a turn and out of
-	 * it a moment behind its stick. */
+	/* The lean follows the turn's pull with a little lag (its pull over
+	 * the last fifth of a second): a heavy craft rolls into a turn a moment
+	 * behind its stick. */
 	for (int q = 0; q < 4; ++q) {
-		const float tq = t - 0.06f - 0.09f * (float)q;
+		const float tq = t - 0.03f - 0.06f * (float)q;
 		float p0[3], p1[3], p2[3];
 		env_tie_weave_offset(r, chased, tq - h, p0);
 		env_tie_weave_offset(r, chased, tq, p1);
@@ -4407,20 +4456,34 @@ static void env_tie_weave_pose(int r, int chased, float t, float pos[3], float n
 	if (!bt_norm(n)) {
 		memcpy(n, bn, sizeof bn);
 	}
-	/* Lift toward the turn: the base attitude's up, leaned by the weave's
-	 * sideways pull (about 60 degrees at its hardest). */
-	const float g = 70.0f * AERON_OPT_UNITS_PER_METER;
-	const float an = bt_dot(acc, n);
+	/* Lift toward the turn: the base attitude's up, banked toward the turn
+	 * in proportion to its sideways pull, ENV_WEAVE_BANK_DEG at its
+	 * hardest (held through each turn, rolled over smoothly between). */
+	float side[3], up[3];
+	static const float zup[3] = { 0.0f, 0.0f, 1.0f };
+	env_cross(n, zup, side);
+	if (!bt_norm(side)) {
+		env_cross(n, bu, side);
+		bt_norm(side);
+	}
+	(void)env_weave(0.0f); /* the table (and its hardest pull) built */
+	const float a_ref = (chased ? 0.55f : 1.0f) * ENV_WEAVE_SWING_M * AERON_OPT_UNITS_PER_METER * s_weave_acc_max;
+	const float pull = a_ref > 0.0f ? fmaxf(-1.0f, fminf(1.0f, bt_dot(acc, side) / a_ref)) : 0.0f;
+	/* (Eased up, so the longer, gentler middle turn still leans well in.) */
+	const float phi = copysignf(powf(fabsf(pull), 0.6f), pull) * ENV_WEAVE_BANK_DEG * BT_PI / 180.0f;
+	const float along = bt_dot(bu, n);
 	for (int a = 0; a < 3; ++a) {
-		u[a] = bu[a] * g + (acc[a] - n[a] * an);
+		up[a] = bu[a] - n[a] * along;
 	}
-	const float un = bt_dot(u, n);
+	if (!bt_norm(up)) {
+		memcpy(up, zup, sizeof up);
+	}
+	float right[3];
+	env_cross(n, up, right); /* the rotation of up about the nose toward it */
 	for (int a = 0; a < 3; ++a) {
-		u[a] -= n[a] * un;
+		u[a] = up[a] * cosf(phi) + right[a] * sinf(phi);
 	}
-	if (!bt_norm(u)) {
-		memcpy(u, bu, sizeof bu);
-	}
+	bt_norm(u);
 }
 
 /* The runner whose chaser `ship` is (weaving after it), or -1. */
@@ -4567,7 +4630,7 @@ static void env_tie_flight_pose(int ship, float t, float pos[3], float n[3], flo
 }
 
 static void env_tie_spawn_bolt(const float p[3], const float d[3], float life, int green) {
-	for (int b = 0; b < 32; ++b) {
+	for (int b = 0; b < ENV_TIE_BOLTS; ++b) {
 		if (!s_env.anim_bolts[b].alive) {
 			memcpy(s_env.anim_bolts[b].p, p, 3 * sizeof(float));
 			memcpy(s_env.anim_bolts[b].d, d, 3 * sizeof(float));
@@ -4933,7 +4996,7 @@ static void env_tie_animate(void) {
 	for (int si = 0; si < 5 && t < T - ENV_TIE_SALVO_SECONDS - 0.1f; ++si) {
 		const int ship = shooters[si];
 		if ((ship == 5 && t > ENV_TIE_BOOM_AT) ||
-			(ship == s_env.anim_hunter && t > k_tie_misses[0] - 0.8f && t < ENV_TIE_BOOM_AT)) {
+			(ship == s_env.anim_hunter && t > k_tie_misses[0] - 1.0f && t < ENV_TIE_BOOM_AT)) {
 			continue; /* the hunter's shots at the X-wing are its own */
 		}
 		if (before < s_env.anim_next_shot[ship] && t >= s_env.anim_next_shot[ship]) {
@@ -4953,15 +5016,19 @@ static void env_tie_animate(void) {
 			s_env.anim_next_shot[ship] = t + 0.42f + 0.06f * (float)si;
 		}
 	}
-	/* The hunter: two misses, then the three hits on the X-wing. */
+	/* The hunter: bursts of three at the X-wing, two bursts walking in
+	 * (all misses), then three ending in the hits. */
 	if (t < ENV_TIE_BOOM_AT) {
-		env_tie_hunter_shot(before, t, k_tie_misses[0], 6.0f);
-		env_tie_hunter_shot(before, t, k_tie_misses[1], -4.0f);
-		for (int h = 0; h < 3; ++h) {
-			env_tie_hunter_shot(before, t, k_tie_hits[h], 0.0f);
+		for (int b = 0; b < 5; ++b) {
+			const float at = b < 2 ? k_tie_misses[b] : k_tie_hits[b - 2];
+			for (int sh = 0; sh < 3; ++sh) {
+				const float side = (sh & 1) ? -1.0f : 1.0f;
+				const float miss = b < 2 ? side * (7.0f - 1.5f * (float)sh) : sh < 2 ? side * 3.0f : 0.0f;
+				env_tie_hunter_shot(before, t, at - 0.13f * (float)(2 - sh), miss);
+			}
 		}
 	}
-	for (int b = 0; b < 32; ++b) {
+	for (int b = 0; b < ENV_TIE_BOLTS; ++b) {
 		if (!s_env.anim_bolts[b].alive) {
 			continue;
 		}
@@ -5029,7 +5096,7 @@ static void env_tie_submit_bolts(AeronScene3D* scene) {
 	const float k = AERON_OPT_UNITS_PER_METER;
 	static const float red[4] = { 2.4f, 0.35f, 0.25f, 1.0f };
 	static const float green[4] = { 0.4f, 2.4f, 0.45f, 1.0f };
-	for (int b = 0; b < 32; ++b) {
+	for (int b = 0; b < ENV_TIE_BOLTS; ++b) {
 		if (!s_env.anim_bolts[b].alive) {
 			continue;
 		}
