@@ -261,6 +261,9 @@ extern int g_localPlayer;
 #ifdef XWA_MODERN
 /* Counts the local player's craft being destroyed (the death camera starting). */
 extern int g_localPlayerDestroyedCount;
+/* Whether an object slot lies in the player's current region (each region
+ * has its own range of object slots). */
+int Player_ObjectInPlayerRegion(int playerIdx, int objIdx);
 #endif
 extern uint8_t g_padlockMouseLookEnabled;
 extern uint8_t g_padlockMouseLookInvertPitch;

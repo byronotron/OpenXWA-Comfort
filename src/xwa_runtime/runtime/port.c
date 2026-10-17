@@ -404,8 +404,9 @@ void XwaPort_GetVrConsoleState(XwaVrConsoleState* out) {
 	out->has_target = player->currentTargetObjectIdx != 0xffffu;
 	for (int i = 0; i < 3; ++i) {
 		const int slot = player->targetPresetSlot[i];
-		out->memory_set[i] = slot >= 0 && (uint32_t)slot < g_objectTableSlotCount &&
-							 g_objectTable[slot].objectType != OBJ_None;
+		if (slot >= 0 && (uint32_t)slot < g_objectTableSlotCount && g_objectTable[slot].objectType != OBJ_None) {
+			out->memory_set[i] = Player_ObjectInPlayerRegion(g_localPlayer, slot) ? 1 : 2;
+		}
 	}
 	out->hyper_ready = player->hyperspacePhase == 0 && (craft->systemFlags & 0x80u) &&
 					   (craft->workingSubsystems & 0x80u) &&

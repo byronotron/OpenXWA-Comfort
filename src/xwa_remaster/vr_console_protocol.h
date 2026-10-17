@@ -78,7 +78,7 @@ typedef struct XwaVrConsoleState {
 	int shield_balance; /* 0 front, 1 even, 2 rear */
 	int sfoils_closed;
 	int has_target;
-	int memory_set[3];
+	int memory_set[3]; /* 0 empty, 1 set, 2 set in another region (kept over hyperspace) */
 	/* At a hyperspace buoy with a working hyperdrive: the jump is a press away. */
 	int hyper_ready;
 	/* Changes when a new mission starts (the button card returns to its

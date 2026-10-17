@@ -17,6 +17,7 @@
 #include "xwa/flight/fediskio.h"
 #include "xwa/frontend/frontend_input.h"
 #include "xwa/frontend/frontend_mission.h"
+#include "xwa/frontend/mission_debrief.h"
 #include "xwa_2d.h"
 #include "xwa_remaster/ship.h"
 
@@ -488,6 +489,11 @@ static EnvMode env_mode(void) {
 	if (v && strcmp(v, "0") == 0) {
 		return ENV_OFF;
 	}
+	/* A failed mission is debriefed among the TIE fighters downing an
+	 * X-wing; the chosen scene comes back after it. */
+	if (MissionDebrief_ShowingFailure()) {
+		return ENV_TIEART;
+	}
 	if (v && SDL_strcasecmp(v, "hangar") == 0) {
 		return ENV_HANGAR;
 	}
@@ -615,7 +621,10 @@ static struct {
 /* The game's music (xwa/audio/music.h pulls in iMUSE's headers). */
 extern int musicState;
 int Music_SetState(int state);
-#define ENV_MUSIC_MISSION_FAILED 1280 /* MUSIC_STATE_FRONTEND_1280: the failed mission's debriefing */
+/* MUSIC_STATE_FRONTEND_1280: the debriefing theme the game plays after a
+ * completed mission (MissionDebrief_Update; a failed one gets 1260, or 1270
+ * in the family campaign). */
+#define ENV_MUSIC_TITLE 1280
 
 /* X in the menus puts the screen away: it fades out (with its frame and
  * logo), the X-Wing Alliance logo fades in large where it was (as at the
@@ -5365,8 +5374,8 @@ static void env_title_update(void) {
 		if (Aeron_XrTakeMenuXPressed()) {
 			s_dismiss.away = !s_dismiss.away;
 		}
-		if (Aeron_XrTakeMenuYPressed()) {
-			env_next_scene();
+		if (Aeron_XrTakeMenuYPressed() && !MissionDebrief_ShowingFailure()) {
+			env_next_scene(); /* (the failed mission's debriefing keeps its scene) */
 		}
 		if (s_dismiss.away) {
 			const AeronInputSnapshot* in = Aeron_InputSnapshot();
@@ -5401,12 +5410,12 @@ static void env_title_update(void) {
 		}
 	}
 	s_title.pressed = pressed;
-	/* The TIE art's startup plays to the music of a failed mission's
-	 * debriefing; the menus get theirs back with the screen. */
+	/* The TIE art's startup plays to a debriefing theme (ENV_MUSIC_TITLE);
+	 * the menus get theirs back with the screen. */
 	if (s_env.mode == ENV_TIEART && !s_title.go && s_title.music_saved < 0 && g_gameConfig.datapadMusicEnabled &&
 		env_float("XWA_XR_TITLE_MUSIC", 1.0f) != 0.0f) {
 		s_title.music_saved = musicState;
-		Music_SetState(ENV_MUSIC_MISSION_FAILED);
+		Music_SetState(ENV_MUSIC_TITLE);
 	}
 	if (s_title.go) {
 		s_title.go_t += dt;

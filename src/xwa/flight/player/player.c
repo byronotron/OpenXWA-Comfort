@@ -1104,8 +1104,15 @@ void Player_HandleHyperspaceCommand(CraftData* craft, unsigned int playerIdx, ch
 		g_players[playerIdx].viewState.cameraYawDelta = 0;
 		g_players[playerIdx].viewState.cameraRollDelta = 0;
 		g_players[playerIdx].viewState.field_32 = 0;
+#ifndef XWA_MODERN
 		*(uint32_t*)&g_players[playerIdx].targetPresetSlot[0] = 0xffffffffu;
 		*(uint32_t*)&g_players[playerIdx].targetPresetSlot[2] = 0xffffffffu;
+#else
+		/* The target memories (F5-F7) stay over the jump: every region's
+		 * objects keep their slots, so a memory works again on the way back
+		 * (recall only targets in the current region:
+		 * Player_ObjectInPlayerRegion). */
+#endif
 
 		if (g_players[playerIdx].turretAutoFireState == 2) {
 			uint16_t slotIdx;
@@ -3781,6 +3788,17 @@ void Player_StartPostDestructionState(unsigned int playerIdx, unsigned int kille
 
 #ifdef XWA_MODERN
 int g_localPlayerDestroyedCount;
+
+int Player_ObjectInPlayerRegion(int playerIdx, int objIdx) {
+	if (objIdx < 0 || (uint32_t)objIdx >= g_objectTableSlotCount || playerIdx < 0 || playerIdx >= XWA_PLAYER_COUNT) {
+		return 0;
+	}
+	if ((uint32_t)objIdx >= g_regionObjectSlotEnd || g_missionRegionCount <= 1) {
+		return 1; /* not a per-region slot */
+	}
+	const uint32_t perRegion = g_regionObjectSlotEnd / (uint32_t)g_missionRegionCount;
+	return perRegion == 0 || (uint32_t)objIdx / perRegion == (uint32_t)g_players[playerIdx].regionIndex;
+}
 #endif
 
 // FUNCTION: XWA 0x505AF0

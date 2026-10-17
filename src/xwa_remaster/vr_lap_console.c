@@ -522,8 +522,10 @@ static void vc_layout(void) {
 			for (int i = 0; i < 3; ++i) {
 				row[i]->arg = i;
 				row[i]->hold_action = XWA_VRC_MEMORY_STORE;
-				row[i]->lit = st->memory_set[i];
-				row[i]->sub = st->memory_set[i] ? "set" : "hold = store";
+				row[i]->lit = st->memory_set[i] == 1;
+				row[i]->sub = st->memory_set[i] == 1   ? "set"
+							  : st->memory_set[i] == 2 ? "other region"
+													   : "hold = store";
 			}
 		}
 		{

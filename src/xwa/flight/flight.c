@@ -10101,6 +10101,16 @@ void Flight_ProcessPlayerActions(unsigned int playerIdx) {
 		case KEY_F6:
 		case KEY_F7: {
 			uint16_t slot = (uint16_t)(g_currentActionKey - KEY_F5);
+#ifdef XWA_MODERN
+			/* Kept over hyperspace jumps: a memory from another region waits
+			 * until the player is back there. */
+			if (g_players[currentPlayerIdx].targetPresetSlot[slot] != -1 &&
+				!Player_ObjectInPlayerRegion((int)currentPlayerIdx,
+											 g_players[currentPlayerIdx].targetPresetSlot[slot])) {
+				FlightAction_PlayEngineClick(currentPlayerIdx);
+				return;
+			}
+#endif
 			if (g_players[currentPlayerIdx].targetPresetSlot[slot] != -1 &&
 				g_objectTable[(uint16_t)g_players[currentPlayerIdx].targetPresetSlot[slot]].objectType !=
 					OBJ_None) {

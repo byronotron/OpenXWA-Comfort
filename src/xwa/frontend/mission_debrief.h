@@ -55,6 +55,9 @@ int MissionDebrief_ShowAwardCeremony(int frameCounter);
 void MissionDebrief_BuildText(char* outResults, char* outHints, int useWinText);
 int MissionDebrief_DrawMissionResultsPage(void);
 int MissionDebrief_DrawMissionHintsPage(void);
+/* XWA_MODERN builds: the debriefing of a mission that was not completed is
+ * on screen. */
+int MissionDebrief_ShowingFailure(void);
 
 #ifdef __cplusplus
 }
