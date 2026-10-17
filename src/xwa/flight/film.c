@@ -22,7 +22,82 @@
 #include "xwa/render/renderer.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+#ifdef XWA_MODERN
+enum { FILM_MEMORY_OFF = 0, FILM_MEMORY_WRITE, FILM_MEMORY_READ };
+static struct {
+	int mode;
+	uint8_t* data;
+	const uint8_t* source;
+	size_t size, capacity, cursor;
+	int overrun;
+} g_filmMemory;
+
+void Film_BeginMemoryWrite(void) {
+	memset(&g_filmMemory, 0, sizeof g_filmMemory);
+	g_filmMemory.mode = FILM_MEMORY_WRITE;
+}
+
+uint8_t* Film_EndMemoryWrite(size_t* size) {
+	uint8_t* data = g_filmMemory.overrun ? NULL : g_filmMemory.data;
+	if (size) {
+		*size = data ? g_filmMemory.size : 0;
+	}
+	if (!data) {
+		free(g_filmMemory.data);
+	}
+	memset(&g_filmMemory, 0, sizeof g_filmMemory);
+	return data;
+}
+
+void Film_BeginMemoryRead(const uint8_t* data, size_t size) {
+	memset(&g_filmMemory, 0, sizeof g_filmMemory);
+	g_filmMemory.mode = FILM_MEMORY_READ;
+	g_filmMemory.source = data;
+	g_filmMemory.size = size;
+}
+
+int Film_EndMemoryRead(void) {
+	const int exact = !g_filmMemory.overrun && g_filmMemory.cursor == g_filmMemory.size;
+	memset(&g_filmMemory, 0, sizeof g_filmMemory);
+	return exact;
+}
+
+static int Film_MemoryWrite(const void* src, size_t size) {
+	if (g_filmMemory.size + size > g_filmMemory.capacity) {
+		size_t capacity = g_filmMemory.capacity ? g_filmMemory.capacity : 4096u;
+		uint8_t* grown;
+		while (capacity < g_filmMemory.size + size) {
+			capacity *= 2u;
+		}
+		grown = (uint8_t*)realloc(g_filmMemory.data, capacity);
+		if (!grown) {
+			g_filmMemory.overrun = 1;
+			return 0;
+		}
+		g_filmMemory.data = grown;
+		g_filmMemory.capacity = capacity;
+	}
+	memcpy(g_filmMemory.data + g_filmMemory.size, src, size);
+	g_filmMemory.size += size;
+	return 1;
+}
+
+static int Film_MemoryRead(void* dst, int size) {
+	if (size <= 0) {
+		return 1;
+	}
+	if (g_filmMemory.cursor + (size_t)size > g_filmMemory.size) {
+		g_filmMemory.overrun = 1;
+		return 0;
+	}
+	memcpy(dst, g_filmMemory.source + g_filmMemory.cursor, (size_t)size);
+	g_filmMemory.cursor += (size_t)size;
+	return 1;
+}
+#endif
 
 // GLOBAL: XWA 0x80DA40
 uint8_t* g_filmWriteBuffer;
@@ -217,6 +292,11 @@ char* FilmNamePrompt_Run(void) {
 
 // FUNCTION: XWA 0x4388D0
 int Film_ReadBytes(void* dst, int size) {
+#ifdef XWA_MODERN
+	if (g_filmMemory.mode == FILM_MEMORY_READ) {
+		return Film_MemoryRead(dst, size);
+	}
+#endif
 	if (g_filmFile == 0) {
 		g_filmPlaybackMode = 3;
 		return 0;
@@ -364,6 +444,11 @@ static int Film_WriteRawBytes(const void* src, size_t size) {
 int Film_WriteBytesBuffered(const void* src, size_t size) {
 	size_t bufferSize;
 
+#ifdef XWA_MODERN
+	if (g_filmMemory.mode == FILM_MEMORY_WRITE) {
+		return Film_MemoryWrite(src, size);
+	}
+#endif
 	if (g_filmFile == 0) {
 		return 0;
 	}

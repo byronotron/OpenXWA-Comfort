@@ -42,6 +42,16 @@ static void XwaModernFlightTiming_ResetAccumulators(void) {
 	g_pendingGlowMarkAnimationTicks = 0;
 }
 
+void XwaModernFlightTiming_SaveStateRegions(XwaSaveStateRegionFn add, void* ctx) {
+	add(ctx, &g_pendingLegacyCadenceTicks, sizeof g_pendingLegacyCadenceTicks, "g_pendingLegacyCadenceTicks");
+	add(ctx, &g_legacyCadenceDue, sizeof g_legacyCadenceDue, "g_legacyCadenceDue");
+	add(ctx, &g_pendingAiTicks, sizeof g_pendingAiTicks, "g_pendingAiTicks");
+	add(ctx, &g_pendingTransientAnimationTicks, sizeof g_pendingTransientAnimationTicks,
+		"g_pendingTransientAnimationTicks");
+	add(ctx, &g_pendingGlowMarkAnimationTicks, sizeof g_pendingGlowMarkAnimationTicks,
+		"g_pendingGlowMarkAnimationTicks");
+}
+
 void XwaModernFlightTiming_Configure(int requested_step_ticks) {
 	g_requestedStepTicks = requested_step_ticks;
 }

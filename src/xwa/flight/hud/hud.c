@@ -19064,13 +19064,15 @@ void Mfd_DrawCommandMenuPage(int mfdSide, void* mfdSurface) {
 		}
 	}
 
-	for (primaryLabel = &g_mfdCommandPrimaryTargetLabels[1][0], targetSlot = 1;
-		 primaryLabel <= &g_mfdCommandPrimaryTargetLabels[6][0]; primaryLabel += 30, ++targetSlot) {
+	/* Row by row (stepping one pointer across the rows trips the fortified
+	 * strcpy's object-size check), each label kept within its 30 bytes. */
+	for (targetSlot = 1; targetSlot <= 6; ++targetSlot) {
 		if (g_players[g_localPlayer].mfd.commandMenu.primaryTargetObjIdx[targetSlot] != 0xffff) {
 			Mfd_BuildScratchCraftListName(
 				(uint16_t)g_players[g_localPlayer].mfd.commandMenu.primaryTargetObjIdx[targetSlot],
 				g_localPlayer, 0);
-			strcpy(primaryLabel, g_flightTextScratchBuffer);
+			snprintf(g_mfdCommandPrimaryTargetLabels[targetSlot], sizeof g_mfdCommandPrimaryTargetLabels[targetSlot],
+					 "%.29s", g_flightTextScratchBuffer);
 		}
 	}
 
@@ -19156,7 +19158,8 @@ void Mfd_DrawCommandMenuPage(int mfdSide, void* mfdSurface) {
 			 ++targetSlot) {
 			Hud_AppendObjectDisplayName(
 				(uint16_t)g_players[g_localPlayer].mfd.commandMenu.secondaryTargetObjIdx[targetSlot], 3);
-			strcpy(g_mfdCommandSecondaryTargetLabels[targetSlot], g_flightTextScratchBuffer);
+			snprintf(g_mfdCommandSecondaryTargetLabels[targetSlot],
+					 sizeof g_mfdCommandSecondaryTargetLabels[targetSlot], "%.29s", g_flightTextScratchBuffer);
 		}
 	}
 

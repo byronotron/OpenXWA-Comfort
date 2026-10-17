@@ -1,5 +1,6 @@
 #include "xwa_runtime/runtime/flight_task.h"
 #include "xwa_runtime/runtime/flight_pause_task.h"
+#include "xwa_runtime/runtime/flight_checkpoints.h"
 #include "xwa/flight/hangar.h"
 
 #include "aeron/aeron.h"
@@ -112,6 +113,7 @@ static int g_xwaFlightTaskRecoveryCountdownState;
 static int g_xwaFlightTaskDirectWorldCleanup;
 static XwaFlightTaskHangarContinuation g_xwaFlightTaskHangarContinuation;
 static int g_xwaFlightTaskPendingHangarTicks;
+static unsigned g_xwaFlightTaskMissionSerial;
 
 // GLOBAL: XWA 0x78287C
 int g_flightTimestampScaleOverride;
@@ -868,6 +870,7 @@ static void XwaFlightTask_RunHangarReadyFrame(void) {
 
 static void XwaFlightTask_RequestInstanceCleanup(int restartMission) {
 	XwaFlightPauseTask_Shutdown();
+	XwaFlightCheckpoints_Reset(); /* the mission's checkpoints go with it */
 	g_xwaFlightTaskRestartMission = restartMission;
 	g_xwaFlightTaskPhase = XWA_FLIGHT_TASK_PHASE_INSTANCE_CLEANUP;
 }
@@ -896,6 +899,8 @@ static int XwaFlightTask_RunSinglePlayerFrame(void) {
 	int missionEndPending;
 	XwaFlightTaskLoopTiming timing;
 
+	/* Between two steps: in-mission checkpoints (taken, or one put back). */
+	XwaFlightCheckpoints_ServiceFrame();
 	g_inputTimestamp += (int)Time_GetFrameDelta();
 	timing.frameStartTimestamp = g_inputTimestamp;
 	if (!XwaFlightTask_WaitForFrameStepDue()) {
@@ -915,7 +920,10 @@ static int XwaFlightTask_RunSinglePlayerFrame(void) {
 	}
 	g_inputTimestamp += (int)Time_GetFrameDelta();
 	timing.networkProcessTicks = g_inputTimestamp - timing.preStepTimestamp;
-	missionEndPending = Flight_CheckMissionEndAndExitRequest();
+	/* While a retry from a checkpoint is offered (the craft lost), the
+	 * mission's end waits; the world keeps going around the wreck. */
+	missionEndPending =
+		XwaFlightCheckpoints_HoldingMissionEnd() ? 0 : Flight_CheckMissionEndAndExitRequest();
 	if (XwaFlightTask_EnterRequestedHangarReady(XWA_FLIGHT_TASK_HANGAR_CONTINUE_FLIGHT)) {
 		return 1;
 	}
@@ -935,7 +943,7 @@ static int XwaFlightTask_RunSinglePlayerFrame(void) {
 		XwaFlightTask_WaitForFrameStepDue();
 		return 1;
 	}
-	if (g_flightExitRequest) {
+	if (g_flightExitRequest && !XwaFlightCheckpoints_HoldingMissionEnd()) {
 		XwaFlightTask_RequestInstanceCleanup(0);
 		return 1;
 	}
@@ -1521,6 +1529,8 @@ void XwaFlightTask_Tick(void) {
 			case XWA_FLIGHT_TASK_PHASE_MISSION_INSTANCE_INIT: {
 				int skipHangarReady;
 
+				++g_xwaFlightTaskMissionSerial;
+
 				g_flightExitRequest = 0;
 				g_collideSweepAllowUnownedTargets = 0;
 				g_collideRicochetDamageScale = 1.0f;
@@ -1893,6 +1903,19 @@ int XwaFlightTask_Shutdown(void) {
 }
 
 int XwaFlightTask_IsActive(void) { return g_xwaFlightTaskActive != 0; }
+
+unsigned XwaFlightTask_MissionSerial(void) { return g_xwaFlightTaskMissionSerial; }
+
+void XwaFlightTask_SaveStateRegions(XwaSaveStateRegionFn add, void* ctx) {
+	add(ctx, &g_xwaFlightTaskLastStepTargetTimestamp, sizeof g_xwaFlightTaskLastStepTargetTimestamp,
+		"flightTaskLastStepTarget");
+	add(ctx, &g_xwaFlightTaskOverlayTargetTimestamp, sizeof g_xwaFlightTaskOverlayTargetTimestamp,
+		"flightTaskOverlayTarget");
+	add(ctx, &g_xwaFlightTaskPredictedFrameDelta, sizeof g_xwaFlightTaskPredictedFrameDelta,
+		"flightTaskPredictedFrameDelta");
+	add(ctx, &g_xwaFlightTaskLastSoundUpdateTimestamp, sizeof g_xwaFlightTaskLastSoundUpdateTimestamp,
+		"flightTaskLastSoundUpdate");
+}
 
 int XwaFlightTask_IsComplete(void) { return g_xwaFlightTaskComplete != 0; }
 

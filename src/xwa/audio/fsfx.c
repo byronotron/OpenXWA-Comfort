@@ -227,6 +227,29 @@ void fsfx_ResetFlightSfxState(int clearSfxIdTable) {
 	g_nextNearbyWeaponSfxScanTime = 0;
 }
 
+#ifdef XWA_MODERN
+/* The flight effects' own bookkeeping that the simulation's dice depend on
+ * (which explosion sounds were used, who spoke when), for save states. */
+void fsfx_SaveStateRegions(XwaSaveStateRegionFn add, void* ctx) {
+	add(ctx, g_fsfxSmallExplosionUsedFlags, sizeof g_fsfxSmallExplosionUsedFlags, "fsfxSmallExplosionUsed");
+	add(ctx, &g_fsfxSmallExplosionRemainingChoices, sizeof g_fsfxSmallExplosionRemainingChoices,
+		"fsfxSmallExplosionRemaining");
+	add(ctx, g_fsfxTacOfficerLastSpeakSecondsByObj, sizeof g_fsfxTacOfficerLastSpeakSecondsByObj,
+		"fsfxTacOfficerLastSpeak");
+	add(ctx, g_fsfxVoiceLinePlayCounts, sizeof g_fsfxVoiceLinePlayCounts, "fsfxVoiceLinePlayCounts");
+	add(ctx, &g_fsfxEnemyFighterAttackCalloutPlayed, sizeof g_fsfxEnemyFighterAttackCalloutPlayed,
+		"fsfxEnemyFighterCallout");
+	add(ctx, &g_fsfxEnemyWarheadAttackCalloutPlayed, sizeof g_fsfxEnemyWarheadAttackCalloutPlayed,
+		"fsfxEnemyWarheadCallout");
+	add(ctx, &g_fsfxLocalPlayerTargetedProjectileFriendlyHitCount,
+		sizeof g_fsfxLocalPlayerTargetedProjectileFriendlyHitCount, "fsfxFriendlyHitCount");
+	add(ctx, &g_nextNearbyWeaponSfxScanTime, sizeof g_nextNearbyWeaponSfxScanTime, "fsfxNextWeaponScan");
+	add(ctx, &g_targetingToneLastSeekBeepTime, sizeof g_targetingToneLastSeekBeepTime, "fsfxSeekBeepTime");
+	add(ctx, &g_incomingMissileWarningState, sizeof g_incomingMissileWarningState, "fsfxMissileWarning");
+	add(ctx, &g_incomingMissileLockStrength, sizeof g_incomingMissileLockStrength, "fsfxMissileLock");
+}
+#endif
+
 // FUNCTION: XWA 0x43F4B0
 int fsfx_IsVoiceQueueEmpty(void) { return g_fsfxVoiceQueueCount == 0; }
 

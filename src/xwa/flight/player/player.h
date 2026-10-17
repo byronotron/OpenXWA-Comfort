@@ -258,6 +258,10 @@ extern PlayerData g_localPlayerSnapshotOnFlightExit;
 extern PlayerViewState g_filmOverlayViewState;
 extern PlayerViewState g_savedPlayerViewStateForPlaybackCamera;
 extern int g_localPlayer;
+#ifdef XWA_MODERN
+/* Counts the local player's craft being destroyed (the death camera starting). */
+extern int g_localPlayerDestroyedCount;
+#endif
 extern uint8_t g_padlockMouseLookEnabled;
 extern uint8_t g_padlockMouseLookInvertPitch;
 extern uint8_t g_padlockMouseLookIgnoreNextDelta;

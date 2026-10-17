@@ -42,6 +42,7 @@
 #include "xwa_runtime/config/modern_video_options.h"
 #include "xwa_runtime/config/modern_video_options_screen.h"
 #include "xwa_runtime/config/modern_vr_options_screen.h"
+#include "xwa_runtime/runtime/flight_checkpoints.h"
 #include "xwa_runtime/config/modern_vr_credits_screen.h"
 #include "xwa_runtime/input/controller_mapping.h"
 #endif
@@ -157,6 +158,19 @@ static int Config_VrPortMenus(void) {
 #endif
 }
 
+/* The in-flight menu's save-state rows (Quick Save, Quick Load when there
+ * is one, Retry Checkpoint when there is one). */
+static int Config_CheckpointRowCount(void) {
+#ifdef XWA_MODERN
+	if (!XwaFlightCheckpoints_Available()) {
+		return 0;
+	}
+	return 1 + (XwaFlightCheckpoints_HasQuickSave() != 0) + (XwaFlightCheckpoints_HasCheckpoint() != 0);
+#else
+	return 0;
+#endif
+}
+
 /* A main menu row as the original numbers it, with Performance Options
  * (row 1) left out in VR. */
 static int Config_MainRow(int row) { return row > 1 && Config_VrPortMenus() ? row - 1 : row; }
@@ -200,6 +214,7 @@ int Config_MainMenuScreen(void) {
 	rowCount = g_configRestrictedOptionsModalActive ? 8 : 12;
 	if (g_configRestrictedOptionsModalActive && g_configExitMissionAvailable) {
 		++rowCount;
+		rowCount += Config_CheckpointRowCount();
 	}
 	if (Config_VrPortMenus()) {
 		--rowCount; /* no Performance Options */
@@ -458,6 +473,45 @@ int Config_MainMenuScreen(void) {
 	}
 	y += 25;
 	++rowIndex;
+
+	if (g_configRestrictedOptionsModalActive && g_configExitMissionAvailable && XwaFlightCheckpoints_Available()) {
+		/* In-mission save states (xwa_runtime/runtime/flight_checkpoints.c):
+		 * each closes the menu and is carried out as the flight resumes. */
+		static const struct {
+			const char* text;
+			XwaFlightCheckpointRequest request;
+		} k_rows[3] = {
+			{ "Quick Save", XWA_FLIGHT_CHECKPOINT_REQUEST_QUICK_SAVE },
+			{ "Quick Load", XWA_FLIGHT_CHECKPOINT_REQUEST_QUICK_LOAD },
+			{ "Retry Checkpoint", XWA_FLIGHT_CHECKPOINT_REQUEST_RETRY },
+		};
+		for (int cp = 0; cp < 3; ++cp) {
+			if ((cp == 1 && !XwaFlightCheckpoints_HasQuickSave()) ||
+				(cp == 2 && !XwaFlightCheckpoints_HasCheckpoint())) {
+				continue;
+			}
+			text = k_rows[cp].text;
+			titleWidth = FrontendText_MeasureWidth(text, 20);
+			textX = g_configMenuCenterX - (int)(titleWidth >> 1);
+			buttonPressed =
+				FrontendButton_DrawMenuButton(textX, y, text, 20, g_colorPaleBlue, 33 + cp, 0, "settingsound");
+			if (g_menuCursorRow == rowIndex) {
+				FrontendText_Draw(20, text, textX, y, g_colorGreen);
+				if (keyState == CONFIG_KEY_ENTER) {
+					FrontendSound_PlayUISound("settingsound", 1, 0, 255, 12 * g_gameConfig.sfxDatapadVolume, 63);
+					Keyboard_FlushCharBuffer();
+					keyState = 0;
+					buttonPressed = 1;
+				}
+			}
+			if (buttonPressed) {
+				XwaFlightCheckpoints_Request(k_rows[cp].request);
+				return 1;
+			}
+			y += 25;
+			++rowIndex;
+		}
+	}
 
 	if (g_configRestrictedOptionsModalActive && g_configExitMissionAvailable) {
 		text = "Exit Mission";

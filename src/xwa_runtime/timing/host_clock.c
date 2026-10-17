@@ -19,6 +19,8 @@ void XwaTime_AdvanceHostClock(int32_t delta_us) {
 
 uint64_t XwaTime_GetElapsedUs(void) { return g_xwaElapsedUs; }
 
+void XwaTime_SetElapsedUsForTesting(uint64_t elapsed_us) { g_xwaElapsedUs = elapsed_us; }
+
 uint32_t XwaTime_GetElapsedTicks(void) { return (uint32_t)(g_xwaElapsedUs / 1000u); }
 
 uint64_t XwaTime_GetLegacyTimerIntervalUs(uint32_t intervalMs) {

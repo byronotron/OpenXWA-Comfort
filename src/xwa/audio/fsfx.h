@@ -84,6 +84,10 @@ extern int g_objPrevZ[];
 
 void         fsfx_UnloadAllEffects_Thunk(void);
 void         fsfx_ResetFlightSfxState(int clearSfxIdTable);
+#ifdef XWA_MODERN
+#include "xwa/util/savestate_region.h"
+void fsfx_SaveStateRegions(XwaSaveStateRegionFn add, void* ctx);
+#endif
 int          fsfx_IsVoiceQueueEmpty(void);
 int          fsfx_ClearSfxNameTable(void);
 int          fsfx_LoadSfxList(char* fileName, int baseSoundId, const char* waveDir);

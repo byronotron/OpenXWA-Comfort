@@ -1128,6 +1128,9 @@ void XwaSnapshot_BeginTick(void);
 /* Flip the write slot into Current (previous Current becomes
  * Previous). Logs once per tick when records were dropped. */
 void XwaSnapshot_Commit(void);
+/* The world jumped (a save state restored): the next committed snapshot has
+ * no previous one to blend or blur from. */
+void XwaSnapshot_NoteDiscontinuity(void);
 
 const XwaSnapshot* XwaSnapshot_Current(void);
 const XwaSnapshot* XwaSnapshot_Previous(void);

@@ -25,6 +25,7 @@
 #include "xwa/frontend/frontend_display.h"
 #include "xwa/frontend/frontend_flight.h"
 #include "xwa/frontend/frontend_screen.h"
+#include "xwa_runtime/runtime/flight_checkpoints.h"
 #include "xwa/frontend/frontend_input.h"
 #include "xwa/frontend/frontend_resources.h"
 #include "xwa/input/forcefeedback.h"
@@ -321,6 +322,13 @@ static void XwaPort_UpdateVrFlightButtons(int enabled) {
 	while (Aeron_XrPollButton(&button, &shifted)) {
 		uint16_t key;
 		if ((int)button < 0 || (int)button >= AERON_XR_BUTTON_COUNT) {
+			continue;
+		}
+		/* The craft is lost and a retry from a checkpoint is offered: A
+		 * retries, B carries on to the mission's end. */
+		if (!shifted && (button == AERON_XR_BUTTON_A || button == AERON_XR_BUTTON_B) &&
+			XwaFlightCheckpoints_OfferAnswer(button == AERON_XR_BUTTON_A)) {
+			XwaPort_VrButtonTick();
 			continue;
 		}
 		if (button == AERON_XR_BUTTON_LEFT_TRIGGER && !shifted && chord_offered) {

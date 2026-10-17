@@ -445,6 +445,11 @@ void Flight_AdvanceOneStep(int targetTimestamp);
 void Flight_StepSimToTime(int targetTimestamp);
 #ifdef XWA_MODERN
 void Flight_ModernResetHighRateIntegration(void);
+#ifdef XWA_MODERN
+#include "xwa/util/savestate_region.h"
+/* flight.c's file-static simulation state, for in-mission save states. */
+void Flight_ModernSaveStateRegions(XwaSaveStateRegionFn add, void* ctx);
+#endif
 /* Complete a pending nonblocking options modal before flight timing resumes. */
 int Flight_ContinueOptionsModal(void);
 #endif

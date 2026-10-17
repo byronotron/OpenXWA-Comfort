@@ -175,6 +175,15 @@ uint16_t GameRand2(void) {
 	return result;
 }
 
+#ifdef XWA_MODERN
+void GameRand_SaveStateRegions(XwaSaveStateRegionFn add, void* ctx) {
+	add(ctx, &g_randSeed, sizeof g_randSeed, "g_randSeed");
+	add(ctx, &g_randSeed2, sizeof g_randSeed2, "g_randSeed2");
+	add(ctx, &g_savedRandSeed, sizeof g_savedRandSeed, "g_savedRandSeed");
+	add(ctx, &g_asteroidFieldRandSeed, sizeof g_asteroidFieldRandSeed, "g_asteroidFieldRandSeed");
+}
+#endif
+
 // FUNCTION: XWA 0x494E70
 uint32_t MATH2_mphconvert(int16_t speed, uint16_t divisor) {
 	uint32_t scaled;

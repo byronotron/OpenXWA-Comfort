@@ -3772,7 +3772,16 @@ void Player_StartPostDestructionState(unsigned int playerIdx, unsigned int kille
 	}
 
 	g_players[playerIdx].regionSessionId = 1;
+#ifdef XWA_MODERN
+	if ((int)playerIdx == g_localPlayer) {
+		++g_localPlayerDestroyedCount; /* in-mission checkpoints offer a retry */
+	}
+#endif
 }
+
+#ifdef XWA_MODERN
+int g_localPlayerDestroyedCount;
+#endif
 
 // FUNCTION: XWA 0x505AF0
 int Player_AppendKillMessageActorName(unsigned int msgSlot, char* nameBuffer, int objIdx) {

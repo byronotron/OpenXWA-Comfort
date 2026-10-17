@@ -18,6 +18,11 @@ uint16_t GameRand_GetSavedSeed(void);
 uint16_t GameRand(void);
 uint16_t GameRandRange(uint16_t modulus);
 uint16_t GameRand2(void);
+#ifdef XWA_MODERN
+#include "xwa/util/savestate_region.h"
+/* The generators' state, whole (the high words feed the next value too). */
+void GameRand_SaveStateRegions(XwaSaveStateRegionFn add, void* ctx);
+#endif
 
 #ifdef __cplusplus
 }

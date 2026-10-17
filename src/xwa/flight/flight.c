@@ -215,6 +215,12 @@ static void FlightDebug_LogJoystickIntegration(const ModernJoystickIntegrationTr
 				  (unsigned int)trace->newPitch, (unsigned int)trace->newYaw, (unsigned int)trace->newRoll);
 }
 
+void Flight_ModernSaveStateRegions(XwaSaveStateRegionFn add, void* ctx) {
+	add(ctx, g_modernTurretAngleRemainders, sizeof g_modernTurretAngleRemainders, "g_modernTurretAngleRemainders");
+	add(ctx, g_modernMapCameraStepRemainders, sizeof g_modernMapCameraStepRemainders,
+		"g_modernMapCameraStepRemainders");
+}
+
 void Flight_ModernResetHighRateIntegration(void) {
 	memset(g_modernTurretAngleRemainders, 0, sizeof(g_modernTurretAngleRemainders));
 	memset(g_modernMapCameraStepRemainders, 0, sizeof(g_modernMapCameraStepRemainders));

@@ -226,6 +226,8 @@ set(XWA_RUNTIME_SOURCES
     src/xwa_runtime/net/netplay_game.c
     src/xwa_runtime/net/netplay_screens.c
     src/xwa_runtime/runtime/flight_pause_task.c
+    src/xwa_runtime/runtime/flight_savestate.c
+    src/xwa_runtime/runtime/flight_checkpoints.c
     src/xwa_runtime/runtime/flight_task.c
     src/xwa_runtime/runtime/frontend_task.c
     src/xwa_runtime/runtime/movie_task.c
@@ -628,6 +630,8 @@ set(XWA_FORMAT_HEADERS
     src/xwa/xwa.h
     src/xwa/xwa_options.h
     src/xwa_runtime/runtime/flight_pause_task.h
+    src/xwa_runtime/runtime/flight_savestate.h
+    src/xwa_runtime/runtime/flight_checkpoints.h
     src/xwa_runtime/runtime/flight_task.h
     src/xwa_runtime/runtime/frontend_task.h
     src/xwa_runtime/timing/host_clock.h

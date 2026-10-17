@@ -10,6 +10,8 @@ extern "C" {
 void XwaTime_Reset(void);
 void XwaTime_AdvanceHostClock(int32_t delta_us);
 uint64_t XwaTime_GetElapsedUs(void);
+/* Tests only (replaying from a save state): sets the host clock. */
+void XwaTime_SetElapsedUsForTesting(uint64_t elapsed_us);
 /* Returns host elapsed milliseconds, matching the unit of Win32 GetTickCount. */
 uint32_t XwaTime_GetElapsedTicks(void);
 uint64_t XwaTime_GetLegacyTimerIntervalUs(uint32_t intervalMs);

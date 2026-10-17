@@ -42,6 +42,7 @@ static XwaSnapshot g_slots[3];
 static int g_write_slot; /* index into g_slots */
 static int g_current_slot = -1;
 static int g_previous_slot = -1;
+static int g_discontinuity;
 static uint64_t g_tick_index;
 static uint32_t g_z_counter;
 static XwaEmitTarget g_emit_target = XWA_EMIT_TARGET_MAIN;
@@ -430,6 +431,10 @@ void XwaSnapshot_Commit(void) {
 	snapshot_maybe_dump(s);
 	g_previous_slot = g_current_slot;
 	g_current_slot = g_write_slot;
+	if (g_discontinuity) {
+		g_discontinuity = 0;
+		g_previous_slot = g_current_slot; /* nothing to blend from */
+	}
 	/* Next free slot: the one that is neither current nor previous. */
 	for (int i = 0; i < 3; i++) {
 		if (i != g_current_slot && i != g_previous_slot) {
@@ -439,6 +444,8 @@ void XwaSnapshot_Commit(void) {
 	}
 	g_tick_index++;
 }
+
+void XwaSnapshot_NoteDiscontinuity(void) { g_discontinuity = 1; }
 
 const XwaSnapshot* XwaSnapshot_Current(void) { return g_current_slot >= 0 ? &g_slots[g_current_slot] : 0; }
 

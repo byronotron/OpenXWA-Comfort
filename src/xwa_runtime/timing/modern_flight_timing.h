@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "xwa/util/savestate_region.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -18,6 +20,8 @@ typedef struct XwaModernAiCadence {
 } XwaModernAiCadence;
 
 void XwaModernFlightTiming_Configure(int requested_step_ticks);
+/* The cadence accumulators, for in-mission save states. */
+void XwaModernFlightTiming_SaveStateRegions(XwaSaveStateRegionFn add, void* ctx);
 void XwaModernFlightTiming_BeginSession(int player_count);
 void XwaModernFlightTiming_EndSession(void);
 int XwaModernFlightTiming_StepTicks(void);
