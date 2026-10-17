@@ -5298,6 +5298,12 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 					Aeron_XrStereoCommitPanelLayer(card ? AERON_XR_PANEL_CARD2 : AERON_XR_PANEL_CARD, quads, n);
 				}
 			}
+			/* Labels beside the controllers the player looks at. */
+			{
+				AeronXrPanel labels[2];
+				const int n = XwaVrConsole_LabelsFrame(cmd, xr_frame.views, labels);
+				Aeron_XrStereoCommitPanelLayer(AERON_XR_PANEL_LABELS, labels, n);
+			}
 			/* Faint beams from the hands to where they point on the console. */
 			if (xr_frame.beam_target) {
 				AeronXrPanel beams[2];

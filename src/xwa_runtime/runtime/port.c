@@ -388,9 +388,12 @@ void XwaPort_GetVrConsoleState(XwaVrConsoleState* out) {
 	memset(out, 0, sizeof *out);
 	out->mission_serial = mission_serial;
 	out->hud_argb = g_hudColors[0];
+	out->offer_active = flight_active && XwaFlightCheckpoints_Offering();
+	out->map_open = XwaPort_VrMapOpen();
 	if (!craft) {
 		return;
 	}
+	out->chord_offered = XwaPort_VrChordEligible(&out->chord_hyper);
 	objectType = g_objectTable[(uint16_t)player->objectIndex].objectType;
 	out->valid = 1;
 	out->laser_level = craft->laserRedirect % 5;

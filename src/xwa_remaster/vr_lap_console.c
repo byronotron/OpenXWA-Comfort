@@ -9,6 +9,7 @@
 #include "aeron/scene/text2d.h"
 #include "aeron/vfs.h"
 #include "xwa_remaster/vr_gloves.h"
+#include "xwa_remaster/vr_controllers.h"
 #include "xwa_remaster/vr_flight_stick.h"
 #include "xwa_runtime/runtime/vr_buttons.h"
 
@@ -1653,6 +1654,7 @@ static int vc_ensure(void);
 static int vc_enabled(void);
 static int vc_card_enabled(void);
 static int vw_enabled(void);
+static int lb_enabled(void);
 
 void XwaVrConsole_BeginFrame(float dt_seconds) {
 	s_vc.dt = dt_seconds > 0.0f && dt_seconds < 0.25f ? dt_seconds : 0.0f;
@@ -1664,8 +1666,8 @@ void XwaVrConsole_BeginFrame(float dt_seconds) {
 	}
 	/* Load the font here, between frames, rather than while the flight
 	 * renderer is recording its command buffer. */
-	if (s_vc.state.valid && s_vc.font_state == 0 && (vc_enabled() || vc_card_enabled() || vw_enabled()) &&
-		Aeron_XrIsPresenting()) {
+	if ((s_vc.state.valid || s_vc.state.offer_active) && s_vc.font_state == 0 &&
+		(vc_enabled() || vc_card_enabled() || vw_enabled() || lb_enabled()) && Aeron_XrIsPresenting()) {
 		vc_ensure();
 	}
 }
@@ -2483,6 +2485,473 @@ static int vw_frame(AeronCommandBuffer* cmd, int width, int height, const AeronX
 	return n;
 }
 
+/* ---- Controller labels ----------------------------------------------------- */
+
+/* With the controller models shown (Hands: Controllers), looking at a
+ * controller with its buttons turned towards you shows what each control
+ * does: a label per control beside it, a leader line to a dot on the
+ * control. Each controller has a sheet of its own (a quad facing the eyes
+ * through the middle of its button face); both share the labels' layer,
+ * the left one in its left half. Thumbstick directions are left out. */
+#define LB_SHEET_H_M 0.30f
+/* Looked at: near the middle of the view, raised towards the face (a
+ * hand resting in the lap is farther), buttons turned towards the eyes. */
+#define LB_ENTER_DEG 20.0f
+#define LB_EXIT_DEG 28.0f
+#define LB_ENTER_DIST_M 0.58f
+#define LB_EXIT_DIST_M 0.72f
+#define LB_ENTER_FACING 0.50f
+#define LB_EXIT_FACING 0.25f
+#define LB_DWELL_S 0.30f
+#define LB_FADE_IN_S 0.15f
+#define LB_FADE_OUT_S 0.25f
+
+typedef struct LbEntry {
+	int ctl;
+	const char* control; /* "TRIGGER", "B", ... */
+	char action[48];
+	char key[16];
+	const char* more; /* a second, smaller line, or NULL */
+	int pressed;
+	float ax, ay; /* the control on the sheet, px */
+	int side;     /* +1 right of the controller, -1 left */
+	float x, y, w, h;
+} LbEntry;
+
+typedef struct LbSheet {
+	int visible;
+	AeronXrPanel pose;
+	float c[3], ax[3], ay[3], az[3], eye[3];
+	float w_m, h_m, w_px, h_px;
+	LbEntry e[XWA_VR_CTL_COUNT];
+	int n;
+} LbSheet;
+
+static struct {
+	float alpha[2], dwell[2];
+	int on[2];
+	LbSheet sheet[2];
+	AeronDrawList2D* list[2];
+	int logged;
+} s_lb;
+
+static void lb_norm(float v[3]) {
+	const float l = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+	if (l > 1e-9f) {
+		v[0] /= l;
+		v[1] /= l;
+		v[2] /= l;
+	}
+}
+
+static int lb_enabled(void) {
+	const char* env = getenv("XWA_XR_CONTROLLER_LABELS");
+	return XwaVrHands_Mode() == XWA_VR_HANDS_CONTROLLERS && !(env && env[0] == '0');
+}
+
+/* "next target" -> "Next target". */
+static void lb_set_action(LbEntry* e, const char* text) {
+	snprintf(e->action, sizeof e->action, "%s", text ? text : "");
+	e->action[0] = (char)toupper((unsigned char)e->action[0]);
+}
+
+static int lb_from_binding(LbEntry* e, AeronXrButton button) {
+	const uint16_t key = XwaVrButtons_Binding(button)->plain;
+	if (key == 0u /* KEY_NONE */) {
+		return 0;
+	}
+	const char* action = XwaVrButtons_KeyAction(key);
+	lb_set_action(e, action ? action : XwaVrButtons_KeyName(key));
+	if (action) {
+		snprintf(e->key, sizeof e->key, "%s", XwaVrButtons_KeyName(key));
+	}
+	return 1;
+}
+
+/* The labels of physical controller `hand` (0 left, 1 right) now. */
+static int lb_entries(int hand, const AeronXrHand* xh, LbEntry* out) {
+	const XwaVrConsoleState* st = &s_vc.state;
+	const int right_role = Aeron_XrLeftHanded() ? !hand : hand;
+	const char* chord = !st->chord_offered ? NULL : st->chord_hyper ? "both triggers: hyperspace" : "both triggers: land";
+	int n = 0;
+	for (int ctl = 0; ctl < XWA_VR_CTL_COUNT; ++ctl) {
+		LbEntry* e = &out[n];
+		memset(e, 0, sizeof *e);
+		e->ctl = ctl;
+		int ok = 1;
+		switch (ctl) {
+			case XWA_VR_CTL_TRIGGER:
+				e->control = "TRIGGER";
+				if (right_role) {
+					lb_set_action(e, "Fire");
+				} else {
+					ok = lb_from_binding(e, AERON_XR_BUTTON_LEFT_TRIGGER);
+				}
+				e->more = chord;
+				e->pressed = xh->trigger > 0.5f;
+				break;
+			case XWA_VR_CTL_GRIP:
+				e->control = "GRIP";
+				if (right_role) {
+					lb_set_action(e, XWA_VR_RIGHT_GRIP_ACTION);
+				} else if (vw_enabled()) {
+					lb_set_action(e, "Quick wheel");
+					e->more = "hold, point, pull the trigger";
+				} else {
+					ok = 0;
+				}
+				e->pressed = xh->grip > 0.5f;
+				break;
+			case XWA_VR_CTL_UPPER:
+				e->control = hand ? "B" : "Y";
+				if (right_role && st->offer_active) {
+					lb_set_action(e, "No, carry on");
+				} else if (right_role && st->map_open) {
+					lb_set_action(e, "Leave the map");
+				} else {
+					ok = lb_from_binding(e, right_role ? AERON_XR_BUTTON_B : AERON_XR_BUTTON_Y);
+				}
+				e->pressed = (xh->buttons & AERON_XR_HAND_BUTTON_UPPER) != 0;
+				break;
+			case XWA_VR_CTL_LOWER:
+				e->control = hand ? "A" : "X";
+				if (right_role && st->offer_active) {
+					lb_set_action(e, "Load quick save");
+				} else {
+					ok = lb_from_binding(e, right_role ? AERON_XR_BUTTON_A : AERON_XR_BUTTON_X);
+				}
+				e->pressed = (xh->buttons & AERON_XR_HAND_BUTTON_LOWER) != 0;
+				break;
+			case XWA_VR_CTL_STICK:
+				e->control = "STICK CLICK";
+				ok = lb_from_binding(e, right_role ? AERON_XR_BUTTON_RIGHT_STICK : AERON_XR_BUTTON_LEFT_STICK);
+				e->pressed = (xh->buttons & AERON_XR_HAND_BUTTON_STICK) != 0;
+				break;
+			case XWA_VR_CTL_MENU:
+				/* The left menu button; the right one is the headset's. */
+				e->control = "MENU";
+				ok = hand == 0;
+				lb_set_action(e, "Pause");
+				e->pressed = (xh->buttons & AERON_XR_HAND_BUTTON_MENU) != 0;
+				break;
+			default: {
+				/* The thumb rest starts voice commands (where it has one). */
+				const char* voice = getenv("XWA_XR_VOICE");
+				e->control = "THUMB REST";
+				ok = Aeron_XrThumbrestTouch(hand) >= 0 &&
+					 !(voice && (voice[0] == '0' || voice[0] == 'o' || voice[0] == 'O'));
+				lb_set_action(e, voice && (voice[0] == 'h' || voice[0] == 'H') ? "Hold: voice command"
+																			   : "Double-tap: voice command");
+				e->pressed = (xh->buttons & AERON_XR_HAND_BUTTON_THUMBREST) != 0;
+				break;
+			}
+		}
+		if (ok && e->action[0]) {
+			++n;
+		}
+	}
+	return n;
+}
+
+/* Whether the player looks at controller `hand` (its buttons towards
+ * them), held for a moment; eases the labels' alpha. */
+static void lb_update_gaze(int hand, const XwaVrControllerView* v, const AeronXrHand* xh, const float eye[3],
+						   const float fwd[3]) {
+	float to[3] = { v->face_center[0] - eye[0], v->face_center[1] - eye[1], v->face_center[2] - eye[2] };
+	const float dist = sqrtf(vc_dot(to, to));
+	int look = 0;
+	const int on = s_lb.on[hand];
+	if (dist > 0.05f && dist < (on ? LB_EXIT_DIST_M : LB_ENTER_DIST_M)) {
+		for (int k = 0; k < 3; ++k) {
+			to[k] /= dist;
+		}
+		const float angle = acosf(fmaxf(-1.0f, fminf(1.0f, vc_dot(fwd, to)))) * 180.0f / 3.14159265f;
+		const float facing = -vc_dot(v->face_normal, to);
+		look = angle < (on ? LB_EXIT_DEG : LB_ENTER_DEG) && facing > (on ? LB_EXIT_FACING : LB_ENTER_FACING);
+	}
+	/* Not while the hand is busy: firing, gripping (the stick, a panel, the
+	 * wheel), pointing at the console. */
+	int busy = xh->trigger > 0.35f || xh->grip > 0.6f || (s_vw.open && s_vw.hand == hand) ||
+			   (s_vc.drawn && s_vc.hands[hand].cursor != 0) || s_vc.lap.grab_hand == hand + 1;
+	for (int c = 0; c < VC_CARDS; ++c) {
+		busy |= s_vc.cards[c].place.grab_hand == hand + 1;
+	}
+	if (look && !busy) {
+		s_lb.dwell[hand] += s_vc.dt;
+		if (s_lb.dwell[hand] >= LB_DWELL_S) {
+			s_lb.on[hand] = 1;
+		}
+	} else {
+		s_lb.dwell[hand] = 0.0f;
+		s_lb.on[hand] = 0;
+	}
+	const float goal = s_lb.on[hand] ? 1.0f : 0.0f;
+	const float step = s_vc.dt / (goal > s_lb.alpha[hand] ? LB_FADE_IN_S : LB_FADE_OUT_S);
+	s_lb.alpha[hand] = goal > s_lb.alpha[hand] ? fminf(goal, s_lb.alpha[hand] + step)
+											   : fmaxf(goal, s_lb.alpha[hand] - step);
+}
+
+/* A LOCAL point seen from the eye, on the sheet's plane: sheet px. */
+static void lb_project(const LbSheet* s, const float p[3], float* px, float* py) {
+	const float d[3] = { p[0] - s->eye[0], p[1] - s->eye[1], p[2] - s->eye[2] };
+	const float ce[3] = { s->c[0] - s->eye[0], s->c[1] - s->eye[1], s->c[2] - s->eye[2] };
+	const float dn = vc_dot(d, s->az);
+	const float t = fabsf(dn) > 1e-5f ? vc_dot(ce, s->az) / dn : 1.0f;
+	const float h[3] = { s->eye[0] + d[0] * t - s->c[0], s->eye[1] + d[1] * t - s->c[1],
+						 s->eye[2] + d[2] * t - s->c[2] };
+	*px = (vc_dot(h, s->ax) / s->w_m + 0.5f) * s->w_px;
+	*py = (0.5f - vc_dot(h, s->ay) / s->h_m) * s->h_px;
+}
+
+static float lb_text_width(const char* text, float size) {
+	if (s_vc.font_state != 1 || !text || !text[0]) {
+		return 0.0f;
+	}
+	AeronTextStyle probe;
+	memset(&probe, 0, sizeof probe);
+	probe.font = &s_vc.font;
+	probe.scale = size / (float)s_vc.font.cell_h;
+	return AeronText_MeasureWidth(&probe, text, -1);
+}
+
+#define LB_CONTROL_PX 15.0f
+#define LB_ACTION_PX 24.0f
+#define LB_KEY_PX 18.0f
+#define LB_MORE_PX 15.0f
+
+/* Places the sheet and its labels for controller `hand`. */
+static void lb_layout(LbSheet* s, int hand, const XwaVrControllerView* v, const float eye[3], float w_px,
+					  float h_px) {
+	memcpy(s->c, v->face_center, sizeof s->c);
+	memcpy(s->eye, eye, sizeof s->eye);
+	s->h_m = LB_SHEET_H_M;
+	s->w_m = LB_SHEET_H_M * w_px / h_px;
+	s->w_px = w_px;
+	s->h_px = h_px;
+	/* Facing the eye, kept level. */
+	float z[3] = { eye[0] - s->c[0], eye[1] - s->c[1], eye[2] - s->c[2] };
+	lb_norm(z);
+	float x[3] = { z[2], 0.0f, -z[0] };
+	if (vc_dot(x, x) < 1e-6f) {
+		x[0] = 1.0f;
+		x[2] = 0.0f;
+	}
+	lb_norm(x);
+	const float y[3] = { z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0] };
+	memcpy(s->ax, x, sizeof x);
+	memcpy(s->ay, y, sizeof y);
+	memcpy(s->az, z, sizeof z);
+	memset(&s->pose, 0, sizeof s->pose);
+	memcpy(s->pose.position, s->c, sizeof s->c);
+	vc_basis_quat(x, y, z, s->pose.orientation);
+	s->pose.size[0] = s->w_m;
+	s->pose.size[1] = s->h_m;
+	/* The controller's footprint: labels go beside it. */
+	float x0 = 1e9f, x1 = -1e9f;
+	for (int i = 0; i < v->outline_count; ++i) {
+		float px, py;
+		lb_project(s, v->outline[i], &px, &py);
+		x0 = fminf(x0, px);
+		x1 = fmaxf(x1, px);
+	}
+	for (int i = 0; i < s->n; ++i) {
+		float px, py;
+		lb_project(s, v->anchor[s->e[i].ctl], &px, &py);
+		s->e[i].ax = px;
+		s->e[i].ay = py;
+		x0 = fminf(x0, px);
+		x1 = fmaxf(x1, px);
+	}
+	/* Outer side: away from the other hand; stick and menu inside. */
+	const int outer = hand ? 1 : -1;
+	for (int i = 0; i < s->n; ++i) {
+		LbEntry* e = &s->e[i];
+		e->side = e->ctl == XWA_VR_CTL_STICK || e->ctl == XWA_VR_CTL_MENU ? -outer : outer;
+		const float aw = lb_text_width(e->action, LB_ACTION_PX) + (e->key[0] ? lb_text_width(e->key, LB_KEY_PX) + 12.0f : 0.0f);
+		const float tw = fmaxf(fmaxf(aw, lb_text_width(e->control, LB_CONTROL_PX)), lb_text_width(e->more, LB_MORE_PX));
+		e->w = tw + 32.0f;
+		e->h = e->more ? 78.0f : 60.0f;
+		const float margin = 6.0f;
+		if (e->side > 0) {
+			e->x = fminf(x1 + 46.0f, w_px - margin - e->w);
+		} else {
+			e->x = fmaxf(x0 - 46.0f - e->w, margin);
+		}
+	}
+	/* Each column top to bottom in the order of its controls, no overlaps. */
+	for (int side = -1; side <= 1; side += 2) {
+		int order[XWA_VR_CTL_COUNT], m = 0;
+		for (int i = 0; i < s->n; ++i) {
+			if (s->e[i].side == side) {
+				int k = m++;
+				while (k > 0 && s->e[order[k - 1]].ay > s->e[i].ay) {
+					order[k] = order[k - 1];
+					--k;
+				}
+				order[k] = i;
+			}
+		}
+		float bottom = 6.0f - 8.0f;
+		for (int k = 0; k < m; ++k) {
+			LbEntry* e = &s->e[order[k]];
+			e->y = fmaxf(e->ay - e->h * 0.5f, bottom + 8.0f);
+			bottom = e->y + e->h;
+		}
+		if (m > 0 && bottom > h_px - 6.0f) {
+			const float shift = bottom - (h_px - 6.0f);
+			for (int k = 0; k < m; ++k) {
+				s->e[order[k]].y -= shift;
+			}
+		}
+		for (int k = 0; k < m; ++k) {
+			LbEntry* e = &s->e[order[k]];
+			e->y = fmaxf(e->y, 6.0f);
+		}
+	}
+}
+
+static void lb_draw_sheet(const LbSheet* s) {
+	const float transparent[4] = { 0, 0, 0, 0 };
+	vc_hud_colors();
+	/* Leader lines and dots first, the labels over them. */
+	for (int i = 0; i < s->n; ++i) {
+		const LbEntry* e = &s->e[i];
+		float line[4], dot[4], rim[4];
+		const float ex = e->side > 0 ? e->x : e->x + e->w, ey = e->y + e->h * 0.5f;
+		const float elbow = ex - (float)e->side * 26.0f;
+		vc_pma(line, VC_HUD, 0.85f);
+		AeronDrawList_AddLine(s_vc.cur_list, e->ax, e->ay, elbow, ey, 2.5f, line, AERON_BLIT2D_BLEND_PMA, NULL);
+		AeronDrawList_AddLine(s_vc.cur_list, elbow, ey, ex, ey, 2.5f, line, AERON_BLIT2D_BLEND_PMA, NULL);
+		vc_pma(dot, VC_HUD, 1.0f);
+		vc_pma(rim, 1.0f, 1.0f, 1.0f, 0.95f);
+		vc_rrect(e->ax - 7.0f, e->ay - 7.0f, 14.0f, 14.0f, 7.0f, 2.0f, 1.0f, dot, rim);
+	}
+	for (int i = 0; i < s->n; ++i) {
+		const LbEntry* e = &s->e[i];
+		float fill[4], border[4], glow[4];
+		vc_pma(glow, VC_HUD, e->pressed ? 0.6f : 0.3f);
+		vc_rrect(e->x - 5.0f, e->y - 5.0f, e->w + 10.0f, e->h + 10.0f, 16.0f, 5.0f, 9.0f, transparent, glow);
+		vc_pma(fill, VC_HUD_DARK, e->pressed ? 0.55f : 0.32f);
+		if (e->pressed) {
+			vc_pma(border, 1.0f, 1.0f, 1.0f, 1.0f);
+		} else {
+			vc_pma(border, VC_HUD, 0.8f);
+		}
+		vc_rrect(e->x, e->y, e->w, e->h, 12.0f, 2.0f, 1.0f, fill, border);
+		vc_text(e->x + 16.0f, e->y + 6.0f, e->control, LB_CONTROL_PX, 0, VC_HUD, 0.95f);
+		vc_text(e->x + 16.0f, e->y + 26.0f, e->action, LB_ACTION_PX, 0, 0.90f, 0.98f, 0.93f, 1.0f);
+		if (e->key[0]) {
+			vc_text(e->x + 16.0f + lb_text_width(e->action, LB_ACTION_PX) + 12.0f, e->y + 31.0f, e->key, LB_KEY_PX, 0,
+					VC_HUD_PALE, 0.75f);
+		}
+		if (e->more) {
+			vc_text(e->x + 16.0f, e->y + 56.0f, e->more, LB_MORE_PX, 0, VC_HUD_PALE, 0.85f);
+		}
+	}
+}
+
+int XwaVrConsole_LabelsFrame(AeronCommandBuffer* cmd, const AeronXrView views[2], AeronXrPanel out[2]) {
+	if (!cmd || !views || !out || !lb_enabled() || (!s_vc.state.valid && !s_vc.state.offer_active) ||
+		s_vc.font_state != 1 || !vc_ensure()) {
+		s_lb.alpha[0] = s_lb.alpha[1] = 0.0f;
+		s_lb.on[0] = s_lb.on[1] = 0;
+		s_lb.dwell[0] = s_lb.dwell[1] = 0.0f;
+		return 0;
+	}
+	static const float minus_z[3] = { 0.0f, 0.0f, -1.0f };
+	float eye[3], fwd[3];
+	for (int k = 0; k < 3; ++k) {
+		eye[k] = 0.5f * (views[0].position[k] + views[1].position[k]);
+	}
+	vc_rotate(views[0].orientation, minus_z, fwd);
+	XwaVrControllerView view[2];
+	AeronXrHand xh[2];
+	int any = 0;
+	for (int h = 0; h < 2; ++h) {
+		LbSheet* s = &s_lb.sheet[h];
+		s->visible = 0;
+		if (!XwaVrControllers_View(h, &view[h]) || !Aeron_XrGetHand(h, &xh[h])) {
+			s_lb.alpha[h] = 0.0f;
+			s_lb.on[h] = 0;
+			s_lb.dwell[h] = 0.0f;
+			continue;
+		}
+		lb_update_gaze(h, &view[h], &xh[h], eye, fwd);
+		if (s_lb.alpha[h] > 0.01f) {
+			s->visible = 1;
+			any = 1;
+		}
+	}
+	if (!any) {
+		return 0;
+	}
+	int tw = 0, th = 0;
+	AeronRenderTarget* target = Aeron_XrStereoPanelTarget(AERON_XR_PANEL_LABELS, &tw, &th);
+	if (!target || tw < 4 || th < 4) {
+		return 0;
+	}
+	const int sw = tw / 2, sh = th;
+	for (int e = 0; e < 2; ++e) {
+		if (!s_lb.list[e] && !(s_lb.list[e] = AeronDrawList_Create(0))) {
+			return 0;
+		}
+	}
+	const float lap_alpha = s_vc.alpha;
+	for (int h = 0; h < 2; ++h) {
+		LbSheet* s = &s_lb.sheet[h];
+		AeronDrawList_Begin(s_lb.list[h], NULL, sw, sh, h == 0 ? AERON_DRAWLIST2D_CLEAR : AERON_DRAWLIST2D_LOAD,
+							NULL);
+		AeronDrawList_SetOrigin(s_lb.list[h], h * sw, 0);
+		if (!s->visible) {
+			continue;
+		}
+		s->n = lb_entries(h, &xh[h], s->e);
+		lb_layout(s, h, &view[h], eye, (float)sw, (float)sh);
+		s_vc.cur_list = s_lb.list[h];
+		s_vc.alpha = s_lb.alpha[h];
+		lb_draw_sheet(s);
+	}
+	s_vc.alpha = lap_alpha;
+	for (int e = 0; e < 2; ++e) {
+		AeronDrawList_SetTarget(s_lb.list[e], target);
+		if (!AeronDrawList_Prepare(s_lb.list[e], cmd)) {
+			return 0;
+		}
+	}
+	AeronRenderPass* pass = Aeron_BeginRenderPass(&(AeronRenderPassDesc) {
+		.color_target = target,
+		.clear_color = 1,
+		.command_buffer = cmd,
+		.debug_label = "VR controller labels",
+	});
+	if (!pass) {
+		return 0;
+	}
+	for (int e = 0; e < 2; ++e) {
+		AeronDrawList_RenderIntoPass(s_lb.list[e], cmd, pass, target);
+	}
+	Aeron_EndRenderPass(pass);
+	int n = 0;
+	for (int h = 0; h < 2; ++h) {
+		if (!s_lb.sheet[h].visible) {
+			continue;
+		}
+		out[n] = s_lb.sheet[h].pose;
+		out[n].rect[0] = h * sw;
+		out[n].rect[1] = 0;
+		out[n].rect[2] = sw;
+		out[n].rect[3] = sh;
+		out[n].eye = 0;
+		++n;
+	}
+	if (!s_lb.logged) {
+		Aeron_LogInfo("xwa.remaster", "controller labels: %dx%d per controller, %.2f m tall", sw, sh,
+					  (double)LB_SHEET_H_M);
+		s_lb.logged = 1;
+	}
+	return n;
+}
+
 /* ---- Button card ------------------------------------------------------- */
 
 /* The controller layout in flight: Quest Touch controllers in outline,
@@ -3007,8 +3476,12 @@ void XwaVrConsole_Shutdown(void) {
 		if (s_vw.list[e]) {
 			AeronDrawList_Destroy(s_vw.list[e]);
 		}
+		if (s_lb.list[e]) {
+			AeronDrawList_Destroy(s_lb.list[e]);
+		}
 	}
 	memset(&s_vw, 0, sizeof s_vw);
+	memset(&s_lb, 0, sizeof s_lb);
 	for (int i = 0; i < AERON_XR_PANEL_COUNT; ++i) {
 		if (s_base[i].list) {
 			AeronDrawList_Destroy(s_base[i].list);

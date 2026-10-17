@@ -31,6 +31,12 @@ void XwaVrGloves_Submit(AeronScene3D* scene, AeronCommandBuffer* cmd, const floa
 /* Hides the gloves this frame (not in a stereo cockpit view). */
 void XwaVrGloves_Idle(void);
 
+/* What the player's hands are (VR Options > Hands, XWA_XR_HANDS): the
+ * pilot gloves, the controllers (vr_controllers.h; the functions here then
+ * draw and describe them instead), or nothing. */
+enum { XWA_VR_HANDS_OFF = 0, XWA_VR_HANDS_GLOVES = 1, XWA_VR_HANDS_CONTROLLERS = 2 };
+int XwaVrHands_Mode(void);
+
 /* The pose of the last submitted frame, in OpenXR LOCAL space (metres). */
 typedef struct XwaVrGloveCapsule {
 	float a[3], b[3];

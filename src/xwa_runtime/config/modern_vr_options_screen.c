@@ -35,7 +35,8 @@ enum {
 	VR_SHADOWS,
 	VR_CONSOLE,
 	VR_WHEEL,
-	VR_GLOVES,
+	VR_HANDS,
+	VR_CONTROLLER_LABELS,
 	VR_FLIGHT_STICK,
 	VR_STICK_TWIST,
 	VR_INVERT_PITCH,
@@ -68,6 +69,8 @@ static const char* const k_scale_values[] = { "0.6", "0.7", "0.75", "0.8", "0.85
 static const char* const k_toggle_texts[] = { "Off", "On" };
 static const char* const k_toggle_values[] = { "0", "1" };
 static const char* const k_hand_texts[] = { "Right-handed", "Left-handed" };
+static const char* const k_hands_texts[] = { "Pilot Gloves", "Controllers", "Off" };
+static const char* const k_hands_values[] = { "gloves", "controllers", "off" };
 static const char* const k_voice_texts[] = { "Off", "Double-tap Thumb Rest", "Hold Thumb Rest" };
 static const char* const k_voice_values[] = { "0", "doubletap", "hold" };
 static const char* const k_res_texts[] = { "70%", "80%", "90%", "100%", "110%", "120%" };
@@ -99,7 +102,10 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "XWA_XR_CONSOLE", "Lap Console", k_toggle_texts, k_toggle_values, 2, 1, 88, 0 },
 	/* Held open with the grip of the hand that has the left controls. */
 	{ "XWA_XR_WHEEL", "Quick Wheel (grip)", k_toggle_texts, k_toggle_values, 2, 1, 67, 0 },
-	{ "XWA_XR_GLOVES", "Pilot Gloves", k_toggle_texts, k_toggle_values, 2, 1, 89, 0 },
+	/* What your hands are: the gloves or the controllers (with labels of
+	 * what their buttons do when you look at them). */
+	{ "XWA_XR_HANDS", "Hands", k_hands_texts, k_hands_values, 3, 1, 89, 0 },
+	{ "XWA_XR_CONTROLLER_LABELS", "Controller Button Labels", k_toggle_texts, k_toggle_values, 2, 1, 66, 0 },
 	{ "XWA_XR_FLIGHT_STICK", "Flight Stick", k_toggle_texts, k_toggle_values, 2, 1, 94, 0 },
 	{ "XWA_XR_STICK_TWIST", "Stick Twist Rolls", k_toggle_texts, k_toggle_values, 2, 0, 96, 0 },
 	{ "AERON_XR_INVERT_PITCH", "Invert Thumbstick Pitch", k_toggle_texts, k_toggle_values, 2, 0, 97, 0 },
@@ -139,7 +145,8 @@ static int vr_index_from_env(const VrSetting* setting) {
 		return best;
 	}
 	if (setting->values == k_layout_values || setting->values == k_voice_values || setting->values == k_fov_values ||
-		setting->values == k_env_values || setting->values == k_shading_values || setting->values == k_bloom_values) {
+		setting->values == k_env_values || setting->values == k_shading_values || setting->values == k_bloom_values ||
+		setting->values == k_hands_values) {
 		for (int i = 0; i < setting->count; i++) {
 			if (SDL_strcasecmp(env, setting->values[i]) == 0) {
 				return i;

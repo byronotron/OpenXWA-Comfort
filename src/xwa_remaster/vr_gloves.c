@@ -8,6 +8,7 @@
  * (+-0.03, -0.05, 0.15) m. */
 
 #include "xwa_remaster/vr_gloves.h"
+#include "xwa_remaster/vr_controllers.h"
 
 #include "aeron/aeron.h"
 #include "aeron/log.h"
@@ -256,10 +257,20 @@ static float gl_scale(void) {
 	return v > 0.3f && v < 2.0f ? v : 0.85f;
 }
 
-static int gl_enabled(void) {
-	const char* env = getenv("XWA_XR_GLOVES");
-	return !(env && env[0] == '0');
+int XwaVrHands_Mode(void) {
+	/* XWA_XR_HANDS: gloves / controllers / off; before it, XWA_XR_GLOVES=0
+	 * meant no hands. */
+	const char* env = getenv("XWA_XR_HANDS");
+	if (env && env[0]) {
+		return env[0] == 'g' || env[0] == 'G'   ? XWA_VR_HANDS_GLOVES
+			   : env[0] == 'c' || env[0] == 'C' ? XWA_VR_HANDS_CONTROLLERS
+												: XWA_VR_HANDS_OFF;
+	}
+	const char* gloves = getenv("XWA_XR_GLOVES");
+	return gloves && gloves[0] == '0' ? XWA_VR_HANDS_OFF : XWA_VR_HANDS_CONTROLLERS;
 }
+
+static int gl_enabled(void) { return XwaVrHands_Mode() == XWA_VR_HANDS_GLOVES; }
 
 static int gl_find(const GlHandModel* m, const char* name) {
 	const size_t n = strlen(name);
@@ -600,6 +611,13 @@ void XwaVrGloves_Submit(AeronScene3D* scene, AeronCommandBuffer* cmd, const floa
 	const uint64_t now_ns = SDL_GetTicksNS();
 	const float dt = last_ns ? (float)((double)(now_ns - last_ns) * 1e-9) : 0.0f;
 	last_ns = now_ns;
+	if (XwaVrHands_Mode() == XWA_VR_HANDS_CONTROLLERS) {
+		s_gl.hands[0].shown = 0;
+		s_gl.hands[1].shown = 0;
+		XwaVrControllers_Submit(scene, cmd, crows, cam_pos, units);
+		return;
+	}
+	XwaVrControllers_Idle();
 	if (!scene || !cmd || !crows || !cam_pos || units <= 0.0f || !gl_enabled() || !gl_ensure(cmd)) {
 		XwaVrGloves_Idle();
 		return;
@@ -729,9 +747,11 @@ void XwaVrGloves_Submit(AeronScene3D* scene, AeronCommandBuffer* cmd, const floa
 void XwaVrGloves_Idle(void) {
 	s_gl.hands[0].shown = 0;
 	s_gl.hands[1].shown = 0;
+	XwaVrControllers_Idle();
 }
 
 int XwaVrGloves_IndexTip(int hand, float out[3], int* pointing) {
+	/* Controllers: no fingertip (the console pokes with the controller). */
 	if (hand < 0 || hand > 1 || !s_gl.hands[hand].shown) {
 		return 0;
 	}
@@ -743,6 +763,9 @@ int XwaVrGloves_IndexTip(int hand, float out[3], int* pointing) {
 }
 
 int XwaVrGloves_Capsules(int hand, XwaVrGloveCapsule* out, int max_out) {
+	if (XwaVrHands_Mode() == XWA_VR_HANDS_CONTROLLERS) {
+		return XwaVrControllers_Capsules(hand, out, max_out);
+	}
 	if (hand < 0 || hand > 1 || !s_gl.hands[hand].shown || !out) {
 		return 0;
 	}
@@ -753,6 +776,9 @@ int XwaVrGloves_Capsules(int hand, XwaVrGloveCapsule* out, int max_out) {
 
 int XwaVrGloves_Mesh(int hand, const float** local_xyz, const float** local_normals, int* vertex_count,
 					 const uint16_t** indices, int* index_count) {
+	if (XwaVrHands_Mode() == XWA_VR_HANDS_CONTROLLERS) {
+		return XwaVrControllers_Mesh(hand, local_xyz, local_normals, vertex_count, indices, index_count);
+	}
 	if (hand < 0 || hand > 1 || !s_gl.hands[hand].shown || !s_gl.hands[hand].local || !s_gl.hands[hand].local_n) {
 		return 0;
 	}
@@ -766,6 +792,7 @@ int XwaVrGloves_Mesh(int hand, const float** local_xyz, const float** local_norm
 }
 
 void XwaVrGloves_Shutdown(void) {
+	XwaVrControllers_Shutdown();
 	for (int h = 0; h < 2; ++h) {
 		free(s_gl.hands[h].local);
 		free(s_gl.hands[h].local_n);

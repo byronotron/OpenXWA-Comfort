@@ -54,6 +54,13 @@ int XwaVrConsole_Frame(AeronCommandBuffer* cmd, int width, int height, const Aer
 int XwaVrConsole_CardFrame(AeronCommandBuffer* cmd, int card, int width, int height, const AeronXrView views[2],
 						   AeronXrPanel out[2]);
 
+/* Labels beside the controller models (Hands: Controllers; XWA_XR_CONTROLLER_
+ * LABELS=0 turns them off): while the player looks at a controller with
+ * its buttons turned towards them, what each control does. Draws the
+ * labels' layer (AERON_XR_PANEL_LABELS) and fills `out` with a quad per
+ * controller shown; returns the count. Call after CardFrame. */
+int XwaVrConsole_LabelsFrame(AeronCommandBuffer* cmd, const AeronXrView views[2], AeronXrPanel out[2]);
+
 /* Another VR panel owns hand 0/1's grip this frame (applied with the
  * console's own in EndFrame). */
 void XwaVrConsole_CaptureGrip(int hand);

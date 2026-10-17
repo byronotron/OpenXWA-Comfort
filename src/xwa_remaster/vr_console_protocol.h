@@ -92,6 +92,13 @@ typedef struct XwaVrConsoleState {
 	 * attacking the current target. */
 	int has_turrets;
 	int gunners_on_target;
+	/* For the controller labels: loading the quick save is on offer (A / B
+	 * answer it, also while there is no craft), both triggers land or jump
+	 * (chord_hyper: jump), the map is open (B leaves it). */
+	int offer_active;
+	int chord_offered;
+	int chord_hyper;
+	int map_open;
 	/* Changes when a new mission starts (the button card returns to its
 	 * spot on the right). */
 	unsigned int mission_serial;

@@ -291,6 +291,7 @@ add_library(xwa_remaster STATIC
     src/xwa_remaster/vr_hud_occlusion.c
     src/xwa_remaster/vr_hand_overlay.c
     src/xwa_remaster/vr_gloves.c
+    src/xwa_remaster/vr_controllers.c
     src/xwa_remaster/vr_flight_stick.c
     src/xwa_remaster/vr_env.c
     src/xwa_remaster/vr_menu_beam.c
@@ -304,6 +305,9 @@ endif()
 target_include_directories(xwa_remaster
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+    PRIVATE
+        # stb_image: the VR controller models' textures.
+        ${CMAKE_CURRENT_SOURCE_DIR}/aeron/third_party/stb
 )
 target_link_libraries(xwa_remaster
     PUBLIC
@@ -311,6 +315,10 @@ target_link_libraries(xwa_remaster
         aeron_scene
         aeron_asset
         xwa_2d_formats
+    PRIVATE
+        # The runtime's controller models: glTF parsing, KTX2 atlas.
+        aeron_cgltf
+        imgbake
 )
 
 # OpenXWA-owned scene shaders use Aeron's cross-platform shader pipeline and
