@@ -148,16 +148,6 @@ unsigned int g_joystickEntryCount;
 // GLOBAL: XWA 0xB0CA20
 ConfigNumericStepperRepeatState g_configNumericStepperRepeatByButtonId[128];
 
-/* VR: the options that do nothing in the VR port are left out (the
- * performance presets, the original renderer's video options, the sound
- * channel count, mouse flight). */
-static int Config_VrPortMenus(void) {
-#ifdef XWA_MODERN
-	return XwaModernVrOptions_Available();
-#else
-	return 0;
-#endif
-}
 
 /* The in-flight menu's save-state rows (Quick Save, Quick Load when there
  * is one). */
@@ -177,9 +167,10 @@ static int Config_CheckpointRowCount(void) {
 static int s_configMissionHintsRow;
 #endif
 
-/* A main menu row as the original numbers it, with Performance Options
- * (row 1) left out in VR. */
-static int Config_MainRow(int row) { return row > 1 && Config_VrPortMenus() ? row - 1 : row; }
+/* A main menu row as the original numbers it. (VR has every row too: the
+ * performance presets and the original video options set the game's own
+ * details, such as debris, which the VR renderer shows.) */
+static int Config_MainRow(int row) { return row; }
 
 // FUNCTION: XWA 0x51D3D0
 int Config_MainMenuScreen(void) {
@@ -222,9 +213,6 @@ int Config_MainMenuScreen(void) {
 		++rowCount;
 		rowCount += Config_CheckpointRowCount();
 		rowCount += XwaModernMissionHintsScreen_Available() != 0;
-	}
-	if (Config_VrPortMenus()) {
-		--rowCount; /* no Performance Options */
 	}
 #else
 	rowCount = g_configRestrictedOptionsModalActive ? 7 : 10;
@@ -287,7 +275,6 @@ int Config_MainMenuScreen(void) {
 
 	y += 25;
 	++rowIndex;
-	if (!Config_VrPortMenus()) {
 	text = FrontendString_Get(STR_CONFIG_PERFORMANCE_OPTIONS);
 	titleWidth = FrontendText_MeasureWidth(text, 20);
 	textX = g_configMenuCenterX - (int)(titleWidth >> 1);
@@ -308,7 +295,6 @@ int Config_MainMenuScreen(void) {
 
 	y += 25;
 	++rowIndex;
-	}
 	text = FrontendString_Get(STR_CONFIG_VIDEO_OPTIONS);
 	titleWidth = FrontendText_MeasureWidth(text, 20);
 	textX = g_configMenuCenterX - (int)(titleWidth >> 1);
@@ -1828,7 +1814,11 @@ int Config_MultiplayerVideoOptionsScreen(void) {
 	}
 	if (buttonPressed) {
 		g_pendingMenuScreen = 2;
+#ifdef XWA_MODERN
+		g_menuCursorRow = 2 + (XwaModernVrOptions_Available() ? 1 : 0); /* on the multiplayer row */
+#else
 		g_menuCursorRow = 1;
+#endif
 	}
 
 	if (action == 1) {
@@ -3998,11 +3988,9 @@ int Config_VideoOptionsMenu(void) {
 	unsigned int titleWidth;
 	FrontendRect rect;
 #ifdef XWA_MODERN
-	/* VR: "OpenXWA VR Options" is the first row; the rest move down one.
-	 * The original renderer's single/multiplayer video options do nothing
-	 * in VR and are left out there. */
+	/* VR: "OpenXWA VR Options" is the first row; the rest move down one. */
 	const int vr = XwaModernVrOptions_Available() ? 1 : 0;
-	const int rows = vr ? 3 : 4;
+	const int rows = vr ? 5 : 4;
 #endif
 
 	keyState = (char)Config_GetMenuNavKey();
@@ -4078,9 +4066,6 @@ int Config_VideoOptionsMenu(void) {
 	}
 #endif
 
-#ifdef XWA_MODERN
-	if (!vr) {
-#endif
 	text = FrontendString_Get(STR_CONFIG_VIDEO_SINGLE_PLAYER_OPTIONS);
 	titleWidth = FrontendText_MeasureWidth(text, 20);
 	textX = g_configMenuCenterX - (int)(titleWidth >> 1);
@@ -4132,18 +4117,15 @@ int Config_VideoOptionsMenu(void) {
 		g_pendingMenuScreen = 8;
 		g_menuCursorRow = 0;
 	}
-#ifdef XWA_MODERN
-	}
-#endif
 
 #ifdef XWA_MODERN
 	text = FrontendString_Get(STR_BACK);
 	titleWidth = FrontendText_MeasureWidth(text, 20);
 	textX = g_configMenuCenterX - (int)(titleWidth >> 1);
 	buttonPressed =
-		FrontendButton_DrawMenuButton(textX, vr ? 253 : 278, text, 20, g_colorPaleBlue, 24, 0, "settingsound");
+		FrontendButton_DrawMenuButton(textX, 278 + 25 * vr, text, 20, g_colorPaleBlue, 24, 0, "settingsound");
 	if (g_menuCursorRow == rows - 1) {
-		FrontendText_Draw(20, text, textX, vr ? 253 : 278, g_colorGreen);
+		FrontendText_Draw(20, text, textX, 278 + 25 * vr, g_colorGreen);
 		if (keyState == CONFIG_KEY_ENTER) {
 			FrontendSound_PlayUISound("settingsound", 1, 0, 255, 12 * g_gameConfig.sfxDatapadVolume, 63);
 			Keyboard_FlushCharBuffer();

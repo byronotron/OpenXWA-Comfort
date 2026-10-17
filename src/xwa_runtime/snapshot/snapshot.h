@@ -557,6 +557,10 @@ typedef struct XwaCockpit {
 	 * detail). Empty = not loaded (classic then draws the flyable
 	 * OPT). */
 	char exterior_name[40];
+	/* The own craft's flyable OPT basename (g_loadedModels byObjectType of
+	 * the player object's type) — names the SHIP, where several craft
+	 * can share one cockpit OPT (the Tie/CombatSim fallbacks). */
+	char craft_name[40];
 	uint8_t seat;             /* player currentSeatIdx (0 = pilot) */
 	uint8_t look_available;   /* player cockpitLookAvailable (seat-0 gate) */
 	uint8_t toggle_available; /* player cockpitToggleAvailable (turret gate) */

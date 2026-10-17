@@ -5192,6 +5192,30 @@ static int env_font(AeronCommandBuffer* cmd) {
 	return s_title.font_state > 0;
 }
 
+/* A controller button's letter in a ring, centred at (cx, cy), `d` across;
+ * the letter in the style's tint scaled by `bright`. */
+static void env_draw_key_ring(AeronDrawList2D* list, AeronTextStyle* style, const char* key, float cx, float cy,
+							  float d, float bright) {
+	AeronDrawList2DRRect r;
+	memset(&r, 0, sizeof r);
+	r.dst_x = cx - 0.5f * d;
+	r.dst_y = cy - 0.5f * d;
+	r.dst_w = d;
+	r.dst_h = d;
+	r.radius_px = 0.5f * d;
+	r.border_px = fmaxf(2.0f, 0.075f * d);
+	r.soft_px = 1.5f;
+	const float a = style->tint[3];
+	for (int k = 0; k < 3; ++k) {
+		r.border[k] = style->tint[k] * bright * a;
+	}
+	r.border[3] = a;
+	AeronDrawList_AddRRect(list, &r);
+	const float w = AeronText_MeasureWidth(style, key, -1);
+	const float h = AeronText_LineHeight(style);
+	AeronText_Draw(list, style, cx - 0.5f * w, cy - 0.5f * h, AERON_TEXT_LEFT, key, -1, NULL);
+}
+
 /* "Press A to Continue" into a texture of its own (once). */
 static void env_title_text(AeronCommandBuffer* cmd) {
 	if (s_title.text_rt || !cmd || !env_font(cmd)) {
@@ -5206,29 +5230,43 @@ static void env_title_text(AeronCommandBuffer* cmd) {
 		s_title.font_state = -1;
 		return;
 	}
-	static const char* const prompt = "Press A to Continue";
+	/* "Press (A) to Continue": the button letter in a ring, as on the
+	 * button hints. */
+	static const char* const before = "Press";
+	static const char* const key = "A";
+	static const char* const after = "to Continue";
 	AeronTextStyle style;
 	memset(&style, 0, sizeof style);
 	style.font = &s_title.font;
-	/* As wide as the texture allows, the line no taller than 80 % of it. */
 	style.scale = 1.0f;
-	const float wide = AeronText_MeasureWidth(&style, prompt, -1);
 	const float tall = AeronText_LineHeight(&style);
+	const float space = 0.32f * tall, ring = 1.05f * tall;
+	const float wide = AeronText_MeasureWidth(&style, before, -1) + space + ring + space +
+					   AeronText_MeasureWidth(&style, after, -1);
+	/* As wide as the texture allows, the line no taller than 70 % of it. */
 	style.scale = fminf(wide > 0.0f ? 0.92f * (float)s_title.text_w / wide : 1.0f,
-						tall > 0.0f ? 0.8f * (float)s_title.text_h / tall : 1.0f);
+						tall > 0.0f ? 0.7f * (float)s_title.text_h / tall : 1.0f);
 	style.tint[0] = style.tint[1] = style.tint[2] = style.tint[3] = 1.0f;
 	style.filter = AERON_BLIT2D_FILTER_LINEAR;
 	AeronDrawList_Begin(s_title.text_list, s_title.text_rt, s_title.text_w, s_title.text_h, AERON_DRAWLIST2D_CLEAR,
 						NULL);
-	AeronText_Draw(s_title.text_list, &style, 0.5f * (float)s_title.text_w,
-				   0.5f * ((float)s_title.text_h - AeronText_LineHeight(&style)), AERON_TEXT_CENTER, prompt, -1, NULL);
+	const float k = style.scale;
+	const float y = 0.5f * ((float)s_title.text_h - tall * k);
+	float x = 0.5f * ((float)s_title.text_w - wide * k);
+	AeronText_Draw(s_title.text_list, &style, x, y, AERON_TEXT_LEFT, before, -1, NULL);
+	x += (AeronText_MeasureWidth(&style, before, -1) + space * k);
+	env_draw_key_ring(s_title.text_list, &style, key, x + 0.5f * ring * k, 0.5f * (float)s_title.text_h, ring * k,
+					  1.0f);
+	x += (ring + space) * k;
+	AeronText_Draw(s_title.text_list, &style, x, y, AERON_TEXT_LEFT, after, -1, NULL);
 	AeronDrawList_Render(s_title.text_list, cmd);
 }
 
 /* ---- the button hints under the screen ----------------------------------- */
 
-/* Two lines in small type under the frame, shown with the screen and when
- * it is put away: the button (tinted) and what it does. */
+/* One line in small type under the frame, shown with the screen and when
+ * it is put away: each button's letter in a ring (tinted), what it does
+ * beside it, the two side by side. */
 static struct {
 	AeronRenderTarget* rt;
 	AeronDrawList2D* list;
@@ -5245,8 +5283,8 @@ static void env_hint_text(AeronCommandBuffer* cmd) {
 	if (s_hint.rt || s_hint.failed || !cmd || !env_font(cmd)) {
 		return;
 	}
-	s_hint.w = 1024;
-	s_hint.h = 224; /* two lines of 112 */
+	s_hint.w = 2048;
+	s_hint.h = 128;
 	s_hint.rt = Aeron_CreateRenderTarget(
 		&(AeronRenderTargetDesc) { .width = s_hint.w, .height = s_hint.h, .format = AERON_TEXTURE_FORMAT_RGBA8_UNORM });
 	s_hint.list = AeronDrawList_Create(64);
@@ -5259,49 +5297,49 @@ static void env_hint_text(AeronCommandBuffer* cmd) {
 	style.font = &s_title.font;
 	style.filter = AERON_BLIT2D_FILTER_LINEAR;
 	style.scale = 1.0f;
-	/* The button letters in a column, the actions after a gap; the block
-	 * centred, as wide as the texture allows, lines at most 75 % of their
-	 * 112 px. */
+	/* (X) action    (Y) action, centred; the line at most 62 % of the
+	 * texture's height, the whole as wide as it allows. */
 	const float line = AeronText_LineHeight(&style);
-	float key_w = 0.0f, text_w = 0.0f;
+	const float ring = 1.15f * line, gap = 0.35f * line, between = 1.4f * line;
+	float block = between;
 	for (int i = 0; i < 2; ++i) {
-		key_w = fmaxf(key_w, AeronText_MeasureWidth(&style, k_hint_lines[i][0], -1));
-		text_w = fmaxf(text_w, AeronText_MeasureWidth(&style, k_hint_lines[i][1], -1));
+		block += ring + gap + AeronText_MeasureWidth(&style, k_hint_lines[i][1], -1);
 	}
-	const float gap = 0.7f * line;
-	const float block = key_w + gap + text_w;
-	const float slot = 0.5f * (float)s_hint.h;
-	style.scale = fminf(block > 0.0f ? 0.96f * (float)s_hint.w / block : 1.0f, line > 0.0f ? 0.75f * slot / line : 1.0f);
-	const float x0 = 0.5f * ((float)s_hint.w - block * style.scale);
+	style.scale = fminf(block > 0.0f ? 0.94f * (float)s_hint.w / block : 1.0f,
+						line > 0.0f ? 0.62f * (float)s_hint.h / (1.15f * line) : 1.0f);
+	const float k = style.scale;
+	const float x0 = 0.5f * ((float)s_hint.w - block * k);
+	const float mid = 0.5f * (float)s_hint.h;
 	AeronDrawList_Begin(s_hint.list, s_hint.rt, s_hint.w, s_hint.h, AERON_DRAWLIST2D_CLEAR, NULL);
 	{
 		/* A dark, soft-edged plate: readable over a bright explosion too. */
 		AeronDrawList2DRRect plate;
 		memset(&plate, 0, sizeof plate);
-		const float pad = 0.45f * line * style.scale;
+		const float pad = 0.5f * line * k;
 		plate.dst_x = fmaxf(x0 - pad, 2.0f);
-		plate.dst_w = fminf(block * style.scale + 2.0f * pad, (float)s_hint.w - 4.0f);
+		plate.dst_w = fminf(block * k + 2.0f * pad, (float)s_hint.w - 4.0f);
 		plate.dst_y = 4.0f;
 		plate.dst_h = (float)s_hint.h - 8.0f;
-		plate.radius_px = 28.0f;
+		plate.radius_px = 0.5f * plate.dst_h;
 		plate.soft_px = 10.0f;
-		for (int k = 0; k < 3; ++k) {
-			plate.fill_top[k] = plate.fill_bottom[k] = 0.0f;
+		for (int c = 0; c < 3; ++c) {
+			plate.fill_top[c] = plate.fill_bottom[c] = 0.0f;
 		}
 		plate.fill_top[3] = plate.fill_bottom[3] = 0.5f;
 		AeronDrawList_AddRRect(s_hint.list, &plate);
 	}
+	float x = x0;
 	for (int i = 0; i < 2; ++i) {
-		const float y = slot * (float)i + 0.5f * (slot - line * style.scale);
-		/* The letter in the menu beam's blue, the action in white. */
+		/* The letter and its ring in the menu beam's blue, the action in white. */
 		style.tint[0] = 0.55f;
 		style.tint[1] = 0.8f;
 		style.tint[2] = 1.0f;
 		style.tint[3] = 1.0f;
-		AeronText_Draw(s_hint.list, &style, x0, y, AERON_TEXT_LEFT, k_hint_lines[i][0], -1, NULL);
+		env_draw_key_ring(s_hint.list, &style, k_hint_lines[i][0], x + 0.5f * ring * k, mid, ring * k, 1.0f);
+		x += (ring + gap) * k;
 		style.tint[0] = style.tint[1] = style.tint[2] = 0.92f;
-		AeronText_Draw(s_hint.list, &style, x0 + (key_w + gap) * style.scale, y, AERON_TEXT_LEFT, k_hint_lines[i][1],
-					   -1, NULL);
+		AeronText_Draw(s_hint.list, &style, x, mid - 0.5f * line * k, AERON_TEXT_LEFT, k_hint_lines[i][1], -1, NULL);
+		x += AeronText_MeasureWidth(&style, k_hint_lines[i][1], -1) + between * k;
 	}
 	AeronDrawList_Render(s_hint.list, cmd);
 }
@@ -5322,8 +5360,9 @@ static void env_submit_hints(AeronScene3D* scene) {
 							? (ENV_FRAME_BEZEL_BOTTOM - k_frame_opening[3]) * sc.pic_w /
 								  (k_frame_opening[2] - k_frame_opening[0])
 							: 0.0f;
-	/* Lines about 7.5 cm tall at the screen's 3.2 m (about 1.3 degrees). */
-	const float th = 0.2f * env_float("XWA_XR_BUTTON_HINT_SCALE", 1.0f) * sc.dist / 3.2f;
+	/* Letters about 7.5 cm tall at the screen's 3.2 m (about 1.3 degrees):
+	 * the line is 62 % of the texture's height. */
+	const float th = 0.14f * env_float("XWA_XR_BUTTON_HINT_SCALE", 1.0f) * sc.dist / 3.2f;
 	const float tw = th * (float)s_hint.w / (float)s_hint.h;
 	const float up = (sc.lift - 0.5f * sc.pic_h - below) * f - 0.03f - 0.5f * th;
 	const float center[3] = { s_env.view_pos[0], s_env.view_pos[1] + (sc.frame_dist + 0.02f) * sc.k,

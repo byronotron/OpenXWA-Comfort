@@ -1,9 +1,11 @@
 /* VR pilot gloves; see vr_gloves.h.
  *
  * The glove meshes are the Godot XR Tools gloves (CC0, DigitalN8m4r3),
- * converted by tools/vr/gen_glove_mesh.py: one skinned mesh per hand with
- * a 26-joint OpenXR-style skeleton. They are skinned on the CPU every frame
- * (about 2,200 vertices per hand) and uploaded into the scene mesh. Like in
+ * converted by tools/vr/gen_glove_mesh.py and decimated to about a third
+ * of their triangles (tools/vr/decimate_glove_mesh.cpp): one skinned mesh
+ * per hand with a 26-joint OpenXR-style skeleton. They are skinned on the
+ * CPU every frame (about 920 vertices per hand) and uploaded into the
+ * scene mesh. Like in
  * XR Tools the hand hangs off the controller's aim pose, offset by
  * (+-0.03, -0.05, 0.15) m. */
 
@@ -428,7 +430,10 @@ static int gl_ensure(AeronCommandBuffer* cmd) {
 			src->vertices[i].tangent[3] = 1.0f;
 		}
 		src->pad_bounds = 0.08f;
-		gl_material(&src->material, grey, grey, grey * 1.08f, 0.0f, 0.78f);
+		/* Matte (roughness 0.9+): the lite mesh shader then skips the
+		 * specular term and the face-normal derivatives for the gloves,
+		 * which can cover a good part of the view up close. */
+		gl_material(&src->material, grey, grey, grey * 1.08f, 0.0f, 0.92f);
 		h->mesh = gl_upload(cmd, src, hand ? "vr.glove.right" : "vr.glove.left");
 		ok = h->mesh != NULL;
 	}

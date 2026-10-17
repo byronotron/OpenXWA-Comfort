@@ -1502,6 +1502,12 @@ void XwaSnapshot_CaptureFlight(void) {
 				snprintf(k->model_name, sizeof k->model_name, "%s", name);
 				s->cockpit_valid = 1;
 			}
+			if ((unsigned)pobj->objectType < XWA_LOADED_MODEL_COUNT) {
+				const char* craft = XwaSnapshotExport_OptHandleName(g_loadedModels.byObjectType[pobj->objectType]);
+				if (craft != NULL) {
+					snprintf(k->craft_name, sizeof k->craft_name, "%s", craft);
+				}
+			}
 			if (g_exteriorModelLoaded) {
 				const char* ext = XwaSnapshotExport_OptHandleName(g_exteriorModel);
 				if (ext != NULL) {

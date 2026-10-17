@@ -108,8 +108,10 @@ static struct {
 	float rect[CK_COUNT][4];
 	uint8_t visible[CK_COUNT];
 	char logged[512];
-	/* Panels placed by hand, per cockpit (XWA_XR_HUD_POSE_<COCKPIT>):
-	 * LOCAL-space poses that replace the defaults. */
+	/* Panels placed by hand, per ship (XWA_XR_HUD_POSE_<SHIP>, with
+	 * _GUNNER<n> for a turret seat): LOCAL-space poses that replace the
+	 * defaults. A ship with no entry yet starts from the one saved for
+	 * its cockpit (how 105-106 kept them). */
 	char cockpit_key[96];
 	char pose_env[1024];
 	uint8_t custom[CK_COUNT];
@@ -290,10 +292,10 @@ static void ck_qnorm(float q[4]) {
 	}
 }
 
-/* XWA_XR_HUD_POSE_ + the cockpit's name in capitals. */
-static void ck_layout_key(const char* cockpit, char* out, size_t size) {
+/* XWA_XR_HUD_POSE_ + the ship's (or cockpit's) name in capitals. */
+static void ck_layout_key(const char* name, char* out, size_t size) {
 	size_t n = (size_t)snprintf(out, size, "XWA_XR_HUD_POSE_");
-	for (const char* c = cockpit && cockpit[0] ? cockpit : "DEFAULT"; *c && n + 1 < size; ++c) {
+	for (const char* c = name && name[0] ? name : "DEFAULT"; *c && n + 1 < size; ++c) {
 		if (isalnum((unsigned char)*c)) {
 			out[n++] = (char)toupper((unsigned char)*c);
 		}
@@ -301,11 +303,17 @@ static void ck_layout_key(const char* cockpit, char* out, size_t size) {
 	out[n] = '\0';
 }
 
-/* Reads this cockpit's layout ("id=x,y,z,qx,qy,qz,qw;...") when it changed. */
-static void ck_read_layout(const char* cockpit) {
+/* Reads this ship's layout ("id=x,y,z,qx,qy,qz,qw;...") when it changed;
+ * without one, the layout saved for its cockpit. */
+static void ck_read_layout(const char* ship, const char* cockpit) {
 	char key[96];
-	ck_layout_key(cockpit, key, sizeof key);
+	ck_layout_key(ship && ship[0] ? ship : cockpit, key, sizeof key);
 	const char* v = getenv(key);
+	if (!v && ship && ship[0] && cockpit && cockpit[0]) {
+		char old_key[96];
+		ck_layout_key(cockpit, old_key, sizeof old_key);
+		v = getenv(old_key);
+	}
 	if (!v) {
 		v = "";
 	}
@@ -463,8 +471,8 @@ static void ck_update_grab(AeronXrPanel* out, const int* index_of) {
 	}
 }
 
-int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, int cmd_separate, const char* cockpit,
-						  AeronXrPanel* out, int max_out) {
+int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, int cmd_separate, const char* ship,
+						  const char* cockpit, AeronXrPanel* out, int max_out) {
 	const XwaHudPreparedDrawState* drawn = XwaRemasterHud_PreparedDrawState();
 	int count = 0;
 	if (!s_ck.initialized) {
@@ -474,7 +482,7 @@ int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, int cmd
 	}
 	s_ck.cmd_separate = cmd_separate;
 	if (s_ck.grab_panel[0] < 0 && s_ck.grab_panel[1] < 0) {
-		ck_read_layout(cockpit);
+		ck_read_layout(ship, cockpit);
 	}
 	memset(s_ck.visible, 0, sizeof s_ck.visible);
 	if (!out || max_out <= 0 || target_w <= 0 || target_h <= 0 || !drawn || !drawn->valid) {

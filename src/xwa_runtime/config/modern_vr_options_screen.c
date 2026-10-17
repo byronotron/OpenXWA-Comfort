@@ -351,7 +351,7 @@ static void vr_persist(void) {
 	memset(g_vr.dirty, 0, sizeof g_vr.dirty);
 }
 
-/* Clears every cockpit's hand-placed HUD layout (XWA_XR_HUD_POSE_*). */
+/* Clears every ship's hand-placed HUD layout (XWA_XR_HUD_POSE_*). */
 extern char** environ;
 static void vr_reset_hud_layouts(void) {
 	static const char prefix[] = "XWA_XR_HUD_POSE_";

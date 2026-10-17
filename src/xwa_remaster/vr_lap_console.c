@@ -92,6 +92,7 @@ typedef struct VcButton {
 	float font_size; /* 0: the default for its height */
 	float radius;    /* corner radius, 0: the default */
 	float border_px; /* 0: the default */
+	float base_fill; /* the fill's alpha at rest at least this (the wheel) */
 } VcButton;
 
 /* The console's own buttons (not game actions): its help page. */
@@ -1096,7 +1097,7 @@ static void vc_draw_button_look(const VcButton* b, int hover, int pressed, float
 		vc_pma(fill, VC_AMBER, 0.12f + 0.45f * hold + 0.1f * hover);
 		vc_pma(border, VC_AMBER, 0.85f);
 	} else {
-		const float on = b->lit ? 0.30f : b->level ? 0.16f : 0.08f;
+		const float on = fmaxf(b->lit ? 0.30f : b->level ? 0.16f : 0.08f, b->base_fill);
 		vc_pma(fill, VC_HUD, on + 0.22f * hover + 0.25f * (pressed || flash));
 		if (hover) {
 			vc_pma(border, 1.0f, 1.0f, 1.0f, 1.0f);
@@ -2154,6 +2155,7 @@ static void vw_layout(void) {
 		it->w = bw;
 		it->h = bh;
 		it->radius = 12.0f;
+		it->base_fill = 0.18f;
 		if (it->font_size <= 0.0f) {
 			it->font_size = n <= 8 ? 24.0f : 22.0f;
 		}
@@ -2164,11 +2166,11 @@ static void vw_layout(void) {
 	c->y = VW_H * 0.5f - VW_CENTER_R;
 	c->w = c->h = 2.0f * VW_CENTER_R;
 	c->radius = VW_CENTER_R;
+	c->base_fill = 0.18f;
 	c->enabled = 1;
 	c->font_size = 28.0f;
 	if (s_vw.level == 0) {
 		c->label = "CONFIRM";
-		c->sub = "space";
 		c->action = XWA_VRC_CONFIRM;
 	} else {
 		c->label = "BACK";
@@ -2303,18 +2305,16 @@ static void vw_update(const AeronXrView views[2]) {
 		}
 	}
 
-	/* Facing the head's yaw (level), eased so a glance does not swing it. */
+	/* Facing the way the head looked when it opened (level); it keeps that
+	 * while open, only following the controller's position. */
 	{
 		float f[3];
 		vc_rotate(views[0].orientation, minus_z, f);
 		const float len = sqrtf(f[0] * f[0] + f[2] * f[2]);
 		const int fresh = s_vw.fwd[0] == 0.0f && s_vw.fwd[2] == 0.0f;
-		if (len > 0.2f) {
-			f[0] /= len;
-			f[2] /= len;
-			const float k = fresh || s_vc.dt <= 0.0f ? 1.0f : fminf(1.0f, s_vc.dt / 0.12f);
-			s_vw.fwd[0] += (f[0] - s_vw.fwd[0]) * k;
-			s_vw.fwd[2] += (f[2] - s_vw.fwd[2]) * k;
+		if (fresh && len > 0.2f) {
+			s_vw.fwd[0] = f[0] / len;
+			s_vw.fwd[2] = f[2] / len;
 		} else if (fresh) {
 			s_vw.fwd[2] = -1.0f; /* looking straight down: straight ahead */
 		}
@@ -2399,10 +2399,12 @@ static void vw_draw(void) {
 	/* The lap console's plate, round. */
 	vc_pma(glow, VC_HUD, 0.25f);
 	vc_rrect(cx - R - 6.0f, cy - R - 6.0f, 2.0f * R + 12.0f, 2.0f * R + 12.0f, R + 6.0f, 8.0f, 12.0f, transparent, glow);
-	vc_pma(fill, VC_HUD_DARK, 0.16f);
-	vc_pma(border, VC_HUD, 0.6f);
+	/* Half as see-through as the console's plate: a dark tint of the HUD
+	 * colour behind the buttons. */
+	vc_pma(fill, s_vc.hud_dark[0] * 0.22f, s_vc.hud_dark[1] * 0.22f, s_vc.hud_dark[2] * 0.22f, 0.62f);
+	vc_pma(border, VC_HUD, 0.7f);
 	vc_rrect(cx - R, cy - R, 2.0f * R, 2.0f * R, R, 2.0f, 1.0f, fill, border);
-	vc_pma(line, VC_HUD, 0.025f);
+	vc_pma(line, VC_HUD, 0.03f);
 	for (float y = cy - R + 10.0f; y < cy + R - 10.0f; y += 6.0f) {
 		const float dy = y + 1.0f - cy;
 		const float half = sqrtf(fmaxf(0.0f, (R - 8.0f) * (R - 8.0f) - dy * dy));

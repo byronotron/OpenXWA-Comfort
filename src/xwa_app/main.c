@@ -417,8 +417,8 @@ static void android_load_settings(void) {
 				  "#XWA_XR_WHEEL=1\n"
 				  "# Controls reference card on your right at mission start (0 = off):\n"
 				  "#XWA_XR_BUTTON_CARD=1\n"
-				  "# HUD panels you move with the grip are kept per cockpit as\n"
-				  "# XWA_XR_HUD_POSE_<COCKPIT>=... (Reset in the VR options).\n"
+				  "# HUD panels you move with the grip are kept per ship as\n"
+				  "# XWA_XR_HUD_POSE_<SHIP>=... (Reset in the VR options).\n"
 				  "# 1 = screen-space ambient occlusion in VR (darkens around the hands):\n"
 				  "#XWA_XR_SSAO=0\n"
 				  "# Your hands: gloves, controllers (with labels of what the buttons do\n"
@@ -1035,7 +1035,7 @@ int main(int argc, char** argv) {
 				if (XwaVrStick_TakePlacement(stick_pos, (int)sizeof stick_pos)) {
 					XwaModernVrOptions_SaveValue("XWA_XR_STICK_POS", stick_pos);
 				}
-				/* A HUD panel moved: this cockpit's layout. */
+				/* A HUD panel moved: this ship's layout. */
 				char layout_key[96];
 				char layout[1024];
 				if (XwaVrCockpitHud_TakeLayout(layout_key, (int)sizeof layout_key, layout, (int)sizeof layout)) {
