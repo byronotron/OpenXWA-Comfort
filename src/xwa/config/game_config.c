@@ -159,13 +159,13 @@ static int Config_VrPortMenus(void) {
 }
 
 /* The in-flight menu's save-state rows (Quick Save, Quick Load when there
- * is one, Retry Checkpoint when there is one). */
+ * is one). */
 static int Config_CheckpointRowCount(void) {
 #ifdef XWA_MODERN
 	if (!XwaFlightCheckpoints_Available()) {
 		return 0;
 	}
-	return 1 + (XwaFlightCheckpoints_HasQuickSave() != 0) + (XwaFlightCheckpoints_HasCheckpoint() != 0);
+	return 1 + (XwaFlightCheckpoints_HasQuickSave() != 0);
 #else
 	return 0;
 #endif
@@ -480,14 +480,13 @@ int Config_MainMenuScreen(void) {
 		static const struct {
 			const char* text;
 			XwaFlightCheckpointRequest request;
-		} k_rows[3] = {
-			{ "Quick Save", XWA_FLIGHT_CHECKPOINT_REQUEST_QUICK_SAVE },
+		} k_rows[2] = {
+			/* Held in memory only: gone when the mission is left. */
+			{ "Quick Save (Erased when exiting mission)", XWA_FLIGHT_CHECKPOINT_REQUEST_QUICK_SAVE },
 			{ "Quick Load", XWA_FLIGHT_CHECKPOINT_REQUEST_QUICK_LOAD },
-			{ "Retry Checkpoint", XWA_FLIGHT_CHECKPOINT_REQUEST_RETRY },
 		};
-		for (int cp = 0; cp < 3; ++cp) {
-			if ((cp == 1 && !XwaFlightCheckpoints_HasQuickSave()) ||
-				(cp == 2 && !XwaFlightCheckpoints_HasCheckpoint())) {
+		for (int cp = 0; cp < 2; ++cp) {
+			if (cp == 1 && !XwaFlightCheckpoints_HasQuickSave()) {
 				continue;
 			}
 			text = k_rows[cp].text;

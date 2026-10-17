@@ -621,10 +621,10 @@ static struct {
 /* The game's music (xwa/audio/music.h pulls in iMUSE's headers). */
 extern int musicState;
 int Music_SetState(int state);
-/* MUSIC_STATE_FRONTEND_1280: the debriefing theme the game plays after a
- * completed mission (MissionDebrief_Update; a failed one gets 1260, or 1270
- * in the family campaign). */
-#define ENV_MUSIC_TITLE 1280
+/* MUSIC_STATE_FRONTEND_1260: the debriefing theme the game plays after a
+ * failed mission (MissionDebrief_Update; 1270 in the family campaign, 1280
+ * after a completed one). */
+#define ENV_MUSIC_TITLE 1260
 
 /* X in the menus puts the screen away: it fades out (with its frame and
  * logo), the X-Wing Alliance logo fades in large where it was (as at the
