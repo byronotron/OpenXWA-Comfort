@@ -512,8 +512,11 @@ static EnvMode env_mode(void) {
 	if (v && SDL_strcasecmp(v, "battle") == 0) {
 		return ENV_BATTLE;
 	}
-	/* "random" (and the default): one of the space scenes, picked once per
-	 * start. */
+	/* Unset: the TIE Fighter box art. */
+	if (!v || !v[0]) {
+		return ENV_TIEART;
+	}
+	/* "random": one of the space scenes, picked once per start. */
 	static EnvMode picked = ENV_OFF;
 	if (picked == ENV_OFF) {
 		static const EnvMode scenes[] = { ENV_ENDOR, ENV_BOXART, ENV_TIEART, ENV_XVTART, ENV_BATTLE };

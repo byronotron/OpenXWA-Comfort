@@ -40,6 +40,7 @@
 
 #include "meshoptimizer.h"
 
+#include <SDL3/SDL_system.h>
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -795,8 +796,14 @@ static void ct_runtime_free(CtRuntime* rt) {
 	rt->generation = generation;
 }
 
-/* Which control a node is, from its name ("trigger", "b_button", ...). */
-static int ct_match_control(const char* name, int hand) {
+/* Which control a node is, from its name ("trigger", "b_button", ...).
+ * `weak` (second pass): the system / home button stands in for a menu
+ * button the model does not have.
+ * Steam Frame controllers (a d-pad and View on the left, A B X Y on the
+ * right) are seen as Touch controllers by the game: Touch X / Y land on
+ * the d-pad's down / up, Touch menu on View, Touch B on the right's top
+ * three buttons (B among them). */
+static int ct_match_control(const char* name, int hand, int weak) {
 	char low[64];
 	size_t n = 0;
 	for (; name[n] && n + 1 < sizeof low; ++n) {
@@ -817,15 +824,29 @@ static int ct_match_control(const char* name, int hand) {
 	if (strstr(low, "thumbstick") || strstr(low, "joystick")) {
 		return XWA_VR_CTL_STICK;
 	}
-	if (strstr(low, "menu") || strstr(low, "system") || strstr(low, "home") || strstr(low, "oculus")) {
+	if (strstr(low, "menu") || strstr(low, "view")) {
 		return XWA_VR_CTL_MENU;
 	}
+	if (strstr(low, "system") || strstr(low, "home") || strstr(low, "oculus")) {
+		return weak ? XWA_VR_CTL_MENU : -1;
+	}
+	if (strstr(low, "dpad") || strstr(low, "d_pad")) {
+		if (hand == 0 && strstr(low, "down")) {
+			return XWA_VR_CTL_LOWER; /* X */
+		}
+		if (hand == 0 && strstr(low, "up")) {
+			return XWA_VR_CTL_UPPER; /* Y */
+		}
+		return -1;
+	}
 	/* Face buttons: the letter as a word of its own, or glued to
-	 * "button" ("a_button", "buttonA", "button_a"). */
+	 * "button" ("a_button", "buttonA", "button_a"). Of single letters the
+	 * last one counts: Meta's joints are "b_button_a", "b_" marking a bone
+	 * (taken first, the right controller's A was its B). */
 	const char upper = hand ? 'b' : 'y', lower = hand ? 'a' : 'x';
 	char tok[64];
 	size_t t = 0;
-	int has_button = strstr(low, "button") != NULL;
+	int letter = -1;
 	for (size_t i = 0; i <= n; ++i) {
 		const char c = low[i];
 		if (isalnum((unsigned char)c)) {
@@ -836,7 +857,7 @@ static int ct_match_control(const char* name, int hand) {
 		}
 		tok[t] = 0;
 		if (t == 1 && (tok[0] == upper || tok[0] == lower)) {
-			return tok[0] == upper ? XWA_VR_CTL_UPPER : XWA_VR_CTL_LOWER;
+			letter = tok[0] == upper ? XWA_VR_CTL_UPPER : XWA_VR_CTL_LOWER;
 		}
 		if (t == 7 && strncmp(tok, "button", 6) == 0 && (tok[6] == upper || tok[6] == lower)) {
 			return tok[6] == upper ? XWA_VR_CTL_UPPER : XWA_VR_CTL_LOWER;
@@ -846,8 +867,7 @@ static int ct_match_control(const char* name, int hand) {
 		}
 		t = 0;
 	}
-	(void)has_button;
-	return -1;
+	return letter;
 }
 
 /* Bilinear resample of an RGBA8 image into a cell of the atlas. */
@@ -893,7 +913,32 @@ static void ct_read(const cgltf_accessor* a, cgltf_size i, float* out, int n) {
 
 /* Loads `glb` as the runtime model of `hand`. `names`: the runtime's
  * animatable node names (SPACE models). */
+/* A copy of the runtime's model in the app's files folder
+ * (controller_left.glb / controller_right.glb, next to openxwa.log), so it
+ * can be looked at off the headset. Written when the model loads. */
+static void ct_save_glb(int hand, const AeronXrRenderModel* rm) {
+#if defined(SDL_PLATFORM_ANDROID)
+	const char* dir = SDL_GetAndroidExternalStoragePath();
+	if (!dir || !dir[0] || !rm->glb || !rm->glb_size) {
+		return;
+	}
+	char path[1024];
+	snprintf(path, sizeof path, "%s/controller_%s.glb", dir, hand ? "right" : "left");
+	FILE* f = fopen(path, "wb");
+	if (f) {
+		const int ok = fwrite(rm->glb, 1, rm->glb_size, f) == rm->glb_size;
+		if (fclose(f) == 0 && ok) {
+			Aeron_LogInfo("xwa.remaster", "controller model saved: %s", path);
+		}
+	}
+#else
+	(void)hand;
+	(void)rm;
+#endif
+}
+
 static int ct_runtime_load(CtRuntime* rt, AeronCommandBuffer* cmd, int hand, const AeronXrRenderModel* rm) {
+	ct_save_glb(hand, rm);
 	cgltf_options options;
 	memset(&options, 0, sizeof options);
 	cgltf_data* data = NULL;
@@ -1070,11 +1115,14 @@ static int ct_runtime_load(CtRuntime* rt, AeronCommandBuffer* cmd, int hand, con
 	for (int c = 0; c < XWA_VR_CTL_COUNT; ++c) {
 		rt->ctl_node[c] = -1;
 	}
-	/* The controls' nodes: the first match in the tree. */
-	for (int i = 0; i < rt->node_count; ++i) {
-		const int c = ct_match_control(rt->nodes[i].name, hand);
-		if (c >= 0 && rt->ctl_node[c] < 0) {
-			rt->ctl_node[c] = i;
+	/* The controls' nodes: the first match in the tree (then the system
+	 * button for a missing menu button). */
+	for (int weak = 0; weak < 2; ++weak) {
+		for (int i = 0; i < rt->node_count; ++i) {
+			const int c = ct_match_control(rt->nodes[i].name, hand, weak);
+			if (c >= 0 && rt->ctl_node[c] < 0) {
+				rt->ctl_node[c] = i;
+			}
 		}
 	}
 	uint32_t prim_id = 0;
@@ -1210,6 +1258,11 @@ static int ct_runtime_load(CtRuntime* rt, AeronCommandBuffer* cmd, int hand, con
 		}
 		m4_inverse_affine(rt->nodes[rt->ctl_node[c]].rest_world, inv);
 		m4_point(inv, centre, rt->ctl_local[c]);
+		static const char* const k_ctl_names[XWA_VR_CTL_COUNT] = { "trigger", "grip",  "upper (B/Y)", "lower (A/X)",
+																	"stick",   "menu", "thumb rest" };
+		Aeron_LogInfo("xwa.remaster", "  %s control %s: node \"%s\", %d vertices, centre %.1f %.1f %.1f mm",
+					  hand ? "right" : "left", k_ctl_names[c], rt->nodes[rt->ctl_node[c]].name, ctl_cnt[c],
+					  (double)(centre[0] * 1000.0f), (double)(centre[1] * 1000.0f), (double)(centre[2] * 1000.0f));
 	}
 	/* Index lists: opaque, mask, blend. */
 	const uint32_t total = list_n[0] + list_n[1] + list_n[2];

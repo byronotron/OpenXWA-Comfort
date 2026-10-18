@@ -23,14 +23,13 @@ extern "C" {
  * `out` with their cockpit placements. With `cmd_separate` the targeting
  * computer was drawn to the aux HUD target (XwaRemasterHud_SetCmdSplit). `world_scale` is XWA_XR_WORLD_SCALE:
  * panels move and scale with the cockpit. Returns the panel count. */
-int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, int cmd_separate, const char* ship,
-						  const char* cockpit, AeronXrPanel* out, int max_out);
+int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, int cmd_separate, const char* cockpit,
+						  AeronXrPanel* out, int max_out);
 
 /* The panels can be picked up with the grip and put anywhere (6DoF); the
- * layout is kept per ship (`ship` above: the craft, plus _GUNNER<n> for a
- * turret seat) as XWA_XR_HUD_POSE_<SHIP>. A ship without one starts from
- * the layout saved for its cockpit (XWA_XR_HUD_POSE_<COCKPIT>).
- * After a move, hands out that key and value once, to be saved. */
+ * layout is kept per cockpit (`cockpit` above: the cockpit model's name)
+ * as XWA_XR_HUD_POSE_<COCKPIT>, shared by every craft flown from that
+ * cockpit. After a move, hands out that key and value once, to be saved. */
 int XwaVrCockpitHud_TakeLayout(char* key, int key_size, char* value, int value_size);
 
 /* An outline around the panels a hand is on or holds, drawn into the HUD

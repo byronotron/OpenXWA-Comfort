@@ -15,7 +15,7 @@
  * screen end at the top. */
 #define MB_TEX_W 48
 #define MB_WIDTH_M 0.016f /* the whole strip; the bright core is a quarter */
-#define MB_MIN_LENGTH_M 0.05f
+#define MB_MIN_LENGTH_M 0.005f /* drawn up close too (a hand right at the console) */
 
 static AeronDrawList2D* s_list;
 

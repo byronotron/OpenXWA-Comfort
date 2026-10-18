@@ -116,7 +116,7 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "AERON_XR_LEFT_HANDED", "Controls", k_hand_texts, k_toggle_values, 2, 0, 75, 0 },
 	{ "XWA_XR_VOICE", "Voice Commands", k_voice_texts, k_voice_values, 3, 1, 98, 0 },
 	{ "XWA_XR_BUTTON_CARD", "Button Card", k_toggle_texts, k_toggle_values, 2, 1, 92, 0 },
-	{ "XWA_XR_ENVIRONMENT", "Menu Scene", k_env_texts, k_env_values, 7, 1, 90, 0 },
+	{ "XWA_XR_ENVIRONMENT", "Menu Scene", k_env_texts, k_env_values, 7, 4, 90, 0 }, /* TIE Fighter box art */
 	/* Ship previews (mission setup, tech room) in stereo on the menu screen. */
 	{ "XWA_XR_SHIP_3D", "3D Ship Previews", k_depth_texts, k_depth_values, 4, 2, 68, 0 },
 	{ "AERON_XR_RESOLUTION_SCALE", "Resolution (restart)", k_res_texts, k_res_values, 6, 4, 86, 1 },
@@ -354,7 +354,7 @@ static void vr_persist(void) {
 	memset(g_vr.dirty, 0, sizeof g_vr.dirty);
 }
 
-/* Clears every ship's hand-placed HUD layout (XWA_XR_HUD_POSE_*). */
+/* Clears every cockpit's hand-placed HUD layout (XWA_XR_HUD_POSE_*). */
 extern char** environ;
 static void vr_reset_hud_layouts(void) {
 	static const char prefix[] = "XWA_XR_HUD_POSE_";

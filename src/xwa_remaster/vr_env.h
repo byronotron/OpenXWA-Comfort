@@ -5,7 +5,7 @@
  * VR environment for the 2D screens (concourse, briefings, menus, films),
  * built from the installed game data and drawn in stereo around the flat
  * virtual screen. XWA_XR_ENVIRONMENT selects it:
- *   random (default) — endor, xwing, tiefighter, xvt or battle, picked at
+ *   random          — endor, xwing, tiefighter, xvt or battle, picked at
  *                     each start;
  *   battle          — a live battle cast from the last mission flown (its
  *                     player craft and wingman, fighters, capital ships,
@@ -23,7 +23,7 @@
  *                     fighters at their attitudes on the cover, a burst,
  *                     their fire and the purple nebula, spread around the
  *                     screen so none hides behind it;
- *   tiefighter      — the TIE Fighter box art: its Interceptors, TIE fighters,
+ *   tiefighter (default) — the TIE Fighter box art: its Interceptors, TIE fighters,
  *                     bomber and the X-wing breaking up in the explosion,
  *                     at their cover attitudes around the screen, before
  *                     Vader's helmet (vr/vader.rgba, APK assets only).

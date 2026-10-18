@@ -5386,19 +5386,10 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		int panel_count = 0;
 		const int cmd_split = XwaRemasterHud_CmdSplit() && xr_frame.hud_aux_target;
 		if (cockpit) {
-			/* The layout is kept per ship (and per turret seat). */
-			char hud_ship[64] = "";
-			if (snap->cockpit.craft_name[0]) {
-				if (snap->cockpit.seat > 0) {
-					snprintf(hud_ship, sizeof hud_ship, "%s_GUNNER%u", snap->cockpit.craft_name,
-							 (unsigned)snap->cockpit.seat);
-				} else {
-					snprintf(hud_ship, sizeof hud_ship, "%s", snap->cockpit.craft_name);
-				}
-			}
+			/* The layout is kept per cockpit. */
 			panel_count = s.suppress_hud ? 0
 										 : XwaVrCockpitHud_Build(g_xr_hud_w, g_xr_hud_h, fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f),
-																 cmd_split, hud_ship, snap->cockpit.model_name, panels,
+																 cmd_split, snap->cockpit.model_name, panels,
 																 AERON_XR_MAX_PANELS);
 			XwaVrCockpitHud_PrepareOverlay(cmd, g_xr_hud_w, g_xr_hud_h);
 			if (panel_count == 0 && !s.suppress_hud) {

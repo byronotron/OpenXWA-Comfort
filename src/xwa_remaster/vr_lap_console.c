@@ -816,9 +816,10 @@ static void vc_update_hand(int hand, const AeronXrPanel* pose, const float ax[3]
 		h->depth = depth;
 	}
 
-	/* Ray (when not poking). */
+	/* Ray: also up close, while the tip hovers over the console (the beam
+	 * then runs all the way to it); not while a poke holds a button. */
 	int ray_hit = 0;
-	if (!poking && !h->poke_down) {
+	if (!h->poke_down) {
 		const float from[3] = { xh.position[0] - pose->position[0], xh.position[1] - pose->position[1],
 								xh.position[2] - pose->position[2] };
 		const float d0 = vc_dot(from, az);
