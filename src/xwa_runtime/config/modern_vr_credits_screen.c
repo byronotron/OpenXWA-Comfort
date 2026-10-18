@@ -8,22 +8,22 @@
 
 #include <stddef.h>
 
-typedef enum { CREDIT_GAP, CREDIT_HEADING, CREDIT_TEXT, CREDIT_NAME } CreditStyle;
+typedef enum { CREDIT_GAP, CREDIT_HEADING, CREDIT_TEXT, CREDIT_NAME, CREDIT_SMALL } CreditStyle;
 
-static const struct {
+typedef struct {
 	CreditStyle style;
 	const char* text;
-} k_credits[] = {
+} CreditLine;
+
+static const CreditLine k_credits[] = {
 	{ CREDIT_TEXT, "This VR port is based on the open source project" },
 	{ CREDIT_TEXT, "OpenXWA by Adrien Moulin" },
 	{ CREDIT_GAP, NULL },
-	{ CREDIT_HEADING, "VR Design, Code Prompting & QA" },
+	{ CREDIT_HEADING, "AI Assisted Coding" },
 	{ CREDIT_NAME, "Neitey" },
 	{ CREDIT_GAP, NULL },
-	{ CREDIT_HEADING, "Voice Commands" },
-	{ CREDIT_TEXT, "sherpa-onnx by k2-fsa (Next-gen Kaldi)" },
-	{ CREDIT_TEXT, "Zipformer English model from k2-fsa icefall" },
-	{ CREDIT_TEXT, "running on ONNX Runtime by Microsoft" },
+	{ CREDIT_HEADING, "VR Design, Menu Environments & QA" },
+	{ CREDIT_NAME, "MarkD" },
 	{ CREDIT_GAP, NULL },
 	{ CREDIT_HEADING, "Radial Menu" },
 	{ CREDIT_TEXT, "Radial menu code borrowed from Team Beef's JK:Academy VR" },
@@ -33,41 +33,89 @@ static const struct {
 	{ CREDIT_TEXT, "Additional artwork was created using ChatGPT." },
 };
 
+/* Second page. Full licence texts: assets/THIRD-PARTY-NOTICES.txt in the APK
+ * (packaging/quest/THIRD-PARTY-NOTICES.txt). */
+static const CreditLine k_licenses[] = {
+	{ CREDIT_HEADING, "Voice Commands" },
+	{ CREDIT_SMALL, "sherpa-onnx by k2-fsa (Next-gen Kaldi) - Apache 2.0" },
+	{ CREDIT_SMALL, "Zipformer English model from k2-fsa icefall - Apache 2.0" },
+	{ CREDIT_SMALL, "ONNX Runtime by Microsoft - MIT" },
+	{ CREDIT_GAP, NULL },
+	{ CREDIT_HEADING, "VR Port" },
+	{ CREDIT_SMALL, "Basis Universal by Binomial - Apache 2.0" },
+	{ CREDIT_SMALL, "meshoptimizer by Arseny Kapoulkine - MIT" },
+	{ CREDIT_SMALL, "OpenXR loader by the Khronos Group - Apache 2.0" },
+	{ CREDIT_SMALL, "Glove models: Godot XR Tools by DigitalN8m4r3 - CC0" },
+	{ CREDIT_GAP, NULL },
+	{ CREDIT_HEADING, "Engine" },
+	{ CREDIT_SMALL, "SDL3 - zlib    FFmpeg - LGPL 2.1+    Zstandard - BSD" },
+	{ CREDIT_SMALL, "astc-encoder by Arm, LLVM libc++ - Apache 2.0" },
+	{ CREDIT_SMALL, "cgltf, cJSON, libyaml, stb, Dear ImGui - MIT" },
+	{ CREDIT_SMALL, "bc7enc, bcdec, DirectXMath, DirectXTex, FidelityFX - MIT" },
+	{ CREDIT_GAP, NULL },
+	{ CREDIT_SMALL, "Full licence texts: THIRD-PARTY-NOTICES.txt in the app" },
+};
+
+static int s_page;
+
+static void draw_lines(XwaModernOptionsMenu* menu, const CreditLine* lines, size_t count) {
+	FrontendRect rect;
+
+	for (size_t i = 0; i < count; ++i) {
+		switch (lines[i].style) {
+			case CREDIT_GAP:
+				menu->y += 10;
+				break;
+			case CREDIT_HEADING:
+				FrontendDraw_RectAssign(&rect, 0, menu->y, 639, menu->y + 15);
+				FrontendText_DrawCentered(15, lines[i].text, &rect, g_colorLightBlue);
+				menu->y += 20;
+				break;
+			case CREDIT_NAME:
+				FrontendDraw_RectAssign(&rect, 0, menu->y, 639, menu->y + 15);
+				FrontendText_DrawCentered(15, lines[i].text, &rect, g_colorPaleCyan);
+				menu->y += 20;
+				break;
+			case CREDIT_SMALL:
+				FrontendDraw_RectAssign(&rect, 0, menu->y, 639, menu->y + 12);
+				FrontendText_DrawCentered(12, lines[i].text, &rect, g_colorPaleBlue);
+				menu->y += 15;
+				break;
+			default:
+				FrontendDraw_RectAssign(&rect, 0, menu->y, 639, menu->y + 12);
+				FrontendText_DrawCentered(12, lines[i].text, &rect, g_colorPaleBlue);
+				menu->y += 17;
+				break;
+		}
+	}
+}
+
 int XwaModernVrCreditsScreen_Update(int menu_center_x, int* cursor_row) {
 	XwaModernOptionsMenu menu;
-	FrontendRect rect;
 	int back;
 
 	if (!cursor_row) {
 		return 0;
 	}
-	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 90, cursor_row, 1);
-	XwaModernOptionsMenu_DrawTitle(&menu, "VR Port Credits");
-	menu.y += 18;
-	for (size_t i = 0; i < sizeof k_credits / sizeof k_credits[0]; ++i) {
-		switch (k_credits[i].style) {
-			case CREDIT_GAP:
-				menu.y += 14;
-				break;
-			case CREDIT_HEADING:
-				FrontendDraw_RectAssign(&rect, 0, menu.y, 639, menu.y + 15);
-				FrontendText_DrawCentered(15, k_credits[i].text, &rect, g_colorLightBlue);
-				menu.y += 21;
-				break;
-			case CREDIT_NAME:
-				FrontendDraw_RectAssign(&rect, 0, menu.y, 639, menu.y + 15);
-				FrontendText_DrawCentered(15, k_credits[i].text, &rect, g_colorPaleCyan);
-				menu.y += 21;
-				break;
-			default:
-				FrontendDraw_RectAssign(&rect, 0, menu.y, 639, menu.y + 12);
-				FrontendText_DrawCentered(12, k_credits[i].text, &rect, g_colorPaleBlue);
-				menu.y += 18;
-				break;
-		}
+	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 90, cursor_row, 2);
+	if (s_page == 0) {
+		XwaModernOptionsMenu_DrawTitle(&menu, "VR Port Credits");
+		menu.y += 18;
+		draw_lines(&menu, k_credits, sizeof k_credits / sizeof k_credits[0]);
+	} else {
+		XwaModernOptionsMenu_DrawTitle(&menu, "Open Source Licenses");
+		menu.y += 12;
+		draw_lines(&menu, k_licenses, sizeof k_licenses / sizeof k_licenses[0]);
 	}
-	menu.y += 24;
+	menu.y += 14;
+	if (XwaModernOptionsMenu_DrawAction(&menu, s_page == 0 ? "Open Source Licenses" : "VR Port Credits", 78, 0)) {
+		s_page = !s_page;
+		*cursor_row = 0;
+	}
 	back = XwaModernOptionsMenu_DrawAction(&menu, FrontendString_Get(STR_BACK), 87, 0);
 	back |= XwaModernOptionsMenu_TakeEscape(&menu);
+	if (back) {
+		s_page = 0;
+	}
 	return back;
 }
