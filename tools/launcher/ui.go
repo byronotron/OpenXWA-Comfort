@@ -1,115 +1,148 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
-	"io"
-	"os"
 	"strings"
-	"sync"
 	"time"
 )
 
-// UI reads the user's answers from the console. When stdin ends (for example
-// a scripted test), every question gets its default answer.
-type UI struct {
-	r   *bufio.Reader
-	eof bool
+// The flow talks to the user only through the UI interface. There are two
+// backends: the console (ui_console.go, --console) and the web window
+// (ui_web.go, the default).
+
+// Option is one button of a question.
+type Option struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Key   string `json:"-"`               // console key; "" means Enter
+	Style string `json:"style,omitempty"` // "primary", "danger" or ""
 }
 
-func newUI(in io.Reader) *UI { return &UI{r: bufio.NewReader(in)} }
+// Question is a card with text and buttons, optionally a text field.
+type Question struct {
+	Kind        string   `json:"kind"` // "buttons" or "text"
+	Title       string   `json:"title,omitempty"`
+	Text        string   `json:"text,omitempty"`
+	Notes       string   `json:"notes,omitempty"` // release notes (scrollable box)
+	Link        string   `json:"link,omitempty"`  // shown as a clickable link
+	List        []string `json:"list,omitempty"`  // e.g. file names
+	Problem     string   `json:"problem,omitempty"`
+	Options     []Option `json:"options"`
+	Default     string   `json:"default,omitempty"` // option chosen by Enter / end of input
+	Value       string   `json:"value,omitempty"`   // text field content
+	Placeholder string   `json:"placeholder,omitempty"`
+	Browse      bool     `json:"browse,omitempty"` // offer a folder picker next to the field
+	Error       bool     `json:"error,omitempty"`  // red card
 
-// readLine returns one line without the line ending; ok is false at end of input.
-func (u *UI) readLine() (string, bool) {
-	if u.eof {
-		return "", false
-	}
-	s, err := u.r.ReadString('\n')
-	if err != nil {
-		u.eof = true
-		if s == "" {
-			logf("INPUT: <end of input>")
-			return "", false
-		}
-	}
-	s = strings.TrimRight(s, "\r\n")
-	logf("INPUT: %q", s)
-	return s, true
+	// Console only.
+	AllowText     bool   `json:"-"` // free text is accepted as the answer "text"
+	ConsolePrompt string `json:"-"`
 }
 
-// ask prints a question and returns the trimmed answer.
-func (u *UI) ask(question string) (string, bool) {
-	fmt.Print(question + " ")
-	logf("ASK: %s", question)
-	line, ok := u.readLine()
-	if !ok {
-		fmt.Println()
-	}
-	return strings.TrimSpace(line), ok
+// Answer is the user's reply. Closed is set when the window was closed or
+// the console input ended; ID is then the question's default.
+type Answer struct {
+	ID     string
+	Text   string
+	Closed bool
 }
 
-// yesNo asks until it gets y or n; an empty answer (or end of input) is def.
-func (u *UI) yesNo(question string, def bool) bool {
-	for {
-		ans, ok := u.ask(question)
-		if !ok || ans == "" {
-			return def
-		}
-		switch strings.ToLower(ans) {
-		case "y", "yes", "j", "ja":
-			return true
-		case "n", "no", "nein", "non":
-			return false
-		}
-		say("Please type y (yes) or n (no).")
-	}
+// Progress is the state of a long task.
+type Progress struct {
+	Label      string // "Copying", "Downloading", ...
+	Files      int
+	TotalFiles int
+	Bytes      int64
+	TotalBytes int64
+	Folder     string
+	Busy       bool // a long single operation is running (counts move later)
+	Spin       int  // console spinner phase
 }
 
-// say prints a line for the user and also writes it to the log.
+// Fraction returns 0..1 (bytes if known, else files), or -1 if unknown.
+func (p *Progress) Fraction() float64 {
+	switch {
+	case p.TotalBytes > 0:
+		return float64(p.Bytes) / float64(p.TotalBytes)
+	case p.TotalFiles > 0:
+		return float64(p.Files) / float64(p.TotalFiles)
+	}
+	return -1
+}
+
+// Summary is "412 of 1530 files - 380 MB of 1.02 GB" (or bytes only).
+func (p *Progress) Summary() string {
+	if p.TotalFiles > 0 {
+		return fmt.Sprintf("%d of %d files - %s of %s", p.Files, p.TotalFiles, humanSize(p.Bytes), humanSize(p.TotalBytes))
+	}
+	if p.TotalBytes > 0 {
+		return fmt.Sprintf("%s of %s (%d%%)", humanSize(p.Bytes), humanSize(p.TotalBytes), p.Bytes*100/p.TotalBytes)
+	}
+	return humanSize(p.Bytes)
+}
+
+// UI is implemented by consoleUI and webUI.
+type UI interface {
+	SetSteps(titles []string)
+	SetStep(n int, state string) // n is 1-based; state "current", "done" or "error"
+	Say(msg string)
+	Progress(p *Progress) // nil ends the progress display
+	Ask(q Question) Answer
+	// Offer shows a question without waiting; the answer arrives on the
+	// channel. Returns nil if the backend cannot do that (console).
+	Offer(q Question) <-chan Answer
+	ClearOffer()
+	OpenPath(p string) // open a folder or file for the user (console: print it)
+	Finish(code int, pause bool)
+}
+
+// ui is the active backend.
+var ui UI
+
+// say shows a line to the user and writes it to the log.
 func say(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
-	fmt.Println(msg)
 	if strings.TrimSpace(msg) != "" {
 		logf("SAY: %s", msg)
 	}
+	if ui != nil {
+		ui.Say(msg)
+	}
 }
 
-// progressLine redraws a single console line in place with \r, at most every
-// 250 ms. The text is kept below 80 columns so it never wraps.
-type progressLine struct {
-	mu      sync.Mutex
-	last    time.Time
-	lastLen int
+// askYesNo asks a question with Yes/No buttons.
+func askYesNo(title, text string, def bool) bool {
+	d, prompt := "no", "(y/N)"
+	if def {
+		d, prompt = "yes", "(Y/n)"
+	}
+	q := Question{
+		Kind:  "buttons",
+		Title: title,
+		Text:  text,
+		Options: []Option{
+			{ID: "yes", Label: "Yes", Key: "y"},
+			{ID: "no", Label: "No", Key: "n"},
+		},
+		Default:       d,
+		ConsolePrompt: strings.TrimSpace(text + " " + prompt),
+	}
+	if def {
+		q.Options[0].Style = "primary"
+	} else {
+		q.Options[1].Style = "primary"
+	}
+	return ui.Ask(q).ID == "yes"
 }
 
-const progressWidth = 78
-
-func (p *progressLine) show(text string, force bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if !force && time.Since(p.last) < 250*time.Millisecond {
-		return
+// sleepCtx waits d, returning false early if the launcher is stopping.
+func sleepCtx(d time.Duration) bool {
+	select {
+	case <-time.After(d):
+		return true
+	case <-appCtx.Done():
+		return false
 	}
-	p.last = time.Now()
-	if len(text) > progressWidth {
-		text = text[:progressWidth]
-	}
-	pad := ""
-	if p.lastLen > len(text) {
-		pad = strings.Repeat(" ", p.lastLen-len(text))
-	}
-	fmt.Fprint(os.Stdout, "\r"+text+pad)
-	p.lastLen = len(text)
-}
-
-// done ends the progress line so the next output starts on a new line.
-func (p *progressLine) done(final string) {
-	p.show(final, true)
-	fmt.Println()
-	logf("PROGRESS: %s", final)
-	p.mu.Lock()
-	p.lastLen = 0
-	p.mu.Unlock()
 }
 
 // humanSize formats a byte count the way Windows Explorer users expect.
@@ -131,4 +164,12 @@ func humanSize(b int64) string {
 	default:
 		return fmt.Sprintf("%.2f GB", float64(b)/gb)
 	}
+}
+
+// plural returns "1 file" or "3 files".
+func plural(n int, word string) string {
+	if n == 1 {
+		return "1 " + word
+	}
+	return fmt.Sprintf("%d %ss", n, word)
 }

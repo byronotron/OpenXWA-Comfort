@@ -28,6 +28,14 @@ Install (and update)
    "Always allow from this computer").
 4. Put on the headset: Library -> filter "Unknown sources" -> OpenXWA.
 
+Keep the headset on your head when the launcher asks you to: OpenXWA has
+to start once on the headset to create its own folder.
+
+Steam Frame: turn on Developer Mode, start "Lepton Development" from your
+Steam Library and keep it running; the launcher then connects to it over
+the USB cable (or Wi-Fi). OpenXWA appears in the Lepton window's Android
+home screen. Not tested on a Steam Frame yet.
+
 Windows may say "Windows protected your PC": the launcher is not
 code-signed yet. Click "More info", then "Run anyway".
 

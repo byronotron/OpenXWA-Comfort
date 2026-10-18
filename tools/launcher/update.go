@@ -124,7 +124,6 @@ func (a *app) checkForUpdates() bool {
 		logf("update check disabled in %s", settingsFileName)
 		return false
 	}
-	say("")
 	say("Checking for a new launcher version...")
 	rel, err := fetchNewestRelease(updateAPIBase(), s.getBool("include_test_versions", false))
 	if errors.Is(err, errNoRelease) {
@@ -147,40 +146,51 @@ func (a *app) checkForUpdates() bool {
 		return false
 	}
 
-	say("")
-	say("New version %s available (released %s).", newVer, rel.releaseDate())
-	notes := strings.Split(strings.TrimSpace(strings.ReplaceAll(rel.Body, "\r\n", "\n")), "\n")
-	if len(notes) > 0 && notes[0] != "" {
-		say("What's new:")
-		for i, l := range notes {
-			if i == 15 {
-				say("  ...")
-				break
-			}
-			say("  %s", l)
-		}
+	notes := cleanNotes(rel.Body)
+	text := fmt.Sprintf("Released %s. What's new:", rel.releaseDate())
+	if notes == "" {
+		text = fmt.Sprintf("Released %s.", rel.releaseDate())
 	}
-	say("")
-	say("  [d] Download now  [l] Later  [s] Skip this version")
-	for {
-		ans, _ := a.ui.ask("Your choice (Enter = later):")
-		switch strings.ToLower(ans) {
-		case "", "l":
-			say("OK, maybe later.")
-			return false
-		case "s":
-			if err := s.set("skip_version", newVer); err != nil {
-				say("Could not save the setting: %v", err)
-			} else {
-				say("Version %s will not be offered again.", newVer)
-			}
-			return false
-		case "d":
-			return a.downloadUpdate(rel)
-		default:
-			say("Please type d, l or s.")
+	ans := ui.Ask(Question{
+		Kind:  "buttons",
+		Title: fmt.Sprintf("New version %s available", newVer),
+		Text:  text,
+		Notes: notes,
+		Options: []Option{
+			{ID: "download", Label: "Download now", Key: "d", Style: "primary"},
+			{ID: "later", Label: "Later", Key: "l"},
+			{ID: "skip", Label: "Skip this version", Key: "s"},
+		},
+		Default: "later",
+	})
+	switch ans.ID {
+	case "download":
+		return a.downloadUpdate(rel)
+	case "skip":
+		if err := s.set("skip_version", newVer); err != nil {
+			say("Could not save the setting: %v", err)
+		} else {
+			say("Version %s will not be offered again.", newVer)
 		}
+	default:
+		say("OK, maybe later.")
 	}
+	return false
+}
+
+// cleanNotes makes Markdown release notes readable as plain text: heading
+// marks and bold/code marks are removed.
+func cleanNotes(body string) string {
+	var out []string
+	for _, l := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
+		t := strings.TrimLeft(l, "#")
+		if t != l {
+			l = strings.TrimSpace(t)
+		}
+		l = strings.NewReplacer("**", "", "`", "").Replace(l)
+		out = append(out, l)
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
 }
 
 // parseSHA256Sums reads "<hex>  <filename>" lines (sha256sum format, with an
@@ -262,6 +272,9 @@ func (a *app) downloadUpdate(rel *ghRelease) bool {
 	zipPath := filepath.Join(dlDir, filepath.Base(zipAsset.Name))
 	say("Downloading %s to %s", zipAsset.Name, dlDir)
 	if err := downloadFile(zipAsset.URL, zipPath, "Downloading"); err != nil {
+		if errors.Is(err, errClosed) {
+			return false
+		}
 		logf("update download failed: %v", err)
 		say("The download failed (%v). Continuing with this version.", err)
 		return false
@@ -305,7 +318,7 @@ func (a *app) downloadUpdate(rel *ghRelease) bool {
 	}
 	say("The new version is in: %s", dest)
 
-	if !a.ui.yesNo("Open the new version now? (Y/n)", true) {
+	if !askYesNo("Download complete", "Open the new version now?", true) {
 		say("OK. You can start it later from that folder. Continuing with this version.")
 		return false
 	}

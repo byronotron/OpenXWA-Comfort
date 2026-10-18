@@ -1,5 +1,7 @@
 #include "xwa/frontend/flight_loading.h"
 
+#include "aeron/aeron.h"
+
 #include "xwa/assets/string_table.h"
 #include "xwa/assets/ui_string.h"
 #include "xwa/audio/music.h"
@@ -182,7 +184,9 @@ int FlightLoading_DrawProgressScreen(int progressStep) {
 		FrontImage_DrawSprite("sbarspark", progressBarWidth + 70, 75);
 	}
 #ifdef XWA_MODERN
-	if (g_flightLoadingPrompt) {
+	/* In the headset the line is under the screen's frame instead
+	 * (xwa_remaster/vr_env.c). */
+	if (g_flightLoadingPrompt && !Aeron_XrIsPresenting()) {
 		const int level = g_flightLoadingPromptLevel < 0 ? 0 : g_flightLoadingPromptLevel > 255 ? 255 : g_flightLoadingPromptLevel;
 		const int color = FrontendDisplay_PackRGB(level, level * 220 / 255, level * 70 / 255);
 		FrontendDraw_RectAssign(&rect, 0, 436, 639, 460);

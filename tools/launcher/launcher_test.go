@@ -187,8 +187,22 @@ func TestDevicesAndNames(t *testing.T) {
 	if len(devs) != 3 || devs[0].model != "Quest 3" || devs[1].state != "unauthorized" || devs[2].state != "no permissions" {
 		t.Errorf("devices = %+v", devs)
 	}
-	if !strings.Contains(waitMessage(devs[1:2]), "Allow") || !strings.Contains(waitMessage(nil), "USB-C") {
+	if waitState(devs) != "unauthorized" || waitState(nil) != "none" || waitState([]adbDevice{{state: "weird"}}) != "weird" ||
+		waitState([]adbDevice{{state: "offline"}, {state: "host"}}) != "offline" {
+		t.Error("waitState")
+	}
+	for _, st := range []string{"none", "unauthorized", "offline", "authorizing", "connecting", "no permissions",
+		"recovery", "sideload", "bootloader", "host", "weird"} {
+		if waitMessage(st) == "" {
+			t.Errorf("no message for %s", st)
+		}
+	}
+	if !strings.Contains(waitMessage("unauthorized"), "Allow") || !strings.Contains(waitMessage("none"), "USB-C") ||
+		!strings.Contains(waitMessage("unauthorized"), "Steam Frame") || !strings.Contains(waitMessage("weird"), "weird") {
 		t.Error("wait messages")
+	}
+	if !strings.Contains(shellProblem("error: closed"), "closed") || !strings.Contains(shellProblem("adb: more than one device/emulator"), "Unplug") {
+		t.Error("shellProblem")
 	}
 	names := map[[2]string]string{
 		{"Oculus", "Quest 3"}:  "Meta Quest 3",
@@ -339,5 +353,63 @@ func TestFetchNewestRelease(t *testing.T) {
 	}
 	if d := (&ghRelease{PublishedAt: "2026-10-01T10:00:00Z"}).releaseDate(); d != "1 Oct 2026" {
 		t.Errorf("date %q", d)
+	}
+}
+
+func TestOwnership(t *testing.T) {
+	out := "10225|u0_a225|/sdcard/x/XWA\n2000|shell|/sdcard/x/XWA/FLIGHTMODELS\nstat: missing\n"
+	m := parseOwners(out, []string{"/sdcard/x/XWA", "/sdcard/x/XWA/FLIGHTMODELS"})
+	if m["/sdcard/x/XWA"].uid != 10225 || m["/sdcard/x/XWA/FLIGHTMODELS"].name != "shell" {
+		t.Errorf("parseOwners = %v", m)
+	}
+	// Names printed differently: matched by order when every path got a line.
+	m = parseOwners("10225|u0_a225|/storage/emulated/0/a\n", []string{"/sdcard/a"})
+	if m["/sdcard/a"].uid != 10225 {
+		t.Errorf("by order: %v", m)
+	}
+	cases := []struct {
+		o      owner
+		app    int
+		foreig bool
+	}{
+		{owner{"shell", 2000}, 10225, true},
+		{owner{"shell", -1}, 0, true},
+		{owner{"u0_a225", 10225}, 10225, false},
+		{owner{"u0_a99", 10099}, 10225, true},
+		{owner{"u0_a225", 10225}, 0, false},
+		{owner{"root", 0}, 0, true},
+		{owner{"u0_a225", -1}, 10225, false},
+	}
+	for _, c := range cases {
+		if got := foreignOwner(c.o, c.app); got != c.foreig {
+			t.Errorf("foreignOwner(%v, %d) = %v", c.o, c.app, got)
+		}
+	}
+	dump := "Packages:\n  Package [org.openxwa.quest] (4d2b1c):\n    userId=10225\n    versionName=1.0\n"
+	if parseAppUID(dump) != 10225 || parseAppUID("nothing") != 0 {
+		t.Error("parseAppUID")
+	}
+}
+
+func TestLeptonPorts(t *testing.T) {
+	ss := "State  Recv-Q Send-Q Local Address:Port Peer Address:Port\n" +
+		"LISTEN 0      128          0.0.0.0:22         0.0.0.0:*\n" +
+		"LISTEN 0      4096       127.0.0.1:5557       0.0.0.0:*\n" +
+		"LISTEN 0      4096            [::]:5555          [::]:*\n" +
+		"ESTAB  0      0          127.0.0.1:5560     127.0.0.1:40000\n"
+	if got := parseLeptonPorts(ss); !reflect.DeepEqual(got, []int{5555, 5557}) {
+		t.Errorf("ss: %v", got)
+	}
+	netstat := "Proto Recv-Q Send-Q Local Address  Foreign Address State\ntcp 0 0 0.0.0.0:5556 0.0.0.0:* LISTEN\n"
+	if got := parseLeptonPorts(netstat); !reflect.DeepEqual(got, []int{5556}) {
+		t.Errorf("netstat: %v", got)
+	}
+}
+
+func TestReflow(t *testing.T) {
+	in := "OpenXWA could not be updated: the copy\nwas signed differently.\n\nWARNING: uninstalling\ndeletes files.\nThese files:\n  a.txt\n  b.txt"
+	want := "OpenXWA could not be updated: the copy was signed differently.\n\nWARNING: uninstalling deletes files. These files:\n  a.txt\n  b.txt"
+	if got := reflow(in); got != want {
+		t.Errorf("reflow:\n%q\nwant\n%q", got, want)
 	}
 }

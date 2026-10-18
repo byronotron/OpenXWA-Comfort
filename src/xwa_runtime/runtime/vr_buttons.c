@@ -221,9 +221,9 @@ const char* XwaVrButtons_KeyAction(uint16_t key) {
 		case KEY_B:
 			return "beam weapon";
 		case KEY_APOSTROPHE:
-			return "lasers > shields";
+			return "lasers to shields";
 		case KEY_SEMICOLON:
-			return "shields > lasers";
+			return "shields to lasers";
 		case KEY_S:
 			return "shield balance";
 		case KEY_N:

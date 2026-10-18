@@ -331,6 +331,9 @@ typedef struct XwaFlightObject {
 	uint8_t orient_dirty; /* MobileObject.orientMatrixDirty */
 	int16_t source_obj;   /* MobileObject.sourceObjIdx */
 	uint16_t speed;       /* MobileObject.speed (raw) */
+	/* A guided warhead's target (WarheadGuidanceState.targetObjIdx, an
+	 * object slot); 0xffff none. */
+	uint16_t warhead_target_slot;
 	/* ---- billboard-law state (SceneBillboard_QueueObjectTextured
 	 * inputs; the HD driver derives explosion/debris/spark sprites from
 	 * these). */

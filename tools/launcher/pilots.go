@@ -59,27 +59,43 @@ func (a *app) copyPilots() error {
 		say("No pilot files in the game folder. Nothing to do.")
 		return nil
 	}
-	say("Pilots found in your game folder: %s", strings.Join(pilotNames(files), ", "))
-	if !a.ui.yesNo("Copy these pilots to the headset? (y/N)", false) {
+	logf("pilots: %v", pilotNames(files))
+	ans := ui.Ask(Question{
+		Kind:  "buttons",
+		Title: "Copy your pilots?",
+		Text: "Pilots found in your game folder: " + strings.Join(pilotNames(files), ", ") + ".\n" +
+			"OpenXWA keeps its own pilots. Copying brings your PC pilots over; they are\n" +
+			"imported the next time OpenXWA starts.",
+		Options: []Option{
+			{ID: "yes", Label: "Copy pilots", Key: "y"},
+			{ID: "no", Label: "Don't copy", Key: "n", Style: "primary"},
+		},
+		Default:       "no",
+		ConsolePrompt: "Copy these pilots to the headset? (y/N)",
+	})
+	if ans.ID != "yes" {
 		say("Pilots are not copied.")
 		return nil
 	}
-	if out, err := a.adb.shell(30*time.Second, "mkdir -p "+shQuote(remotePilots)); err != nil {
-		return fail("Could not create the pilot folder on the headset:\n  %s", strings.TrimSpace(out))
+	// pilot-import is made by mkdir only where such folders belong to the app
+	// (see probeCopyOwnership); otherwise adb push makes it.
+	if a.mkdirOK {
+		if out, err := a.adb.shell(30*time.Second, "mkdir -p "+shQuote(a.remotePilots())); err != nil {
+			return fail("Could not create the pilot folder on the headset:\n  %s", strings.TrimSpace(out))
+		}
 	}
 	for try := 1; try <= 3; try++ {
 		var jobs []pushJob
-		remote, err := a.listRemote(remotePilots)
+		remote, err := a.listRemote(a.remotePilots())
 		if err != nil {
 			remote = map[string]int64{}
 		}
 		bad := filesToCopy(files, remote)
 		if len(bad) == 0 {
-			say("Pilots copied. OpenXWA brings them in the next time it starts.")
-			return nil
+			return a.pilotsDone()
 		}
 		for _, f := range bad {
-			j := singleFileJob(remotePilots, f)
+			j := singleFileJob(a.remotePilots(), f)
 			j.label = ""
 			jobs = append(jobs, j)
 		}
@@ -87,7 +103,7 @@ func (a *app) copyPilots() error {
 			return err
 		}
 	}
-	remote, _ := a.listRemote(remotePilots)
+	remote, _ := a.listRemote(a.remotePilots())
 	if bad := filesToCopy(files, remote); len(bad) > 0 {
 		var names []string
 		for _, f := range bad {
@@ -95,6 +111,19 @@ func (a *app) copyPilots() error {
 		}
 		say("WARNING: these pilot files could not be copied: %s", strings.Join(names, ", "))
 		say("The game files are copied anyway; run the launcher again later to retry.")
+		return nil
+	}
+	return a.pilotsDone()
+}
+
+// pilotsDone checks that the app can read pilot-import, then reports.
+func (a *app) pilotsDone() error {
+	m := a.remoteOwners(a.remotePilots())
+	if o, ok := m[a.remotePilots()]; ok && foreignOwner(o, a.appUID()) {
+		logf("pilot-import belongs to %v; removing it", o)
+		a.adb.shell(60*time.Second, "rm -rf "+shQuote(a.remotePilots()))
+		say("WARNING: the pilots could not be copied in a way OpenXWA can read on this\n" +
+			"headset, so they were removed again. The game files are copied anyway.")
 		return nil
 	}
 	say("Pilots copied. OpenXWA brings them in the next time it starts.")

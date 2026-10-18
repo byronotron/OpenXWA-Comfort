@@ -1327,7 +1327,7 @@ int XwaFlightTask_Init(char* missionCmdLine, const char* filmFilePath) {
 }
 
 /* Single-player missions: once loaded, the loading screen waits for any
- * button before the hangar ("Press any button to enter the Hangar",
+ * button before the hangar ("Press Any Key to Continue",
  * pulsing), so a player who looked away does not miss the start. Returns 1
  * when the flight may go on. */
 static int s_hangarPromptActive;
@@ -1398,7 +1398,7 @@ static int XwaFlightTask_HangarPromptDone(uint64_t nowUs) {
 		s_hangarPromptActive = 1;
 		s_hangarPromptStartUs = nowUs;
 		s_hangarPromptInput = now;
-		g_flightLoadingPrompt = "Press any button to enter the Hangar";
+		g_flightLoadingPrompt = "Press Any Key to Continue";
 		XwaFlightTask_Log("hangar-prompt");
 	}
 	const int pressed = XwaFlightTask_NewPress(&now, &s_hangarPromptInput);

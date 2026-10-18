@@ -222,14 +222,6 @@ func singleFileJob(base string, f gameFile) pushJob {
 	return pushJob{label: label, local: f.Abs, remote: base + "/" + f.Rel, files: []gameFile{f}}
 }
 
-// plural returns "1 file" or "3 files".
-func plural(n int, word string) string {
-	if n == 1 {
-		return "1 " + word
-	}
-	return fmt.Sprintf("%d %ss", n, word)
-}
-
 func totalSize(files []gameFile) int64 {
 	var n int64
 	for _, f := range files {
@@ -238,79 +230,64 @@ func totalSize(files []gameFile) int64 {
 	return n
 }
 
-// copyProgress draws "Copying: 412 of 1530 files (380 MB of 1.02 GB)  FOLDER".
-// While a long folder push runs, a small spinner shows that it is working.
+// copyProgress feeds the UI's progress display. While a long folder push
+// runs, a ticker keeps the display alive (console spinner, busy stripes).
 type copyProgress struct {
-	mu         sync.Mutex
-	line       progressLine
-	verb       string
-	doneFiles  int
-	totalFiles int
-	doneBytes  int64
-	totalBytes int64
-	folder     string
-	spin       int
-	stop       chan struct{}
+	mu   sync.Mutex
+	p    Progress
+	stop chan struct{}
 }
 
 func newCopyProgress(verb string, files []gameFile) *copyProgress {
-	p := &copyProgress{verb: verb, totalFiles: len(files), totalBytes: totalSize(files), stop: make(chan struct{})}
+	c := &copyProgress{p: Progress{Label: verb, TotalFiles: len(files), TotalBytes: totalSize(files)}, stop: make(chan struct{})}
+	ui.Progress(&c.p)
 	go func() {
 		t := time.NewTicker(250 * time.Millisecond)
 		defer t.Stop()
 		for {
 			select {
-			case <-p.stop:
+			case <-c.stop:
 				return
 			case <-t.C:
-				p.mu.Lock()
-				p.spin++
-				p.mu.Unlock()
-				p.draw(false)
+				c.mu.Lock()
+				c.p.Spin++
+				p := c.p
+				c.mu.Unlock()
+				ui.Progress(&p)
 			}
 		}
 	}()
-	return p
+	return c
 }
 
-func (p *copyProgress) text(final bool) string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	s := fmt.Sprintf("%s: %d of %d files (%s of %s)", p.verb, p.doneFiles, p.totalFiles, humanSize(p.doneBytes), humanSize(p.totalBytes))
-	if !final && p.folder != "" {
-		spinner := `|/-\`[p.spin%4 : p.spin%4+1]
-		room := progressWidth - len(s) - 4
-		f := p.folder
-		if room < 4 {
-			f = ""
-		} else if len(f) > room {
-			f = "..." + f[len(f)-room+3:]
-		}
-		s += "  " + f + " " + spinner
-	}
-	return s
+// start marks one push as running.
+func (c *copyProgress) start(j pushJob) {
+	c.mu.Lock()
+	c.p.Folder = j.label
+	c.p.Busy = len(j.files) > 1
+	p := c.p
+	c.mu.Unlock()
+	ui.Progress(&p)
 }
 
-func (p *copyProgress) draw(force bool) { p.line.show(p.text(false), force) }
-
-func (p *copyProgress) setFolder(f string) {
-	p.mu.Lock()
-	p.folder = f
-	p.mu.Unlock()
-	p.draw(false)
+func (c *copyProgress) add(files []gameFile) {
+	c.mu.Lock()
+	c.p.Files += len(files)
+	c.p.Bytes += totalSize(files)
+	c.p.Busy = false
+	p := c.p
+	c.mu.Unlock()
+	ui.Progress(&p)
 }
 
-func (p *copyProgress) add(files []gameFile) {
-	p.mu.Lock()
-	p.doneFiles += len(files)
-	p.doneBytes += totalSize(files)
-	p.mu.Unlock()
-	p.draw(false)
-}
-
-func (p *copyProgress) finish() {
-	close(p.stop)
-	p.line.done(p.text(true))
+func (c *copyProgress) finish() {
+	close(c.stop)
+	c.mu.Lock()
+	c.p.Folder, c.p.Busy = "", false
+	p := c.p
+	c.mu.Unlock()
+	ui.Progress(&p)
+	ui.Progress(nil)
 }
 
 // listRemote lists the files below a headset folder with their sizes.
@@ -338,8 +315,13 @@ var errDisconnected = &userError{msg: "The headset was disconnected. Check the U
 func (a *app) runPushes(verb string, jobs []pushJob, files []gameFile) error {
 	p := newCopyProgress(verb, files)
 	for _, j := range jobs {
-		p.setFolder(j.label)
+		p.start(j)
 		out, err := a.adb.run(0, "push", j.local, j.remote)
+		if err == errClosed {
+			p.finish()
+			logf("copy stopped during the push of %s (window closed)", j.local)
+			return errClosed
+		}
 		if err != nil || strings.Contains(out, "adb: error") {
 			logf("push of %s reported a problem", j.local)
 			if a.headsetGone() {
@@ -382,7 +364,7 @@ func parseDfAvailable(out string) (int64, bool) {
 
 // checkFreeSpace warns when the headset may be too full for need bytes.
 func (a *app) checkFreeSpace(need int64) error {
-	out, err := a.adb.shell(30*time.Second, "df -k "+shQuote(remoteBase))
+	out, err := a.adb.shell(30*time.Second, "df -k "+shQuote(a.remoteBase()))
 	if err != nil {
 		logf("df failed; skipping the free space check")
 		return nil
@@ -398,11 +380,21 @@ func (a *app) checkFreeSpace(need int64) error {
 	if free >= need+margin {
 		return nil
 	}
-	say("")
-	say("WARNING: the headset may not have enough free space.")
-	say("  Needed: about %s    Free on the headset: %s", humanSize(need), humanSize(free))
-	say("Free up space on the headset (for example uninstall games you no longer play).")
-	if !a.ui.yesNo("Continue anyway? (y/N)", false) {
+	logf("WARNING: not enough free space on the headset")
+	q := Question{
+		Kind:  "buttons",
+		Title: "The headset may not have enough free space",
+		Text: fmt.Sprintf("Needed: about %s    Free on the headset: %s\n"+
+			"Free up space on the headset (for example uninstall games you no longer play).",
+			humanSize(need), humanSize(free)),
+		Options: []Option{
+			{ID: "stop", Label: "Stop", Key: "n", Style: "primary"},
+			{ID: "go", Label: "Continue anyway", Key: "y"},
+		},
+		Default:       "stop",
+		ConsolePrompt: "Continue anyway? (y/N)",
+	}
+	if ui.Ask(q).ID != "go" {
 		return fail("Stopped so you can free up space on the headset. Run the launcher again\nafterwards; it only copies what is missing.")
 	}
 	return nil
@@ -418,38 +410,72 @@ func (a *app) copyGame() error {
 	logf("%d game files, %d skipped", len(files), skipped)
 	say("%d game files (%s).", len(files), humanSize(totalSize(files)))
 
+	for attempt := 1; ; attempt++ {
+		if err := a.copyMissing(files); err != nil {
+			return err
+		}
+		bad, xwaBad, err := a.finalOwnershipCheck(files)
+		if err == nil {
+			break
+		}
+		if xwaBad || attempt == 2 {
+			return err
+		}
+		// Some folders below XWA belong to the wrong owner: remove them and
+		// copy them again, letting adb push make the folders.
+		say("Some folders on the headset belong to the wrong owner; removing them and\ncopying them again.")
+		a.mkdirOK = false
+		var q []string
+		for _, p := range bad {
+			q = append(q, shQuote(a.remoteGame()+"/"+p))
+		}
+		if out, err := a.adb.shell(10*time.Minute, "rm -rf "+strings.Join(q, " ")); err != nil {
+			if err == errClosed {
+				return err
+			}
+			return fail("Could not remove the unusable folders:\n  %s", strings.TrimSpace(out))
+		}
+	}
+	return a.writeManifest(files)
+}
+
+// copyMissing copies the files that are missing or have the wrong size, then
+// verifies them.
+func (a *app) copyMissing(files []gameFile) error {
 	say("Checking what is already on the headset...")
-	remote, err := a.listRemote(remoteGame)
+	remote, err := a.listRemote(a.remoteGame())
 	if err != nil {
 		return fail("Could not read the files on the headset (%v).\nCheck the USB cable and try again.", err)
 	}
 	todo := filesToCopy(files, remote)
 	if len(todo) == 0 {
 		say("All game files are already on the headset. Nothing to copy.")
+		return nil
+	}
+	if len(todo) == len(files) {
+		say("%s to copy (%s).", plural(len(todo), "file"), humanSize(totalSize(todo)))
 	} else {
-		if len(todo) == len(files) {
-			say("%s to copy (%s).", plural(len(todo), "file"), humanSize(totalSize(todo)))
-		} else {
-			say("%s to copy (new or changed, %s).", plural(len(todo), "file"), humanSize(totalSize(todo)))
-		}
-		if err := a.checkFreeSpace(totalSize(todo)); err != nil {
-			return err
-		}
-		// Create every folder first: pushing into missing folders is where
-		// files went missing before.
-		for _, c := range mkdirCommands(remoteGame, todo, 4000) {
+		say("%s to copy (new or changed, %s).", plural(len(todo), "file"), humanSize(totalSize(todo)))
+	}
+	if err := a.checkFreeSpace(totalSize(todo)); err != nil {
+		return err
+	}
+	// Create every folder first (pushing into missing folders is where files
+	// went missing before), but only where folders made that way belong to
+	// the app (see probeCopyOwnership); otherwise adb push makes them.
+	if a.mkdirOK {
+		for _, c := range mkdirCommands(a.remoteGame(), todo, 4000) {
 			if out, err := a.adb.shell(2*time.Minute, c); err != nil {
 				return fail("Could not create the folders on the headset:\n  %s", strings.TrimSpace(out))
 			}
 		}
-		if err := a.runPushes("Copying", planPushes(a.gameDir, remoteGame, todo), todo); err != nil {
-			return err
-		}
-		if err := a.verifyGame(files); err != nil {
-			return err
-		}
+	} else {
+		logf("not creating folders with mkdir on this headset; adb push makes them")
 	}
-	return a.writeManifest(files)
+	if err := a.runPushes("Copying", planPushes(a.gameDir, a.remoteGame(), todo), todo); err != nil {
+		return err
+	}
+	return a.verifyGame(files)
 }
 
 // verifyGame lists the headset again and re-copies missing or wrong-size
@@ -458,7 +484,7 @@ func (a *app) verifyGame(files []gameFile) error {
 	say("Checking the copied files...")
 	const rounds = 3
 	for round := 1; ; round++ {
-		remote, err := a.listRemote(remoteGame)
+		remote, err := a.listRemote(a.remoteGame())
 		if err != nil {
 			if a.headsetGone() {
 				return errDisconnected
@@ -489,7 +515,7 @@ func (a *app) verifyGame(files []gameFile) error {
 		say("%s did not arrive correctly. Copying again (try %d of %d)...", plural(len(bad), "file"), round, rounds)
 		var jobs []pushJob
 		for _, f := range bad {
-			jobs = append(jobs, singleFileJob(remoteGame, f))
+			jobs = append(jobs, singleFileJob(a.remoteGame(), f))
 		}
 		if err := a.runPushes("Copying again", jobs, bad); err != nil {
 			return err
@@ -521,7 +547,7 @@ func (a *app) writeManifest(files []gameFile) error {
 		return fail("Could not write a temporary file: %v", err)
 	}
 	tmp.Close()
-	remote := remoteGame + "/" + manifestName
+	remote := a.remoteGame() + "/" + manifestName
 	for try := 1; try <= 3; try++ {
 		a.adb.run(2*time.Minute, "push", tmpPath, remote)
 		out, _ := a.adb.shell(30*time.Second, "stat -c %s "+shQuote(remote))

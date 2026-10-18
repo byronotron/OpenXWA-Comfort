@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the OpenXWA launcher.
 #   ./build.sh 1.0.0-rc3
-# Produces dist/OpenXWA-Launcher.exe (Windows, the release build) and
+# Produces dist/OpenXWA-Launcher.exe (Windows GUI program, the release build) and
 # dist/openxwa-launcher-linux (for testing).
 set -euo pipefail
 
@@ -20,7 +20,8 @@ fi
 mkdir -p dist
 LDFLAGS="-s -w -X main.version=$VER"
 
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 "$GO" build -trimpath -ldflags "$LDFLAGS" -o dist/OpenXWA-Launcher.exe .
+# -H windowsgui: a GUI program, so no console window opens (--console makes one).
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 "$GO" build -trimpath -ldflags "$LDFLAGS -H windowsgui" -o dist/OpenXWA-Launcher.exe .
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 "$GO" build -trimpath -ldflags "$LDFLAGS" -o dist/openxwa-launcher-linux .
 
 echo "Built version $VER:"

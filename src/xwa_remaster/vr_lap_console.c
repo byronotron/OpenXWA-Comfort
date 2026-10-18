@@ -549,7 +549,7 @@ static void vc_layout(void) {
 			}
 		}
 		{
-			static const char* const l[2] = { "LASERS > SHIELDS", "SHIELDS > LASERS" };
+			static const char* const l[2] = { "LASERS TO SHIELDS", "SHIELDS TO LASERS" };
 			static const XwaVrConsoleAction a[2] = { XWA_VRC_LASERS_TO_SHIELDS, XWA_VRC_SHIELDS_TO_LASERS };
 			vc_row(x, 340.0f, w, 54.0f, 2, l, a, row);
 			row[0]->enabled = row[1]->enabled = st->has_shields;
@@ -953,6 +953,8 @@ void XwaVrConsole_CaptureGrip(int hand) {
 	}
 }
 
+static int vp_ray_beam(int hand, float start[3], float end[3]);
+
 int XwaVrConsole_RayBeam(int hand, float start[3], float end[3]) {
 	if (s_vw.open && s_vw.drawn && hand == s_vw.hand) {
 		/* The quick wheel's pointer: bright. */
@@ -960,8 +962,11 @@ int XwaVrConsole_RayBeam(int hand, float start[3], float end[3]) {
 		memcpy(end, s_vw.ray_end, sizeof s_vw.ray_end);
 		return 2;
 	}
-	if (hand < 0 || hand > 1 || !s_vc.drawn || !s_vc.awake || s_vc.hands[hand].cursor != 2) {
+	if (hand < 0 || hand > 1) {
 		return 0;
+	}
+	if (!s_vc.drawn || !s_vc.awake || s_vc.hands[hand].cursor != 2) {
+		return vp_ray_beam(hand, start, end); /* the side panel's, if pointed at */
 	}
 	memcpy(start, s_vc.hands[hand].ray_start, sizeof s_vc.hands[hand].ray_start);
 	memcpy(end, s_vc.hands[hand].ray_end, sizeof s_vc.hands[hand].ray_end);
@@ -1868,7 +1873,7 @@ static void vw_layout(void) {
 		case 1 + VW_CAT_ENERGY:
 			/* Recharge rates step up one level a pick (MAX wraps to OFF, as
 			 * the keys do). */
-			b = vw_item("LASERS >\nSHIELDS", XWA_VRC_LASERS_TO_SHIELDS, 0);
+			b = vw_item("LASERS TO\nSHIELDS", XWA_VRC_LASERS_TO_SHIELDS, 0);
 			b->enabled = st->has_shields;
 			b = vw_item("LASER\nRECHARGE", XWA_VRC_LASER_LEVEL, (vw_clamp_level(st->laser_level) + 1) % 5);
 			b->sub = k_vw_levels[vw_clamp_level(st->laser_level)];
@@ -1886,7 +1891,7 @@ static void vw_layout(void) {
 						 : NULL;
 			vw_item("ENERGY\nPRESET 1", XWA_VRC_PRESET_RECALL, 0);
 			vw_item("ENERGY\nPRESET 2", XWA_VRC_PRESET_RECALL, 1);
-			b = vw_item("SHIELDS >\nLASERS", XWA_VRC_SHIELDS_TO_LASERS, 0);
+			b = vw_item("SHIELDS TO\nLASERS", XWA_VRC_SHIELDS_TO_LASERS, 0);
 			b->enabled = st->has_shields;
 			break;
 		case 1 + VW_CAT_TARGETING:
@@ -3122,8 +3127,11 @@ static struct {
 	int hover[2];   /* tab under each hand's cursor, -1 none; VP_TABS = the map */
 	int poke_down[2];
 	int trigger_down[2];
+	int ray[2]; /* the hand's ray on the panel this frame: a beam to it */
+	float ray_start[2][3], ray_end[2][3];
 	int captured[2];
 	int tab_dirty;
+	int map_help; /* the map's legend ("?") shown */
 } s_vp = { .zoom = 1, .hover = { -1, -1 } };
 
 static void vp_load(void) {
@@ -3131,6 +3139,8 @@ static void vp_load(void) {
 		return;
 	}
 	s_vp.loaded = 1;
+	const char* legend = getenv("XWA_XR_MAP_LEGEND"); /* 1: open at start (tests) */
+	s_vp.map_help = legend && legend[0] == '1';
 	const char* env = getenv("XWA_XR_PANEL_TAB");
 	for (int t = 0; env && t < VP_TABS; ++t) {
 		if (strcmp(env, k_vp_tab_keys[t]) == 0) {
@@ -3148,10 +3158,22 @@ int XwaVrConsole_TakePanelTab(char* out, int size) {
 	return 1;
 }
 
-/* What lies at panel pixel (x, y): a tab, VP_TABS for the map area, -1. */
+/* The map's "?" (top right, under the tabs). */
+#define VP_HELP_X(w) ((w) - 92.0f)
+#define VP_HELP_Y 88.0f
+#define VP_HELP_W 60.0f
+#define VP_HELP_H 48.0f
+#define VP_HIT_HELP (VP_TABS + 1)
+
+/* What lies at panel pixel (x, y): a tab, VP_TABS for the map area,
+ * VP_HIT_HELP for the map's "?", -1. */
 static int vp_hit(float x, float y, float w, float h) {
 	if (x < 0.0f || y < 0.0f || x >= w || y >= h) {
 		return -1;
+	}
+	if (s_vp.tab == VP_TAB_MAP && x >= VP_HELP_X(w) && x < VP_HELP_X(w) + VP_HELP_W && y >= VP_HELP_Y &&
+		y < VP_HELP_Y + VP_HELP_H) {
+		return VP_HIT_HELP;
 	}
 	if (y >= VP_TAB_TOP && y < VP_TAB_TOP + VP_TAB_H) {
 		const float tw = (w - 48.0f) / (float)VP_TABS;
@@ -3165,12 +3187,16 @@ static void vp_press(int hand, int what) {
 	if (what < 0) {
 		return;
 	}
-	if (what < VP_TABS) {
+	if (what == VP_HIT_HELP) {
+		s_vp.map_help = !s_vp.map_help;
+	} else if (what < VP_TABS) {
 		if (what != s_vp.tab) {
 			s_vp.tab = what;
 			s_vp.tab_dirty = 1;
 			setenv("XWA_XR_PANEL_TAB", k_vp_tab_keys[what], 1);
 		}
+	} else if (s_vp.map_help) {
+		s_vp.map_help = 0; /* a touch on the legend closes it */
 	} else {
 		s_vp.zoom = (s_vp.zoom + 1) % (int)(sizeof k_vp_ranges_km / sizeof k_vp_ranges_km[0]);
 	}
@@ -3185,6 +3211,7 @@ static void vp_update_hands(const AeronXrPanel* pose, const float ax[3], const f
 		AeronXrHand xh;
 		s_vp.hover[hand] = -1;
 		s_vp.captured[hand] = 0;
+		s_vp.ray[hand] = 0;
 		if (!Aeron_XrGetHand(hand, &xh)) {
 			s_vp.poke_down[hand] = s_vp.trigger_down[hand] = 0;
 			continue;
@@ -3226,6 +3253,11 @@ static void vp_update_hands(const AeronXrPanel* pose, const float ax[3], const f
 					if (rx >= 0.0f && rx < w_px && ry >= 0.0f && ry < h_px) {
 						ray = 1;
 						what = vp_hit(rx, ry, w_px, h_px);
+						s_vp.ray[hand] = 1;
+						for (int k = 0; k < 3; ++k) {
+							s_vp.ray_start[hand][k] = tip[k];
+							s_vp.ray_end[hand][k] = pose->position[k] + hit[k];
+						}
 					}
 				}
 			}
@@ -3284,6 +3316,47 @@ static void vp_iff_color(int iff, float out[3]) {
 	out[2] = k[i][2];
 }
 
+/* A contact's symbol at (px, py): 0 craft, 1 freighter, 2 capital ship /
+ * station, 3 mine, 4 small object, 5 missile, 6 torpedo. */
+static void vp_symbol(int kind, float px, float py, const float cc[4]) {
+	switch (kind) {
+		case 0:
+			vc_rrect(px - 6.0f, py - 6.0f, 12.0f, 12.0f, 6.0f, 0.0f, 1.0f, cc, NULL);
+			break;
+		case 1:
+			vc_rrect(px - 9.0f, py - 7.0f, 18.0f, 14.0f, 3.0f, 0.0f, 1.0f, cc, NULL);
+			break;
+		case 2:
+			vc_rrect(px - 16.0f, py - 8.0f, 32.0f, 16.0f, 3.0f, 0.0f, 1.0f, cc, NULL);
+			break;
+		case 3:
+			AeronDrawList_AddLine(s_vc.cur_list, px - 6.0f, py - 6.0f, px + 6.0f, py + 6.0f, 2.5f, cc,
+								  AERON_BLIT2D_BLEND_PMA, NULL);
+			AeronDrawList_AddLine(s_vc.cur_list, px - 6.0f, py + 6.0f, px + 6.0f, py - 6.0f, 2.5f, cc,
+								  AERON_BLIT2D_BLEND_PMA, NULL);
+			break;
+		case 4: {
+			/* A diamond. */
+			const float d = 8.0f;
+			AeronDrawList_AddLine(s_vc.cur_list, px, py - d, px + d, py, 2.5f, cc, AERON_BLIT2D_BLEND_PMA, NULL);
+			AeronDrawList_AddLine(s_vc.cur_list, px + d, py, px, py + d, 2.5f, cc, AERON_BLIT2D_BLEND_PMA, NULL);
+			AeronDrawList_AddLine(s_vc.cur_list, px, py + d, px - d, py, 2.5f, cc, AERON_BLIT2D_BLEND_PMA, NULL);
+			AeronDrawList_AddLine(s_vc.cur_list, px - d, py, px, py - d, 2.5f, cc, AERON_BLIT2D_BLEND_PMA, NULL);
+			break;
+		}
+		default:
+			AeronDrawList_AddLine(s_vc.cur_list, px, py - 7.0f, px - 6.0f, py + 5.0f, 2.5f, cc,
+								  AERON_BLIT2D_BLEND_PMA, NULL);
+			AeronDrawList_AddLine(s_vc.cur_list, px, py - 7.0f, px + 6.0f, py + 5.0f, 2.5f, cc,
+								  AERON_BLIT2D_BLEND_PMA, NULL);
+			AeronDrawList_AddLine(s_vc.cur_list, px - 6.0f, py + 5.0f, px + 6.0f, py + 5.0f, 2.5f, cc,
+								  AERON_BLIT2D_BLEND_PMA, NULL);
+			break;
+	}
+}
+
+static void vp_map_legend(void);
+
 static void vp_map_draw(void) {
 	const float W = s_vc.cur_w_px, H = s_vc.cur_h_px;
 	const XwaSnapshot* snap = XwaSnapshot_Current();
@@ -3292,19 +3365,31 @@ static void vp_map_draw(void) {
 	const float lift = 0.75f;            /* stalk pixels per plane pixel of height */
 	const float range_km = k_vp_ranges_km[s_vp.zoom];
 	float c[4];
-	/* Range rings and the cross. */
-	for (int ring = 1; ring <= 3; ++ring) {
+	/* Range rings and the cross (not under the legend). */
+	for (int ring = 1; ring <= 3 && !s_vp.map_help; ++ring) {
 		vc_pma(c, VC_CYAN, ring == 3 ? 0.55f : 0.28f);
 		vc_card_ellipse(cx, cy, rx * (float)ring / 3.0f, ry * (float)ring / 3.0f, 0.0f, 0.0f, 360.0f, 2.0f, c);
 	}
-	vc_pma(c, VC_CYAN, 0.22f);
-	AeronDrawList_AddLine(s_vc.cur_list, cx - rx, cy, cx + rx, cy, 1.5f, c, AERON_BLIT2D_BLEND_PMA, NULL);
-	AeronDrawList_AddLine(s_vc.cur_list, cx, cy - ry, cx, cy + ry, 1.5f, c, AERON_BLIT2D_BLEND_PMA, NULL);
+	if (!s_vp.map_help) {
+		vc_pma(c, VC_CYAN, 0.22f);
+		AeronDrawList_AddLine(s_vc.cur_list, cx - rx, cy, cx + rx, cy, 1.5f, c, AERON_BLIT2D_BLEND_PMA, NULL);
+		AeronDrawList_AddLine(s_vc.cur_list, cx, cy - ry, cx, cy + ry, 1.5f, c, AERON_BLIT2D_BLEND_PMA, NULL);
+	}
 	{
 		char text[64];
 		snprintf(text, sizeof text, "RANGE %.0f KM", (double)range_km);
 		vc_text(44.0f, 96.0f, text, 20.0f, 0, VC_CYAN, 0.95f);
-		vc_text(W - 44.0f, 96.0f, "touch the map: zoom", 16.0f, 2, 0.62f, 0.85f, 0.92f, 0.9f);
+		const int hover = s_vp.hover[0] == VP_HIT_HELP || s_vp.hover[1] == VP_HIT_HELP;
+		float fill[4], border[4];
+		vc_pma(fill, VC_CYAN, s_vp.map_help ? 0.45f : hover ? 0.22f : 0.08f);
+		vc_pma(border, VC_CYAN, s_vp.map_help || hover ? 1.0f : 0.55f);
+		vc_rrect(VP_HELP_X(W), VP_HELP_Y, VP_HELP_W, VP_HELP_H, 12.0f, 2.0f, 1.0f, fill, border);
+		vc_text(VP_HELP_X(W) + 0.5f * VP_HELP_W, VP_HELP_Y + 9.0f, "?", 30.0f, 1, 1.0f, 1.0f, 1.0f, 1.0f);
+		if (s_vp.map_help) {
+			/* The legend instead of the map while it is open. */
+			vp_map_legend();
+			return;
+		}
 		snprintf(text, sizeof text, "%.0f", (double)(range_km / 3.0f));
 		vc_text(cx + rx / 3.0f + 6.0f, cy + 4.0f, text, 14.0f, 0, 0.62f, 0.85f, 0.92f, 0.8f);
 	}
@@ -3339,7 +3424,7 @@ static void vp_map_draw(void) {
 		if (f == self || f->slot_class != XWA_SNAP_SLOT_MAIN || f->render_region != self->render_region) {
 			continue;
 		}
-		int kind; /* 0 craft, 1 large, 2 huge, 3 mine, 4 small object, 5 warhead */
+		int kind; /* 0 craft, 1 large, 2 huge, 3 mine, 4 small object, 5 missile, 6 torpedo */
 		switch (f->genus) {
 			case XWA_SNAP_GENUS_FIGHTER:
 			case XWA_SNAP_GENUS_TRANSPORT:
@@ -3364,11 +3449,25 @@ static void vp_map_draw(void) {
 				break;
 			case XWA_SNAP_GENUS_NPC_PROJECTILE:
 			case XWA_SNAP_GENUS_PLAYER_PROJECTILE:
-				/* Warheads only (torpedoes to ion pulses), not lasers or flares. */
-				if (f->object_type < 286 || f->object_type > 297) {
-					continue;
+				/* Warheads only, not lasers or flares: the torpedo kind
+				 * (torpedoes, space bombs, heavy rockets) apart from the
+				 * missile kind (missiles, mag and ion pulses). */
+				switch (f->object_type) {
+					case 286: /* OBJ_WarheadTorpedo */
+					case 291: /* OBJ_WarheadAdvancedTorpedo */
+					case 293: /* OBJ_WarheadSpaceBomb */
+					case 294: /* OBJ_WarheadRocket */
+						kind = 6;
+						break;
+					case 287: /* OBJ_WarheadMissile */
+					case 292: /* OBJ_WarheadAdvancedMissile */
+					case 295: /* OBJ_WarheadMagPulse */
+					case 296: /* OBJ_WarheadIonPulse */
+						kind = 5;
+						break;
+					default:
+						continue;
 				}
-				kind = 5;
 				break;
 			default:
 				continue;
@@ -3384,7 +3483,7 @@ static void vp_map_draw(void) {
 		const double flat = sqrt(mx * mx + mz * mz);
 		int outside = 0;
 		if (flat > 1.0) {
-			if (kind == 5) {
+			if (kind >= 5) {
 				continue;
 			}
 			mx /= flat;
@@ -3399,13 +3498,14 @@ static void vp_map_draw(void) {
 		const float py = base_y - (float)mh * ry * lift;
 		float col[3];
 		vp_iff_color(f->iff, col);
-		if (kind == 5) {
-			if (!blink) {
+		if (kind >= 5) {
+			/* Missiles red, torpedoes blue; blinking when aimed at you. */
+			if (f->warhead_target_slot == self->slot && !blink) {
 				continue;
 			}
-			col[0] = 1.0f;
-			col[1] = 0.25f;
-			col[2] = 0.2f;
+			col[0] = kind == 5 ? 1.0f : 0.35f;
+			col[1] = kind == 5 ? 0.25f : 0.55f;
+			col[2] = kind == 5 ? 0.2f : 1.0f;
 		}
 		const float a = outside ? 0.45f : 1.0f;
 		float cc[4];
@@ -3417,34 +3517,7 @@ static void vp_map_draw(void) {
 			AeronDrawList_AddFill(s_vc.cur_list, px - 3.0f, base_y - 1.0f, 6.0f, 2.0f, stalk, AERON_BLIT2D_BLEND_PMA,
 								  NULL);
 		}
-		switch (kind) {
-			case 0:
-				vc_rrect(px - 6.0f, py - 6.0f, 12.0f, 12.0f, 6.0f, 0.0f, 1.0f, cc, NULL);
-				break;
-			case 1:
-				vc_rrect(px - 9.0f, py - 7.0f, 18.0f, 14.0f, 3.0f, 0.0f, 1.0f, cc, NULL);
-				break;
-			case 2:
-				vc_rrect(px - 16.0f, py - 8.0f, 32.0f, 16.0f, 3.0f, 0.0f, 1.0f, cc, NULL);
-				break;
-			case 3:
-				AeronDrawList_AddLine(s_vc.cur_list, px - 6.0f, py - 6.0f, px + 6.0f, py + 6.0f, 2.5f, cc,
-									  AERON_BLIT2D_BLEND_PMA, NULL);
-				AeronDrawList_AddLine(s_vc.cur_list, px - 6.0f, py + 6.0f, px + 6.0f, py - 6.0f, 2.5f, cc,
-									  AERON_BLIT2D_BLEND_PMA, NULL);
-				break;
-			case 4:
-				vc_card_ellipse(px, py, 7.0f, 7.0f, 45.0f, 0.0f, 360.0f, 2.5f, cc);
-				break;
-			default:
-				AeronDrawList_AddLine(s_vc.cur_list, px, py - 7.0f, px - 6.0f, py + 5.0f, 2.5f, cc,
-									  AERON_BLIT2D_BLEND_PMA, NULL);
-				AeronDrawList_AddLine(s_vc.cur_list, px, py - 7.0f, px + 6.0f, py + 5.0f, 2.5f, cc,
-									  AERON_BLIT2D_BLEND_PMA, NULL);
-				AeronDrawList_AddLine(s_vc.cur_list, px - 6.0f, py + 5.0f, px + 6.0f, py + 5.0f, 2.5f, cc,
-									  AERON_BLIT2D_BLEND_PMA, NULL);
-				break;
-		}
+		vp_symbol(kind, px, py, cc);
 		if (tgt && f->slot == tgt->slot && f->signature == tgt->signature) {
 			target_xy[0] = px;
 			target_xy[1] = py;
@@ -3471,6 +3544,66 @@ static void vp_map_draw(void) {
 				 (unsigned)tgt->distance_whole, (unsigned)(tgt->distance_frac % 100u));
 		vc_text(W * 0.5f, H - 72.0f, text, 20.0f, 1, 1.0f, 1.0f, 1.0f, 0.95f);
 	}
+}
+
+/* The map's legend ("?"), over the map. */
+static void vp_map_legend(void) {
+	const float W = s_vc.cur_w_px;
+	const float x = 60.0f, y = 146.0f, w = W - 120.0f, h = 568.0f;
+	float fill[4], border[4], c[4];
+	vc_pma(fill, 0.02f, 0.06f, 0.09f, 0.94f);
+	vc_pma(border, VC_CYAN, 0.8f);
+	vc_rrect(x, y, w, h, 18.0f, 2.0f, 1.0f, fill, border);
+	vc_text(x + 28.0f, y + 20.0f, "HOW TO READ THE MAP", 24.0f, 0, VC_CYAN, 1.0f);
+	static const char* const k_lines[] = {
+		"You are the arrow in the middle; up is straight ahead.",
+		"The oval is the plane of your wings; rings at 1/3, 2/3, full range.",
+		"A line up or down: the contact is above or below that plane.",
+		"Colours as the targeting box. Brackets: your target.",
+		"Faded at the edge: further away than the range.",
+		"A blinking missile or torpedo is aimed at you.",
+		"Touch the map to zoom (2 / 6 / 20 km).",
+	};
+	float ty = y + 66.0f;
+	for (size_t i = 0; i < sizeof k_lines / sizeof k_lines[0]; ++i) {
+		vc_text(x + 28.0f, ty, k_lines[i], 19.0f, 0, 0.88f, 0.97f, 1.0f, 1.0f);
+		ty += 34.0f;
+	}
+	/* The symbols, two columns. */
+	static const struct {
+		int kind;
+		const char* text;
+	} k_syms[] = {
+		{ 0, "fighter, transport" }, { 1, "freighter" },          { 2, "capital ship, station" },
+		{ 3, "mine" },               { 4, "buoy, container" },    { 5, "missile" },
+		{ 6, "torpedo" },
+	};
+	ty += 14.0f;
+	for (size_t i = 0; i < sizeof k_syms / sizeof k_syms[0]; ++i) {
+		const float sx = x + 50.0f + (float)(i % 2) * (w * 0.5f);
+		const float sy = ty + (float)(i / 2) * 40.0f + 10.0f;
+		if (k_syms[i].kind == 5) {
+			vc_pma(c, 1.0f, 0.25f, 0.2f, 1.0f);
+		} else if (k_syms[i].kind == 6) {
+			vc_pma(c, 0.35f, 0.55f, 1.0f, 1.0f);
+		} else {
+			vc_pma(c, 0.35f, 1.0f, 0.35f, 1.0f);
+		}
+		vp_symbol(k_syms[i].kind, sx, sy, c);
+		vc_text(sx + 34.0f, sy - 11.0f, k_syms[i].text, 19.0f, 0, 0.88f, 0.97f, 1.0f, 1.0f);
+	}
+	vc_text(x + w * 0.5f, y + h - 40.0f, "touch to close", 16.0f, 1, 0.62f, 0.85f, 0.92f, 0.9f);
+}
+
+/* A faint beam from the hand to where it points on the side panel (as on
+ * the lap console). */
+static int vp_ray_beam(int hand, float start[3], float end[3]) {
+	if (!s_vc.cards[VC_CARD_BUTTONS].drawn || !s_vp.ray[hand] || s_vp.poke_down[hand]) {
+		return 0;
+	}
+	memcpy(start, s_vp.ray_start[hand], sizeof s_vp.ray_start[hand]);
+	memcpy(end, s_vp.ray_end[hand], sizeof s_vp.ray_end[hand]);
+	return 1;
 }
 
 /* The whole panel: plate, tabs, the tab's page. */
@@ -3597,7 +3730,7 @@ int XwaVrConsole_CardFrame(AeronCommandBuffer* cmd, int card, int width, int hei
 		const int map_tick = s_vp.tab == VP_TAB_MAP ? (int)(s_vc.clock * 12.0f) : 0;
 		const int words[] = { card, (int)alpha_q, cd->place.grab_side, cd->place.hover_side[0], cd->place.hover_side[1],
 							  Aeron_XrLeftHanded(), s_vc.font_state, (int)s_vc.state.hud_argb, width, height,
-							  s_vp.tab, s_vp.zoom, s_vp.hover[0], s_vp.hover[1], map_tick };
+							  s_vp.tab, s_vp.zoom, s_vp.hover[0], s_vp.hover[1], map_tick, s_vp.map_help };
 		for (size_t i = 0; i < sizeof words / sizeof words[0]; ++i) {
 			key = (key ^ (uint32_t)words[i]) * 1099511628211ull;
 		}

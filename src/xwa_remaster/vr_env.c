@@ -661,6 +661,7 @@ static int env_title_active(void) {
 static float env_screen_reveal(void);
 static void env_title_text(AeronCommandBuffer* cmd);
 static void env_hint_text(AeronCommandBuffer* cmd);
+static void env_prompt_text(AeronCommandBuffer* cmd);
 int XwaVrEnv_ScreenHidden(void) { return env_dismiss_applies() && env_screen_reveal() <= 0.0f; }
 int XwaVrEnv_InputBlocked(void) { return XwaVrEnv_ScreenHidden() || (env_dismiss_applies() && s_dismiss.away); }
 float XwaVrEnv_ScreenFade(void) { return env_dismiss_applies() ? env_screen_reveal() : 1.0f; }
@@ -1432,6 +1433,7 @@ int XwaVrEnv_Prepare(AeronCommandBuffer* cmd) {
 		env_title_text(cmd);
 	} else {
 		env_hint_text(cmd);
+		env_prompt_text(cmd);
 	}
 	/* One OPT (or sprite) per frame. */
 	int busy = 0;
@@ -5347,6 +5349,71 @@ static void env_hint_text(AeronCommandBuffer* cmd) {
 	AeronDrawList_Render(s_hint.list, cmd);
 }
 
+/* The loading screen's "Press Any Key to Continue"
+ * (g_flightLoadingPrompt, flight_task.c): its own line under the button
+ * hints, pulsing (the 2D screen shows it only off the headset). */
+/* (xwa/frontend/flight_loading.c, a modern addition there) */
+extern const char* g_flightLoadingPrompt;
+extern int g_flightLoadingPromptLevel;
+
+static struct {
+	AeronRenderTarget* rt;
+	AeronDrawList2D* list;
+	int w, h;
+	int failed;
+	const char* text;
+} s_prompt;
+
+static void env_prompt_text(AeronCommandBuffer* cmd) {
+	const char* text = g_flightLoadingPrompt;
+	if (!text || s_prompt.failed || !cmd || (s_prompt.rt && s_prompt.text == text) || !env_font(cmd)) {
+		return;
+	}
+	if (!s_prompt.rt) {
+		s_prompt.w = 2048;
+		s_prompt.h = 160;
+		s_prompt.rt = Aeron_CreateRenderTarget(&(AeronRenderTargetDesc) {
+			.width = s_prompt.w, .height = s_prompt.h, .format = AERON_TEXTURE_FORMAT_RGBA8_UNORM });
+		s_prompt.list = AeronDrawList_Create(16);
+		if (!s_prompt.rt || !s_prompt.list) {
+			s_prompt.failed = 1;
+			return;
+		}
+	}
+	s_prompt.text = text;
+	AeronTextStyle style;
+	memset(&style, 0, sizeof style);
+	style.font = &s_title.font;
+	style.filter = AERON_BLIT2D_FILTER_LINEAR;
+	style.scale = 1.0f;
+	const float line = AeronText_LineHeight(&style);
+	const float width = AeronText_MeasureWidth(&style, text, -1);
+	style.scale = fminf(width > 0.0f ? 0.86f * (float)s_prompt.w / width : 1.0f,
+						line > 0.0f ? 0.62f * (float)s_prompt.h / line : 1.0f);
+	const float k = style.scale;
+	AeronDrawList_Begin(s_prompt.list, s_prompt.rt, s_prompt.w, s_prompt.h, AERON_DRAWLIST2D_CLEAR, NULL);
+	{
+		AeronDrawList2DRRect plate;
+		memset(&plate, 0, sizeof plate);
+		const float pad = 0.6f * line * k;
+		plate.dst_w = fminf(width * k + 2.0f * pad, (float)s_prompt.w - 4.0f);
+		plate.dst_x = 0.5f * ((float)s_prompt.w - plate.dst_w);
+		plate.dst_y = 4.0f;
+		plate.dst_h = (float)s_prompt.h - 8.0f;
+		plate.radius_px = 0.5f * plate.dst_h;
+		plate.soft_px = 10.0f;
+		plate.fill_top[3] = plate.fill_bottom[3] = 0.6f;
+		AeronDrawList_AddRRect(s_prompt.list, &plate);
+	}
+	style.tint[0] = 1.0f;
+	style.tint[1] = 0.86f;
+	style.tint[2] = 0.3f;
+	style.tint[3] = 1.0f;
+	AeronText_Draw(s_prompt.list, &style, 0.5f * (float)s_prompt.w, 0.5f * ((float)s_prompt.h - line * k),
+				   AERON_TEXT_CENTER, text, -1, NULL);
+	AeronDrawList_Render(s_prompt.list, cmd);
+}
+
 /* Lower edge of the frame's bezel (image rows; transparent below). */
 #define ENV_FRAME_BEZEL_BOTTOM 1032.0f
 
@@ -5378,6 +5445,22 @@ static void env_submit_hints(AeronScene3D* scene) {
 	s_quad_chrome = 1;
 	env_quad_tex(scene, Aeron_RenderTargetGetTexture(s_hint.rt), AERON_SCENE_BILLBOARD_STAGE_OVERLAY,
 				 AERON_SCENE_BILLBOARD_BLEND_PMA, c, tint);
+	/* The hangar prompt, one line further down, a little larger, pulsing
+	 * (premultiplied: the tint scales the whole quad). */
+	if (g_flightLoadingPrompt && s_prompt.rt && s_prompt.text == g_flightLoadingPrompt) {
+		const float ph = 1.25f * th;
+		const float pw = ph * (float)s_prompt.w / (float)s_prompt.h;
+		const float pcenter[3] = { center[0], center[1], center[2] - (0.5f * th + 0.02f + 0.5f * ph) * sc.k };
+		const float pax[3] = { 0.5f * pw * sc.k, 0.0f, 0.0f };
+		const float pay[3] = { 0.0f, 0.0f, 0.5f * ph * sc.k };
+		float pc[4][3];
+		env_rect(pcenter, pax, pay, pc);
+		const int level = g_flightLoadingPromptLevel < 0 ? 0 : g_flightLoadingPromptLevel > 255 ? 255 : g_flightLoadingPromptLevel;
+		const float a = (float)level / 255.0f;
+		const float ptint[4] = { a, a, a, a };
+		env_quad_tex(scene, Aeron_RenderTargetGetTexture(s_prompt.rt), AERON_SCENE_BILLBOARD_STAGE_OVERLAY,
+					 AERON_SCENE_BILLBOARD_BLEND_PMA, pc, ptint);
+	}
 	s_quad_chrome = 0;
 }
 

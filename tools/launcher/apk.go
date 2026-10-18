@@ -78,9 +78,8 @@ func (a *app) installApp() error {
 		say("OpenXWA %s is already installed and up to date.", inst)
 		return nil
 	case a.apkVersion != "" && inst != "" && compareVersions(inst, a.apkVersion) > 0:
-		say("The headset has OpenXWA %s, which is newer than the one that came with", inst)
-		say("this launcher (%s).", a.apkVersion)
-		if a.ui.yesNo("Keep the newer one? (Y/n)", true) {
+		say("The headset has OpenXWA %s, which is newer than the one that came with\nthis launcher (%s).", inst, a.apkVersion)
+		if askYesNo("A newer OpenXWA is installed", "Keep the newer one?", true) {
 			say("Keeping OpenXWA %s.", inst)
 			return nil
 		}
@@ -137,6 +136,9 @@ func failureLine(out string) string {
 // remoteHasEntry reports whether "ls <dir>" lists name (case-insensitive).
 func (a *app) remoteHasEntry(dir, name string) bool {
 	out, err := a.adb.shell(20*time.Second, "ls "+shQuote(dir))
+	if strings.Contains(strings.ToLower(out), "permission denied") {
+		logf("listing %s: permission denied", dir)
+	}
 	if err != nil {
 		return false
 	}
@@ -146,34 +148,4 @@ func (a *app) remoteHasEntry(dir, name string) bool {
 		}
 	}
 	return false
-}
-
-// prepareAppFolder is step 5: start the app once so Android creates its
-// folder with the right owner, then stop it again.
-func (a *app) prepareAppFolder() error {
-	if a.remoteHasEntry(remoteBase, "XWA") {
-		say("The OpenXWA folder on the headset is ready.")
-		return nil
-	}
-	say("Starting OpenXWA once on the headset so it can create its folder...")
-	a.adb.shell(30*time.Second, "am start -n "+appActivity)
-	found := false
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		time.Sleep(time.Second)
-		if a.remoteHasEntry(remoteBase, "XWA") {
-			found = true
-			break
-		}
-	}
-	a.adb.shell(30*time.Second, "am force-stop "+appPackage)
-	if !found {
-		say("OpenXWA did not create its folder in time; creating it directly.")
-		out, err := a.adb.shell(30*time.Second, "mkdir -p "+shQuote(remoteGame))
-		if err != nil || !a.remoteHasEntry(remoteBase, "XWA") {
-			return fail("Could not create the OpenXWA folder on the headset:\n  %s", strings.TrimSpace(out))
-		}
-	}
-	say("The OpenXWA folder on the headset is ready.")
-	return nil
 }

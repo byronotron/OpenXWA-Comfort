@@ -3,7 +3,10 @@
 Windows PC app (one portable .exe, no install) that puts OpenXWA and the
 user's own X-Wing Alliance game files on a standalone headset over USB.
 Quest, Pico and Steam Frame use the same steps. Mac/Linux later.
-Implemented in this folder (Go, standard library only; build.sh). This file records the agreed design.
+Implemented in this folder (Go, standard library only; build.sh): a window UI
+(embedded page in an Edge/Chrome app window, web/index.html) or --console.
+This file records the original design; see the code for the current flow
+(never creating the app folder, ownership checks, Steam Frame via Lepton).
 
 ## Distribution
 

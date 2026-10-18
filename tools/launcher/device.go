@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -38,31 +39,64 @@ func parseDevices(out string) []adbDevice {
 	return devs
 }
 
-// waitMessage tells the user what to do for the current device states.
-func waitMessage(devs []adbDevice) string {
-	has := func(state string) bool {
-		for _, d := range devs {
-			if d.state == state {
-				return true
-			}
+// stateRank orders the states so the most useful message wins when several
+// devices are listed.
+var stateRank = map[string]int{
+	"unauthorized": 9, "no permissions": 8, "offline": 7, "authorizing": 6, "connecting": 5,
+	"recovery": 4, "sideload": 4, "rescue": 4, "bootloader": 4, "host": 2,
+}
+
+// waitState picks the state that describes the situation ("none" if no
+// device is listed at all).
+func waitState(devs []adbDevice) string {
+	best, rank := "none", -1
+	for _, d := range devs {
+		r, ok := stateRank[d.state]
+		if !ok {
+			r = 1 // unknown states
 		}
-		return false
+		if r > rank {
+			best, rank = d.state, r
+		}
 	}
-	switch {
-	case has("unauthorized"):
-		return "Put on the headset and choose Allow (tick \"Always allow from this computer\")."
-	case has("no permissions"):
-		return "adb is not allowed to use the headset. On Linux, set up the udev rules for\n" +
-			"Android devices (or run adb as your user with the right group), then reconnect."
-	case has("offline"), has("authorizing"), has("connecting"):
-		return "The headset is connecting... please wait."
-	case len(devs) > 0:
-		return "The headset is busy (" + devs[0].state + "). Please wait or restart the headset."
-	default:
-		return "Connect the headset with a USB-C cable and put it on.\n" +
+	return best
+}
+
+// waitMessage tells the user what to do for a device state.
+func waitMessage(state string) string {
+	switch state {
+	case "none":
+		return "Connect the headset to this computer with a USB-C cable and put it on.\n" +
 			"(Developer mode must be on for the headset. See README.txt.)"
+	case "unauthorized":
+		return "The headset is connected but has not allowed this computer yet.\n" +
+			"Put on the headset and look for the \"Allow USB debugging?\" prompt. Choose\n" +
+			"Allow (tick \"Always allow from this computer\"). On Steam Frame the prompt may\n" +
+			"appear in the Android (Lepton) environment."
+	case "offline":
+		return "The headset is connected but not responding (offline).\n" +
+			"Unplug the cable and plug it in again, or try another USB port or cable."
+	case "authorizing":
+		return "The headset is checking this computer's key... please wait."
+	case "connecting":
+		return "Connecting to the headset... please wait."
+	case "no permissions":
+		return "adb is not allowed to use the headset's USB connection.\n" +
+			"On Linux, set up the udev rules for Android devices and reconnect.\n" +
+			"On Windows, check that the headset's USB driver is installed."
+	case "recovery", "sideload", "rescue", "bootloader":
+		return "The headset is in " + state + " mode. Restart it normally and reconnect."
+	case "host":
+		return "adb sees another computer instead of a headset. Connect the headset with\n" +
+			"a USB-C cable."
+	default:
+		return "The headset reports an unusual state (" + state + ").\n" +
+			"Unplug the cable and plug it in again."
 	}
 }
+
+// stuckStates are states where restarting the connection may help.
+var stuckStates = map[string]bool{"offline": true, "unauthorized": true, "authorizing": true, "connecting": true}
 
 // deviceDisplayName turns getprop values into "Meta Quest 3", "PICO 4", ...
 func deviceDisplayName(manufacturer, model string) string {
@@ -86,25 +120,58 @@ func deviceDisplayName(manufacturer, model string) string {
 	return brand + " " + model
 }
 
-// connect is step 3: wait until exactly one headset is connected and allowed.
+// restartConnection restarts the adb server and asks adb to reconnect
+// devices that are stuck offline.
+func (a *app) restartConnection() {
+	say("Restarting the connection to the headset...")
+	serial := a.adb.Serial
+	a.adb.Serial = ""
+	a.adb.run(30*time.Second, "kill-server")
+	sleepCtx(time.Second)
+	a.adb.run(60*time.Second, "start-server")
+	a.adb.run(30*time.Second, "reconnect", "offline")
+	a.adb.Serial = serial
+	a.reconnectLepton()
+}
+
+// connect is step 3: wait until a headset is connected and allowed, then
+// check that its shell and storage really work.
 func (a *app) connect() error {
+	a.adb.Serial = ""
 	if _, err := a.adb.run(60*time.Second, "start-server"); err != nil {
+		if err == errClosed {
+			return err
+		}
 		say("adb had trouble starting; trying anyway.")
 	}
-	last := ""
-	shownHint := false
+	lastOut, lastState, lastMsg := "\x00", "", ""
+	stateSince := time.Now()
+	var offer <-chan Answer
+	offered, autoReconnected := false, false
 	failures := 0
+	defer ui.ClearOffer()
 	for {
-		out, err := a.adb.run(20*time.Second, "devices", "-l")
+		if appCtx.Err() != nil {
+			return errClosed
+		}
+		out, err := a.adb.runQuiet(20*time.Second, "devices", "-l")
+		if out != lastOut {
+			logf("adb devices -l changed:\n%s", out)
+			lastOut = out
+		}
 		if err != nil {
+			if err == errClosed {
+				return err
+			}
 			failures++
 			if failures == 5 {
-				say("adb does not answer. If another program uses adb (SideQuest, Meta Quest")
-				say("Developer Hub, Android Studio), close it and run the launcher again.")
+				say("adb does not answer. If another program uses adb (SideQuest, Meta Quest\n" +
+					"Developer Hub, Android Studio), close it and try again.")
 			}
-			time.Sleep(2 * time.Second)
+			sleepCtx(2 * time.Second)
 			continue
 		}
+		failures = 0
 		devs := parseDevices(out)
 		var ready []adbDevice
 		for _, d := range devs {
@@ -117,44 +184,218 @@ func (a *app) connect() error {
 			break
 		}
 		if len(ready) > 1 {
-			say("Several devices are connected:")
-			for i, d := range ready {
-				name := d.model
-				if name == "" {
-					name = "device"
-				}
-				say("  %d) %s (%s)", i+1, name, d.serial)
+			ui.ClearOffer()
+			if s := a.pickAndroid(ready); s != "" {
+				a.adb.Serial = s
+				break
 			}
-			choice := 1
-			for {
-				ans, ok := a.ui.ask("Type the number of your headset:")
-				if !ok {
-					break
-				}
-				if n, err := strconv.Atoi(ans); err == nil && n >= 1 && n <= len(ready) {
-					choice = n
-					break
-				}
+			a.adb.Serial = a.chooseDevice(ready)
+			if a.adb.Serial == "" {
+				return errClosed
 			}
-			a.adb.Serial = ready[choice-1].serial
 			break
 		}
-		msg := waitMessage(devs)
-		if msg != last {
-			say("%s", msg)
-			if !shownHint {
-				say("(Waiting for the headset. Press Ctrl+C to stop.)")
-				shownHint = true
+
+		state := waitState(devs)
+		if state != lastState {
+			lastState, stateSince = state, time.Now()
+			if offered {
+				ui.ClearOffer()
+				offer, offered = nil, false
 			}
-			last = msg
 		}
-		time.Sleep(2 * time.Second)
+		if msg := waitMessage(state); msg != lastMsg {
+			say("%s", msg)
+			lastMsg = msg
+		}
+		if stuckStates[state] && !offered && time.Since(stateSince) > 20*time.Second {
+			offered = true
+			offer = ui.Offer(Question{
+				Kind:  "buttons",
+				Title: "Still not connected",
+				Text:  "The headset has been \"" + state + "\" for a while. Restarting the connection often helps.",
+				Options: []Option{
+					{ID: "restart", Label: "Restart connection", Style: "primary"},
+					{ID: "again", Label: "Try again"},
+				},
+			})
+			if offer == nil && state == "offline" && !autoReconnected {
+				// Console: try once by itself.
+				autoReconnected = true
+				say("Trying to reconnect...")
+				a.adb.run(30*time.Second, "reconnect", "offline")
+			}
+		}
+		select {
+		case ans := <-offer:
+			offer, offered = nil, false
+			ui.ClearOffer()
+			stateSince = time.Now()
+			lastMsg = ""
+			if ans.ID == "restart" {
+				a.restartConnection()
+			}
+		case <-time.After(2 * time.Second):
+		case <-appCtx.Done():
+			return errClosed
+		}
+	}
+	logf("using device %s", a.adb.Serial)
+	return a.checkDevice()
+}
+
+// chooseDevice lets the user pick one of several connected devices.
+func (a *app) chooseDevice(ready []adbDevice) string {
+	var opts []Option
+	for i, d := range ready {
+		name := d.model
+		if name == "" {
+			name = "Device"
+		}
+		opts = append(opts, Option{ID: d.serial, Label: fmt.Sprintf("%s (%s)", name, d.serial), Key: fmt.Sprint(i + 1)})
+	}
+	ans := ui.Ask(Question{Kind: "buttons", Title: "Several devices are connected", Text: "Which one is your headset?",
+		Options: opts, Default: ready[0].serial})
+	if ans.Closed && appCtx.Err() != nil {
+		return ""
+	}
+	return ans.ID
+}
+
+// shellProblem explains a failed "adb shell".
+func shellProblem(out string) string {
+	l := strings.ToLower(out)
+	switch {
+	case strings.Contains(l, "error: closed"):
+		return "The headset closed the connection (\"error: closed\"). This often happens\n" +
+			"right after allowing USB debugging, or when another program (SideQuest, Meta\n" +
+			"Quest Developer Hub, Android Studio) uses adb at the same time."
+	case strings.Contains(l, "offline"):
+		return "The headset went offline. Unplug the cable and plug it in again, or try\n" +
+			"another USB port or cable."
+	case strings.Contains(l, "unauthorized"):
+		return "The headset has not allowed this computer. Put it on and choose Allow."
+	case strings.Contains(l, "more than one device"):
+		return "More than one device is connected. Unplug the other devices."
+	case strings.Contains(l, "not found"):
+		return "The headset disappeared. Check the USB cable."
+	}
+	return "The headset does not answer commands yet."
+}
+
+// checkDevice runs right after a device reports "device": some devices say
+// so before their shell is ready. It also finds where shared storage is.
+func (a *app) checkDevice() error {
+	var out string
+	var err error
+	ok := false
+	for try := 1; try <= 5; try++ {
+		out, err = a.adb.run(20*time.Second, "shell", "echo ok")
+		if err == errClosed {
+			return err
+		}
+		if err == nil && strings.Contains(out, "ok") {
+			ok = true
+			break
+		}
+		logf("shell check %d of 5 failed: %v", try, err)
+		if !sleepCtx(time.Duration(try) * 1500 * time.Millisecond) {
+			return errClosed
+		}
+	}
+	if !ok {
+		return &userError{
+			msg: "The headset was found, but the connection could not be established.\n\n" +
+				shellProblem(out) + "\n\nUse \"Restart connection\", or unplug and replug the cable, then try again.",
+			restart: true,
+		}
 	}
 
-	model, _ := a.adb.shell(20*time.Second, "getprop ro.product.model")
-	manu, _ := a.adb.shell(20*time.Second, "getprop ro.product.manufacturer")
-	say("Found: %s", deviceDisplayName(firstLine(manu), firstLine(model)))
-	return nil
+	// An Android device answers getprop with its SDK level. Steam Frame's USB
+	// connection is its Linux system (SteamOS) instead; OpenXWA runs in its
+	// Android layer (Lepton), reached through a second adb connection.
+	sdk, sdkErr := a.adb.shell(20*time.Second, "getprop ro.build.version.sdk")
+	if sdkErr == errClosed {
+		return sdkErr
+	}
+	if _, err := strconv.Atoi(firstLine(sdk)); err != nil {
+		logf("no Android SDK level from %s (%q, %v); checking for SteamOS", a.adb.Serial, strings.TrimSpace(sdk), sdkErr)
+		if !a.isSteamOS() {
+			return &userError{msg: "The connected device does not answer like an Android headset.\n" +
+				"Please collect the logs and report this, naming your headset model.", restart: true}
+		}
+		if err := a.connectLepton(a.adb.Serial); err != nil {
+			return err
+		}
+	}
+
+	prop := func(name string) string {
+		o, _ := a.adb.shell(20*time.Second, "getprop "+name)
+		return firstLine(o)
+	}
+	model, manu := prop("ro.product.model"), prop("ro.product.manufacturer")
+	logf("device: serial=%s manufacturer=%q model=%q device=%q sdk=%q release=%q build=%q",
+		a.adb.Serial, manu, model, prop("ro.product.device"), prop("ro.build.version.sdk"),
+		prop("ro.build.version.release"), prop("ro.build.fingerprint"))
+	if a.lepton != "" {
+		say("Found: Steam Frame (Android layer at %s)", a.lepton)
+	} else {
+		say("Found: %s", deviceDisplayName(manu, model))
+	}
+	a.uid = 0
+	return a.detectStorage()
+}
+
+// storageProbe prints DIR/LIST/NOLIST/MISSING for <root>/Android/data.
+func storageProbe(root string) string {
+	d := shQuote(root + "/Android/data")
+	return "if [ -d " + d + " ]; then echo DIR; if ls " + d + " >/dev/null 2>&1; then echo LIST; else echo NOLIST; fi; else echo MISSING; fi"
+}
+
+// detectStorage finds the shared storage path that works on this headset:
+// /sdcard normally, else $EXTERNAL_STORAGE or /storage/emulated/0.
+func (a *app) detectStorage() error {
+	env, _ := a.adb.shell(20*time.Second, "echo $EXTERNAL_STORAGE")
+	env = firstLine(env)
+	var cands []string
+	for _, c := range []string{"/sdcard", env, "/storage/emulated/0", "/storage/self/primary"} {
+		if strings.HasPrefix(c, "/") && !contains(cands, c) {
+			cands = append(cands, c)
+		}
+	}
+	for _, root := range cands {
+		out, err := a.adb.shell(20*time.Second, storageProbe(root))
+		if err == errClosed {
+			return err
+		}
+		logf("storage probe %s: %q (%v)", root, strings.TrimSpace(out), err)
+		if !strings.Contains(out, "DIR") {
+			continue
+		}
+		a.storage = root
+		if root != defaultStorage {
+			say("Using the headset storage at %s.", root)
+		}
+		if strings.Contains(out, "NOLIST") {
+			logf("Android/data exists but cannot be listed by adb (permission denied)")
+			say("Note: this headset does not let adb list Android/data. The launcher will\n" +
+				"still try to use the OpenXWA folder directly.")
+		}
+		return nil
+	}
+	logf("no storage root with Android/data found (EXTERNAL_STORAGE=%q)", env)
+	return &userError{msg: "The headset's shared storage (where OpenXWA keeps its files) was not found.\n" +
+		"Restart the headset and try again. If it keeps happening, please collect the\n" +
+		"logs and report it, naming your headset model.", restart: true}
+}
+
+func contains(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }
 
 func firstLine(s string) string {

@@ -1192,6 +1192,10 @@ void XwaSnapshot_CaptureFlight(void) {
 		f->roll = o->roll;
 		f->angle_d = o->angleD;
 		f->player_owner = o->playerOwnerIdx;
+		f->warhead_target_slot = 0xffffu;
+		if (o->mobj && o->mobj->pWarheadGuidance) {
+			f->warhead_target_slot = o->mobj->pWarheadGuidance->targetObjIdx;
+		}
 		/* Billboard-law state (see header): the sprite frame / debris
 		 * component selector, the type-2006 depth pull-in, and the
 		 * render walk's slot-range dispatch class. */

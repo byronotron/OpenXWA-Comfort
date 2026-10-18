@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -338,122 +339,151 @@ func unmergedMessage(dir string) error {
 }
 
 // tryUserFolder checks a folder named by the user. It returns the valid game
-// root, or prints why the folder is not usable.
-func tryUserFolder(p string) (string, error) {
+// root, or a problem text saying why the folder is not usable.
+func tryUserFolder(p string) (root, problem string, err error) {
+	if p == "" {
+		return "", "Please choose a folder.", nil
+	}
 	if !isDir(p) {
-		say("That folder does not exist: %s", p)
-		return "", nil
+		return "", "That folder does not exist: " + p, nil
 	}
 	root, unmerged := findGameRoot(p, 2)
 	if root != "" {
-		return root, nil
+		return root, "", nil
 	}
 	if unmerged != "" {
-		return "", unmergedMessage(unmerged)
+		return "", "", unmergedMessage(unmerged)
 	}
 	c := checkGameDir(p)
-	say("This is not an X-Wing Alliance game folder: %s", p)
-	say("These files are missing: %s", strings.Join(c.missing, ", "))
-	say("Choose the folder that contains RESDATA.TXT and the FLIGHTMODELS, MISSIONS,")
-	say("MOVIES and WAVE folders.")
-	return "", nil
+	return "", "This is not an X-Wing Alliance game folder: " + p + "\n" +
+		"These files are missing: " + strings.Join(c.missing, ", ") + "\n" +
+		"Choose the folder that contains RESDATA.TXT and the FLIGHTMODELS, MISSIONS,\n" +
+		"MOVIES and WAVE folders.", nil
+}
+
+func folderQuestion(text, value, problem string) Question {
+	prompt := "Folder:"
+	if value != "" {
+		prompt = "Press Enter to use it, or type another folder path:"
+	}
+	return Question{
+		Kind:          "text",
+		Title:         "Where is X-Wing Alliance?",
+		Text:          text,
+		Value:         value,
+		Problem:       problem,
+		Placeholder:   `for example C:\GOG Games\Star Wars - X-Wing Alliance`,
+		Browse:        true,
+		Options:       []Option{{ID: "ok", Label: "Use this folder", Style: "primary"}},
+		ConsolePrompt: prompt,
+	}
+}
+
+func (a *app) setGame(root string) error {
+	a.gameDir = root
+	say("Game folder: %s", root)
+	return nil
+}
+
+func noFolderChosen() error {
+	if appCtx.Err() != nil {
+		return errClosed
+	}
+	return fail("No game folder was chosen.")
 }
 
 // chooseGame is step 2: use the folder from the command line, or find the
 // game automatically and let the user confirm or choose.
 func (a *app) chooseGame(arg string) error {
+	problem := ""
 	if arg != "" {
-		p := cleanUserPath(arg)
-		root, err := tryUserFolder(p)
+		root, prob, err := tryUserFolder(cleanUserPath(arg))
 		if err != nil {
 			return err
 		}
 		if root != "" {
-			a.gameDir = root
-			say("Game folder: %s", root)
-			return nil
+			return a.setGame(root)
 		}
+		problem = prob
 	}
 
+	text := "Choose the folder that contains RESDATA.TXT."
+	value := ""
 	if arg == "" {
 		say("Looking for X-Wing Alliance on this computer...")
 		valid, unmerged := detectGames()
 		logf("detected games: %q; unmerged: %q", valid, unmerged)
 		switch {
 		case len(valid) == 1:
-			say("Found X-Wing Alliance here:")
-			say("  %s", valid[0])
-			ans, ok := a.ui.ask("Press Enter to use it, or type another folder path:")
-			if !ok || ans == "" {
-				a.gameDir = valid[0]
-				say("Game folder: %s", a.gameDir)
-				return nil
-			}
-			root, err := tryUserFolder(cleanUserPath(ans))
-			if err != nil {
-				return err
-			}
-			if root != "" {
-				a.gameDir = root
-				say("Game folder: %s", root)
-				return nil
-			}
+			text, value = "Found X-Wing Alliance here:", valid[0]
 		case len(valid) > 1:
-			say("Found X-Wing Alliance in several places:")
+			var opts []Option
 			for i, v := range valid {
-				say("  %d) %s", i+1, v)
+				opts = append(opts, Option{ID: fmt.Sprint(i), Label: v, Key: fmt.Sprint(i + 1)})
 			}
+			opts = append(opts, Option{ID: "other", Label: "Another folder...", Key: "o"})
 			for {
-				ans, ok := a.ui.ask("Type the number of the one to use (or paste another folder path):")
-				if !ok {
-					return fail("No game folder was chosen.")
+				ans := ui.Ask(Question{
+					Kind:      "buttons",
+					Title:     "Which X-Wing Alliance folder?",
+					Text:      "Found X-Wing Alliance in several places. Choose the one to use:",
+					Problem:   problem,
+					Options:   opts,
+					AllowText: true,
+				})
+				if ans.Closed {
+					return noFolderChosen()
 				}
-				if n, err := strconv.Atoi(ans); err == nil && n >= 1 && n <= len(valid) {
-					a.gameDir = valid[n-1]
-					say("Game folder: %s", a.gameDir)
-					return nil
+				if ans.ID == "other" {
+					break
 				}
-				if ans == "" {
+				if ans.ID == "text" {
+					root, prob, err := tryUserFolder(cleanUserPath(ans.Text))
+					if err != nil {
+						return err
+					}
+					if root != "" {
+						return a.setGame(root)
+					}
+					problem = prob
 					continue
 				}
-				root, err := tryUserFolder(cleanUserPath(ans))
-				if err != nil {
-					return err
-				}
-				if root != "" {
-					a.gameDir = root
-					say("Game folder: %s", root)
-					return nil
+				var n int
+				fmt.Sscan(ans.ID, &n)
+				if n >= 0 && n < len(valid) {
+					return a.setGame(valid[n])
 				}
 			}
 		default:
 			if len(unmerged) > 0 {
 				return unmergedMessage(unmerged[0])
 			}
-			say("X-Wing Alliance was not found automatically.")
+			text = "X-Wing Alliance was not found automatically.\n" + text
+		}
+	}
+	if runtime.GOOS == "windows" {
+		if _, console := ui.(*consoleUI); console {
+			text += "\nTip: in Explorer, hold Shift, right-click the folder and choose \"Copy as path\"."
 		}
 	}
 
 	for {
-		say("Type or paste the path of your X-Wing Alliance folder (the one with RESDATA.TXT).")
-		if runtime.GOOS == "windows" {
-			say("Tip: in Explorer, hold Shift, right-click the folder and choose \"Copy as path\".")
+		ans := ui.Ask(folderQuestion(text, value, problem))
+		if ans.Closed {
+			return noFolderChosen()
 		}
-		ans, ok := a.ui.ask("Folder:")
-		if !ok {
-			return fail("No game folder was chosen.")
-		}
-		if ans == "" {
-			continue
-		}
-		root, err := tryUserFolder(cleanUserPath(ans))
+		root, prob, err := tryUserFolder(cleanUserPath(ans.Text))
 		if err != nil {
 			return err
 		}
 		if root != "" {
-			a.gameDir = root
-			say("Game folder: %s", root)
-			return nil
+			return a.setGame(root)
+		}
+		say("%s", prob)
+		problem = prob
+		value = ""
+		if _, console := ui.(*consoleUI); console {
+			problem = "" // already printed
 		}
 	}
 }

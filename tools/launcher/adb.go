@@ -18,23 +18,39 @@ import (
 type ADB struct {
 	Path   string
 	Serial string
+	ctx    context.Context // nil: appCtx (stopped when the launcher stops)
 }
 
 // run executes adb with the given arguments and returns stdout+stderr
 // (with \r\n turned into \n). Every call is logged with its output.
-// timeout 0 means no limit (used for long pushes and installs).
+// timeout 0 means no limit (used for long pushes and installs). The command
+// is stopped when the launcher stops (window closed).
 func (a *ADB) run(timeout time.Duration, args ...string) (string, error) {
+	return a.exec(timeout, true, args...)
+}
+
+// runQuiet is run without logging a successful call (for polling).
+func (a *ADB) runQuiet(timeout time.Duration, args ...string) (string, error) {
+	return a.exec(timeout, false, args...)
+}
+
+func (a *ADB) exec(timeout time.Duration, logOK bool, args ...string) (string, error) {
 	full := args
 	if a.Serial != "" {
 		full = append([]string{"-s", a.Serial}, args...)
 	}
-	ctx := context.Background()
+	base := appCtx
+	if a.ctx != nil {
+		base = a.ctx
+	}
+	ctx := base
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
 	cmd := exec.CommandContext(ctx, a.Path, full...)
+	noConsoleWindow(cmd)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
@@ -47,7 +63,10 @@ func (a *ADB) run(timeout time.Duration, args ...string) (string, error) {
 	if errors.Is(err, exec.ErrWaitDelay) {
 		err = nil
 	}
-	if ctx.Err() == context.DeadlineExceeded {
+	switch {
+	case base.Err() != nil:
+		err = errClosed
+	case ctx.Err() == context.DeadlineExceeded:
 		err = fmt.Errorf("adb did not answer within %s", timeout)
 	}
 	out := strings.ReplaceAll(buf.String(), "\r\n", "\n")
@@ -55,7 +74,9 @@ func (a *ADB) run(timeout time.Duration, args ...string) (string, error) {
 	if err != nil {
 		status = err.Error()
 	}
-	logf("$ adb %s  [%s, %.2fs]\n%s", strings.Join(quoteForLog(full), " "), status, time.Since(start).Seconds(), out)
+	if logOK || err != nil {
+		logf("$ adb %s  [%s, %.2fs]\n%s", strings.Join(quoteForLog(full), " "), status, time.Since(start).Seconds(), out)
+	}
 	return out, err
 }
 
@@ -222,19 +243,28 @@ func platformToolsURL() string {
 // downloadPlatformTools asks for the licence, downloads Google's
 // platform-tools zip and unpacks it into <exe dir>/platform-tools.
 func (a *app) downloadPlatformTools() (string, error) {
-	say("")
-	say("OpenXWA needs Google's free \"adb\" tool (Android Platform Tools) to talk")
-	say("to the headset. It is not on this computer yet, so it can be downloaded")
-	say("now from Google (a few MB).")
-	say("")
-	say("Downloading it means you accept the Android SDK License Agreement:")
-	say("  https://developer.android.com/studio/terms")
-	say("")
-	ans, _ := a.ui.ask("Type yes to accept and download:")
-	if !strings.EqualFold(strings.TrimSpace(ans), "yes") {
+	ans := ui.Ask(Question{
+		Kind:  "buttons",
+		Title: "Google's adb tool is needed",
+		Text: "OpenXWA needs Google's free \"adb\" tool (Android Platform Tools) to talk\n" +
+			"to the headset. It is not on this computer yet, so it can be downloaded\n" +
+			"now from Google (a few MB).\n\n" +
+			"Downloading it means you accept the Android SDK License Agreement:",
+		Link: "https://developer.android.com/studio/terms",
+		Options: []Option{
+			{ID: "yes", Label: "I accept, download adb", Key: "yes", Style: "primary"},
+			{ID: "no", Label: "Cancel", Key: "no"},
+		},
+		Default:       "no",
+		ConsolePrompt: "Type yes to accept and download:",
+	})
+	if ans.Closed && appCtx.Err() != nil {
+		return "", errClosed
+	}
+	if ans.ID != "yes" {
 		return "", fail("adb was not downloaded, so the launcher cannot continue.\n" +
 			"You can also install SideQuest or Meta Quest Developer Hub (they include adb)\n" +
-			"and then run this launcher again.")
+			"and then try again.")
 	}
 
 	var lastErr error
@@ -246,6 +276,9 @@ func (a *app) downloadPlatformTools() (string, error) {
 		zipPath := filepath.Join(dir, "platform-tools-download.zip")
 		say("Downloading adb...")
 		if err := downloadFile(platformToolsURL(), zipPath, "Downloading adb"); err != nil {
+			if errors.Is(err, errClosed) {
+				return "", err
+			}
 			os.Remove(zipPath)
 			lastErr = err
 			if errors.Is(err, errNotWritable) {

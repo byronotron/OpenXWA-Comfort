@@ -11,6 +11,8 @@
 #include "xwa/flight/object/object.h"
 #include "xwa/flight/player/player.h"
 #include "xwa/config/game_config.h"
+#include "xwa/config/pilot.h"
+#include "xwa/frontend/mission_setup.h"
 #include "xwa/flight/flight_display.h"
 #include "xwa_runtime/runtime/flight_savestate.h"
 #include "xwa_runtime/runtime/flight_task.h"
@@ -288,9 +290,12 @@ void XwaFlightCheckpoints_ServiceFrame(void) {
 	}
 	if (g_localPlayerDestroyedCount != s_cp.seen_destroyed) {
 		s_cp.seen_destroyed = g_localPlayerDestroyedCount;
-		/* The death menu (it offers the quick save too). */
-		s_cp.death_menu = 1;
-		s_cp.death_us = XwaTime_GetElapsedUs();
+		/* The death menu (it offers the quick save too); the combat
+		 * simulator keeps the original game's ending. */
+		if (g_pilotData.missionDirectoryId != MISSION_DIRECTORY_SKIRMISH) {
+			s_cp.death_menu = 1;
+			s_cp.death_us = XwaTime_GetElapsedUs();
+		}
 	}
 	if (s_cp.offering) {
 		cp_handle_offer();

@@ -29,6 +29,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <errno.h>
+#include <time.h>
+#include <unistd.h>
 
 /* OS message boxes are invisible inside an immersive VR app, so the Quest
  * build (and desktop runs with XWA_INGAME_SETUP=1, for testing) shows setup
@@ -306,6 +309,16 @@ static int resolve_game_data(const XwaLaunchOptions* launch, const XwaHostConfig
 						 missing, list);
 				return 0;
 			}
+		}
+		if (!ok && use_ingame_setup() && access(launch->game_data_path, R_OK | X_OK) != 0) {
+			/* (android_default_game_data could not move it aside) */
+			snprintf(error, error_size,
+					 "OpenXWA cannot read its game folder on the headset:\n%s\n\n"
+					 "It was created over USB before OpenXWA had started once.\n"
+					 "Run the OpenXWA Launcher on your PC again with the headset on your head:\n"
+					 "it repairs the folder and copies the game files again. Then choose Try Again.",
+					 launch->game_data_path);
+			return 0;
 		}
 		if (!ok && use_ingame_setup()) {
 			char detail[512];
@@ -739,6 +752,24 @@ static void android_default_game_data(XwaLaunchOptions* launch) {
 		return;
 	}
 	snprintf(path, sizeof path, "%s/XWA", external);
+	{
+		/* A folder made over adb before the app ever ran belongs to the
+		 * shell user and the app cannot read it (or anything copied into
+		 * it). Move it aside and make our own: the PC launcher then sees
+		 * the files missing and copies them again. */
+		struct stat st;
+		if (stat(path, &st) == 0 && S_ISDIR(st.st_mode) && st.st_uid != getuid() && access(path, R_OK | X_OK) != 0) {
+			char aside[XWA_HOST_CONFIG_PATH_CAPACITY + 32];
+			snprintf(aside, sizeof aside, "%s/XWA-unreadable-%ld", external, (long)time(NULL));
+			if (rename(path, aside) == 0) {
+				Aeron_LogWarn("xwa.config", "game-data folder %s belonged to uid %u, not to the app: moved to %s",
+							  path, (unsigned)st.st_uid, aside);
+			} else {
+				Aeron_LogError("xwa.config", "game-data folder %s belongs to uid %u and cannot be read or moved (%s)",
+							   path, (unsigned)st.st_uid, strerror(errno));
+			}
+		}
+	}
 	mkdir(path, 0775);
 	snprintf(launch->game_data_path, sizeof launch->game_data_path, "%s", path);
 	Aeron_LogInfo("xwa.config", "Android game-data folder: %s", path);

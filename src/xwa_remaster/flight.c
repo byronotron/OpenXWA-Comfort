@@ -3246,8 +3246,8 @@ static const struct {
 	const char* cockpit;
 	float scale;
 } k_xr_cockpit_scale[] = {
-	{ "YWINGCOCKPIT", 0.95f },
-	{ "AWINGCOCKPIT", 0.95f },
+	{ "YWINGCOCKPIT", 0.90f },
+	{ "AWINGCOCKPIT", 0.90f },
 };
 
 static int fl_name_matches(const char* name, const char* key) {

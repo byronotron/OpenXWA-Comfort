@@ -26,17 +26,20 @@ var downloadClient = func() *http.Client {
 	return &http.Client{Transport: t}
 }()
 
-// downloadFile saves url to dest, drawing "label: 3.2 MB of 7.0 MB (45%)".
-// It writes to dest+".part" first and renames when complete.
+// downloadFile saves url to dest with a progress display. It writes to
+// dest+".part" first and renames when complete.
 func downloadFile(url, dest, label string) error {
 	logf("download %s -> %s", url, dest)
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(appCtx, "GET", url, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("User-Agent", userAgent())
 	resp, err := downloadClient.Do(req)
 	if err != nil {
+		if appCtx.Err() != nil {
+			return errClosed
+		}
 		return err
 	}
 	defer resp.Body.Close()
@@ -48,28 +51,22 @@ func downloadFile(url, dest, label string) error {
 	if err != nil {
 		return fmt.Errorf("%w: %v", errNotWritable, err)
 	}
-	var p progressLine
-	total := resp.ContentLength
-	var got int64
-	buf := make([]byte, 64<<10)
-	draw := func(force bool) {
-		if total > 0 {
-			p.show(fmt.Sprintf("%s: %s of %s (%d%%)", label, humanSize(got), humanSize(total), got*100/total), force)
-		} else {
-			p.show(fmt.Sprintf("%s: %s", label, humanSize(got)), force)
-		}
+	p := Progress{Label: label, TotalBytes: resp.ContentLength}
+	if p.TotalBytes < 0 {
+		p.TotalBytes = 0
 	}
+	defer ui.Progress(nil)
+	buf := make([]byte, 64<<10)
 	for {
 		n, rerr := resp.Body.Read(buf)
 		if n > 0 {
 			if _, werr := f.Write(buf[:n]); werr != nil {
 				f.Close()
 				os.Remove(part)
-				fmt.Println()
 				return werr
 			}
-			got += int64(n)
-			draw(false)
+			p.Bytes += int64(n)
+			ui.Progress(&p)
 		}
 		if rerr == io.EOF {
 			break
@@ -77,26 +74,27 @@ func downloadFile(url, dest, label string) error {
 		if rerr != nil {
 			f.Close()
 			os.Remove(part)
-			fmt.Println()
+			if appCtx.Err() != nil {
+				return errClosed
+			}
 			return rerr
 		}
 	}
-	draw(true)
-	fmt.Println()
+	ui.Progress(&p)
 	if err := f.Close(); err != nil {
 		os.Remove(part)
 		return err
 	}
-	if total > 0 && got != total {
+	if resp.ContentLength > 0 && p.Bytes != resp.ContentLength {
 		os.Remove(part)
-		return fmt.Errorf("the download stopped early (%d of %d bytes)", got, total)
+		return fmt.Errorf("the download stopped early (%d of %d bytes)", p.Bytes, resp.ContentLength)
 	}
 	os.Remove(dest)
 	if err := os.Rename(part, dest); err != nil {
 		os.Remove(part)
 		return err
 	}
-	logf("downloaded %d bytes", got)
+	logf("downloaded %d bytes", p.Bytes)
 	return nil
 }
 
