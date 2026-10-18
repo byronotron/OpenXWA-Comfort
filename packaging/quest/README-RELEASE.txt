@@ -53,7 +53,10 @@ Controls
   Left grip (hold): radial menu     Left menu button: game menu (Esc)
   In menus the right controller is a laser pointer.
   Taking the headset off or opening the Meta menu pauses the game.
-  VR settings: game menu -> VR Options.
+  Side panel on your right: tactical map, voice commands and the button
+  mapping; touch a tab (or point and pull the trigger). Touch the map to
+  zoom.
+  VR settings and help: game menu -> VR Options.
 
 
 Problems?

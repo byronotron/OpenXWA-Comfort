@@ -4,8 +4,14 @@
 #include "aeron/log.h"
 #include "xwa/assets/string_table.h"
 #include "xwa_runtime/config/modern_options_menu.h"
+#include "xwa/frontend/frontend_color.h"
+#include "xwa/frontend/frontend_draw.h"
+#include "xwa/frontend/frontend_text.h"
+#include "xwa_runtime/runtime/vr_buttons.h"
 
 #include <SDL3/SDL.h>
+
+#include <ctype.h>
 
 #include <errno.h>
 #include <math.h>
@@ -23,7 +29,7 @@ typedef struct VrSetting {
 	int count;
 	int fallback;               /* index used when the key is unset */
 	int button_id;
-	int page;                   /* 0 main, 1 Performance / GPU */
+	int page;                   /* 0 main, 1 Performance / GPU, -1 not offered */
 } VrSetting;
 
 enum {
@@ -43,7 +49,7 @@ enum {
 	VR_INVERT_PITCH,
 	VR_HANDED,
 	VR_VOICE,
-	VR_BUTTON_CARD,
+	VR_SIDE_PANEL,
 	VR_ENVIRONMENT,
 	VR_SHIP_3D,
 	VR_RESOLUTION,
@@ -58,7 +64,7 @@ enum {
 	VR_COUNT
 };
 
-static const char* const k_layout_texts[] = { "Cockpit", "Helmet", "Fixed" };
+static const char* const k_layout_texts[] = { "Cockpit (Recommended)", "Helmet", "Fixed" };
 static const char* const k_layout_values[] = { "cockpit", "helmet", "fixed" };
 static const char* const k_size_texts[] = { "Small", "Medium", "Large", "Larger", "Largest" };
 static const char* const k_size_values[] = { "0.45", "0.55", "0.65", "0.75", "0.85" };
@@ -74,7 +80,7 @@ static const char* const k_hands_texts[] = { "Pilot Gloves", "Controllers", "Off
 static const char* const k_hands_values[] = { "gloves", "controllers", "off" };
 static const char* const k_voice_texts[] = { "Off", "Double-tap Thumb Rest", "Hold Thumb Rest" };
 static const char* const k_voice_values[] = { "0", "doubletap", "hold" };
-static const char* const k_res_texts[] = { "70%", "80%", "90%", "100%", "110%", "120%" };
+static const char* const k_res_texts[] = { "70%", "80%", "90%", "100%", "110% (Recommended)", "120%" };
 static const char* const k_res_values[] = { "0.7", "0.8", "0.9", "1.0", "1.1", "1.2" };
 static const char* const k_fov_texts[] = { "Off", "Low", "Medium", "High" };
 static const char* const k_fov_values[] = { "0", "low", "medium", "high" };
@@ -84,11 +90,13 @@ static const char* const k_env_texts[] = { "Off",           "Random",
 static const char* const k_env_values[] = { "0", "random", "endor", "xwing", "tiefighter", "xvt", "battle" };
 static const char* const k_depth_texts[] = { "Off (flat)", "Subtle", "Normal", "Strong" };
 static const char* const k_depth_values[] = { "0", "0.5", "1", "1.6" };
-static const char* const k_refresh_texts[] = { "Headset Setting", "72 Hz", "80 Hz", "90 Hz", "120 Hz" };
+static const char* const k_refresh_texts[] = { "Headset Setting", "72 Hz (Recommended)", "80 Hz", "90 Hz", "120 Hz" };
 static const char* const k_refresh_values[] = { "0", "72", "80", "90", "120" };
 static const char* const k_shading_texts[] = { "Full", "Lite (faster)" };
 static const char* const k_shading_values[] = { "full", "lite" };
-static const char* const k_bloom_texts[] = { "Shared (both eyes)", "Per Eye", "Off" };
+static const char* const k_bloom_texts[] = { "Shared (Recommended)", "Per Eye", "Off" };
+/* Off is the recommended setting (dynamic lights, cockpit shadows). */
+static const char* const k_off_rec_texts[] = { "Off (Recommended)", "On" };
 static const char* const k_bloom_values[] = { "1", "eye", "0" };
 
 /* Page 1 holds what costs or saves GPU time: each night-shift
@@ -98,8 +106,8 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "XWA_XR_HUD_SCALE", "Helmet HUD Size", k_size_texts, k_size_values, 5, 2, 81, 0 },
 	{ "XWA_XR_DEPTH_BOOST", "Depth Boost", k_boost_texts, k_boost_values, 9, 0, 82, 0 },
 	{ "XWA_XR_WORLD_SCALE", "World Scale", k_scale_texts, k_scale_values, 9, 6, 83, 0 },
-	{ "XWA_POINT_LIGHTS", "Dynamic Lights", k_toggle_texts, k_toggle_values, 2, 0, 84, 1 },
-	{ "XWA_XR_SHADOWS", "Cockpit Shadows", k_toggle_texts, k_toggle_values, 2, 0, 85, 1 },
+	{ "XWA_POINT_LIGHTS", "Dynamic Lights", k_off_rec_texts, k_toggle_values, 2, 0, 84, 1 },
+	{ "XWA_XR_SHADOWS", "Cockpit Shadows", k_off_rec_texts, k_toggle_values, 2, 0, 85, 1 },
 	{ "XWA_XR_CONSOLE", "Lap Console", k_toggle_texts, k_toggle_values, 2, 1, 88, 0 },
 	/* Held open with the grip of the hand that has the left controls. */
 	{ "XWA_XR_WHEEL", "Radial Menu (grip)", k_toggle_texts, k_toggle_values, 2, 1, 67, 0 },
@@ -115,14 +123,16 @@ static const VrSetting k_settings[VR_COUNT] = {
 	/* Mirrors the controllers' game roles (the flight stick stays right). */
 	{ "AERON_XR_LEFT_HANDED", "Controls", k_hand_texts, k_toggle_values, 2, 0, 75, 0 },
 	{ "XWA_XR_VOICE", "Voice Commands", k_voice_texts, k_voice_values, 3, 1, 98, 0 },
-	{ "XWA_XR_BUTTON_CARD", "Button Card", k_toggle_texts, k_toggle_values, 2, 1, 92, 0 },
+	/* The panel on the right: tactical map, voice commands, button mapping. */
+	{ "XWA_XR_SIDE_PANEL", "Side Panel", k_toggle_texts, k_toggle_values, 2, 1, 92, 0 },
 	{ "XWA_XR_ENVIRONMENT", "Menu Scene", k_env_texts, k_env_values, 7, 4, 90, 0 }, /* TIE Fighter box art */
-	/* Ship previews (mission setup, tech room) in stereo on the menu screen. */
-	{ "XWA_XR_SHIP_3D", "3D Ship Previews", k_depth_texts, k_depth_values, 4, 2, 68, 0 },
+	/* Ship previews (mission setup, tech room) in stereo on the menu screen:
+	 * always subtle, not in the menu. */
+	{ "XWA_XR_SHIP_3D", "3D Ship Previews", k_depth_texts, k_depth_values, 4, 1, 68, -1 },
 	{ "AERON_XR_RESOLUTION_SCALE", "Resolution (restart)", k_res_texts, k_res_values, 6, 4, 86, 1 },
 	{ "AERON_XR_REFRESH_RATE", "Refresh Rate", k_refresh_texts, k_refresh_values, 5, 0, 99, 1 },
 	/* Near-first draw order and the GPU clock floor. */
-	{ "XWA_XR_GPU_OPT", "GPU Optimizations", k_toggle_texts, k_toggle_values, 2, 1, 79, 1 },
+	{ "XWA_XR_GPU_OPT", "GPU Optimizations", k_toggle_texts, k_toggle_values, 2, 1, 79, -1 }, /* always on */
 	{ "XWA_XR_FOVEATION", "Foveation (restart)", k_fov_texts, k_fov_values, 4, 1, 78, 1 },
 	{ "XWA_XR_SHADING", "Ship Shading (restart)", k_shading_texts, k_shading_values, 2, 1, 77, 1 },
 	{ "XWA_XR_DIRECT_OUTPUT", "Direct Output (no bloom)", k_toggle_texts, k_toggle_values, 2, 0, 76, 1 },
@@ -403,6 +413,7 @@ static const struct {
 	{ "XWA_XR_ASTC", "1" },
 	{ "XWA_XR_BLOOM", "1" },
 	{ "XWA_XR_SHIP_3D", "0.5" },
+	{ "XWA_XR_SIDE_PANEL", "1" },
 	{ "AERON_XR_INVERT_PITCH", "0" },
 	{ "XWA_XR_HANDS", "controllers" },
 };
@@ -494,6 +505,80 @@ static int vr_page_rows(int page) {
 	return n;
 }
 
+/* "Help": the controller layout, from the button bindings (so it follows
+ * left-handed controls and any change of the layout). */
+static int vr_help_row(int y, const char* control, const char* action) {
+	char a[96];
+	snprintf(a, sizeof a, "%s", action ? action : "");
+	a[0] = (char)toupper((unsigned char)a[0]);
+	FrontendText_Draw(12, control, 312 - (int)FrontendText_MeasureWidth(control, 12), y, g_colorLightBlue);
+	FrontendText_Draw(12, a, 328, y, g_colorPaleBlue);
+	return y + 16;
+}
+
+static void vr_draw_help(XwaModernOptionsMenu* menu) {
+	const int lh = Aeron_XrLeftHanded();
+	int y = menu->y + 4;
+	y = vr_help_row(y, lh ? "Left stick" : "Right stick", "Pitch and yaw");
+	y = vr_help_row(y, lh ? "Right stick" : "Left stick", "Roll (left/right), throttle (fwd/back)");
+	y = vr_help_row(y, lh ? "Left trigger" : "Right trigger", "Fire");
+	y = vr_help_row(y, "Both triggers", "Land / hyperspace (when offered)");
+	static const AeronXrButton k_order[] = {
+		AERON_XR_BUTTON_A,           AERON_XR_BUTTON_B,          AERON_XR_BUTTON_X,
+		AERON_XR_BUTTON_Y,           AERON_XR_BUTTON_LEFT_TRIGGER, AERON_XR_BUTTON_RIGHT_STICK,
+		AERON_XR_BUTTON_LEFT_STICK,  AERON_XR_BUTTON_RIGHT_GRIP,
+	};
+	for (size_t i = 0; i < sizeof k_order / sizeof k_order[0]; ++i) {
+		const XwaVrButtonBinding* b = XwaVrButtons_Binding(k_order[i]);
+		const char* action = b && b->plain ? XwaVrButtons_KeyAction(b->plain) : NULL;
+		char control[48];
+		snprintf(control, sizeof control, "%s", XwaVrButtons_ButtonName(k_order[i], 0));
+		control[0] = (char)toupper((unsigned char)control[0]);
+		if (action) {
+			y = vr_help_row(y, control, action);
+		}
+	}
+	y = vr_help_row(y, lh ? "Right grip (hold)" : "Left grip (hold)", "Radial menu: point, pull the trigger");
+	y = vr_help_row(y, "Grip on a panel", "Move HUD panels, the console, the stick");
+	y = vr_help_row(y, "Left menu button", "Pause / game menu");
+	y = vr_help_row(y, "Thumb rest", "Voice command (as set in Voice Commands)");
+	y = vr_help_row(y, "In menus", "Right controller points, trigger selects");
+	menu->y = y + 12;
+}
+
+static void vr_draw_voice(XwaModernOptionsMenu* menu) {
+	const char* mode = SDL_getenv("XWA_XR_VOICE");
+	const char* how = mode && SDL_strcasecmp(mode, "hold") == 0
+						  ? "Hold a thumb rest and speak, e.g. \"attack my target\""
+					  : mode && (mode[0] == '0' || SDL_strcasecmp(mode, "off") == 0)
+						  ? "Voice commands are off (VR Options: Voice Commands)"
+						  : "Double-tap a thumb rest, then speak, e.g. \"attack my target\"";
+	FrontendRect rect;
+	FrontendDraw_RectAssign(&rect, 0, menu->y, 639, menu->y + 12);
+	FrontendText_DrawCentered(12, how, &rect, g_colorPaleBlue);
+	int groups = 0;
+	const XwaVrVoiceGroup* g = XwaVrButtons_VoiceGroups(&groups);
+	int bottom = menu->y;
+	for (int c = 0; c < groups && c < 3; ++c) {
+		const int x = 48 + c * 196;
+		int y = menu->y + 24;
+		FrontendText_Draw(12, g[c].title, x, y, g_colorLightBlue);
+		y += 18;
+		for (int i = 0; i < g[c].count; ++i) {
+			FrontendText_Draw(12, g[c].phrases[i], x, y, g_colorPaleBlue);
+			y += 15;
+		}
+		if (y > bottom) {
+			bottom = y;
+		}
+	}
+	FrontendDraw_RectAssign(&rect, 0, bottom + 6, 639, bottom + 18);
+	FrontendText_DrawCentered(12, "Your own words work too: \"wingmen, go after my target\"", &rect, g_colorPaleBlue);
+	menu->y = bottom + 30;
+}
+
+enum { VR_PAGE_MAIN, VR_PAGE_PERF, VR_PAGE_HELP, VR_PAGE_VOICE };
+
 int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 	static int page;
 	XwaModernOptionsMenu menu;
@@ -503,7 +588,23 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 		return 0;
 	}
 	vr_load();
-	if (page == 1) {
+	if (page == VR_PAGE_HELP || page == VR_PAGE_VOICE) {
+		XwaModernOptionsMenu_Begin(&menu, menu_center_x, 38, cursor_row, 1);
+		XwaModernOptionsMenu_DrawTitle(&menu, page == VR_PAGE_HELP ? "Help: Controller Buttons" : "Voice Commands");
+		if (page == VR_PAGE_HELP) {
+			vr_draw_help(&menu);
+		} else {
+			vr_draw_voice(&menu);
+		}
+		back = XwaModernOptionsMenu_DrawAction(&menu, FrontendString_Get(STR_BACK), 87, 0);
+		back |= XwaModernOptionsMenu_TakeEscape(&menu);
+		if (back) {
+			*cursor_row = page == VR_PAGE_HELP ? 0 : 1;
+			page = VR_PAGE_MAIN;
+		}
+		return 0;
+	}
+	if (page == VR_PAGE_PERF) {
 		/* Performance / GPU: every optimization on its own switch. */
 		XwaModernOptionsMenu_Begin(&menu, menu_center_x, 38, cursor_row, vr_page_rows(1) + 1);
 		XwaModernOptionsMenu_DrawTitle(&menu, "VR Performance / GPU");
@@ -511,13 +612,25 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 		back = XwaModernOptionsMenu_DrawAction(&menu, FrontendString_Get(STR_BACK), 87, 0);
 		back |= XwaModernOptionsMenu_TakeEscape(&menu);
 		if (back) {
-			page = 0;
-			*cursor_row = vr_page_rows(0) + 3; /* on "Performance / GPU..." */
+			page = VR_PAGE_MAIN;
+			*cursor_row = 2 + vr_page_rows(0) + 2; /* on "Performance / GPU..." */
 		}
 		return 0;
 	}
-	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 38, cursor_row, vr_page_rows(0) + 5);
+	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 38, cursor_row, vr_page_rows(0) + 6);
 	XwaModernOptionsMenu_DrawTitle(&menu, "VR Options");
+	if (XwaModernOptionsMenu_DrawAction(&menu, "Help", 65, 0)) {
+		page = VR_PAGE_HELP;
+		*cursor_row = 0;
+		return 0;
+	}
+	menu.y -= 4;
+	if (XwaModernOptionsMenu_DrawAction(&menu, "View Voice Commands", 64, 0)) {
+		page = VR_PAGE_VOICE;
+		*cursor_row = 0;
+		return 0;
+	}
+	menu.y -= 4;
 	vr_draw_settings(&menu, 0);
 
 	if (XwaModernOptionsMenu_DrawAction(&menu, "Reset HUD Panel Positions", 93, 0)) {
@@ -530,14 +643,8 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 		Aeron_LogInfo("xwa.config", "lap console back at its default spot");
 	}
 	menu.y -= 4;
-	if (XwaModernOptionsMenu_DrawAction(&menu, "Reset Flight Stick Position", 95, 0)) {
-		SDL_setenv_unsafe("XWA_XR_STICK_POS", "", 1);
-		XwaModernVrOptions_SaveValue("XWA_XR_STICK_POS", "");
-		Aeron_LogInfo("xwa.config", "flight stick back at its default spot");
-	}
-	menu.y -= 4;
 	if (XwaModernOptionsMenu_DrawAction(&menu, "Performance / GPU...", 71, 0)) {
-		page = 1;
+		page = VR_PAGE_PERF;
 		*cursor_row = 0;
 		return 0;
 	}

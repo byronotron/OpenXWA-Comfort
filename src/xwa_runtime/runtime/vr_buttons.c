@@ -395,3 +395,29 @@ int XwaVrButtons_RewriteText(const char* in, char* out, size_t size) {
 	out[o] = '\0';
 	return changed;
 }
+
+static const char* const k_voice_wing[] = { "attack my target",    "cover me",       "ignore my target",
+											"evade",               "wait",           "go ahead",
+											"return to base",      "report in",      "call resupply",
+											"call reinforcements", "gunner attack my target" };
+static const char* const k_voice_target[] = { "target closest enemy",    "next target",      "previous target",
+											  "target my attacker",      "who is attacking my target",
+											  "target incoming missile", "target objective", "newest target",
+											  "next subsystem",          "clear target",     "nav buoy" };
+static const char* const k_voice_ship[] = { "match speed",       "countermeasures",   "change weapon", "s-foils",
+											"lasers to shields", "shields to lasers", "link weapons",
+											"convergence",       "map",               "dock",
+											"pick up",           "release cargo",     "hyperspace",
+											"confirm" };
+
+const XwaVrVoiceGroup* XwaVrButtons_VoiceGroups(int* count) {
+	static const XwaVrVoiceGroup groups[] = {
+		{ "WINGMEN", k_voice_wing, (int)(sizeof k_voice_wing / sizeof k_voice_wing[0]) },
+		{ "TARGETING", k_voice_target, (int)(sizeof k_voice_target / sizeof k_voice_target[0]) },
+		{ "SHIP", k_voice_ship, (int)(sizeof k_voice_ship / sizeof k_voice_ship[0]) },
+	};
+	if (count) {
+		*count = (int)(sizeof groups / sizeof groups[0]);
+	}
+	return groups;
+}

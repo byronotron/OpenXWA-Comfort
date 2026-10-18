@@ -76,6 +76,16 @@ const char* XwaVrButtons_KeyName(uint16_t key);
  * when it has no short description. */
 const char* XwaVrButtons_KeyAction(uint16_t key);
 
+/* The voice command list, by group (the voice card in the cockpit and the
+ * VR Options page show it). Keep in step with the command table in
+ * xwa_app/voice_core.c: one phrase per command; close wordings work too. */
+typedef struct XwaVrVoiceGroup {
+	const char* title;
+	const char* const* phrases;
+	int count;
+} XwaVrVoiceGroup;
+const XwaVrVoiceGroup* XwaVrButtons_VoiceGroups(int* count);
+
 /* Rewrites the keyboard references in a game text for the Touch
  * controllers ("Press 'T'" -> "Press B", "the space bar" -> "grip+X",
  * "(Shift-D)" -> "(grip+L-trigger)"). Keys no VR control sends are left as

@@ -11,7 +11,9 @@
 #include "xwa_remaster/vr_gloves.h"
 #include "xwa_remaster/vr_controllers.h"
 #include "xwa_remaster/vr_flight_stick.h"
+#include "aeron/asset/opt_model.h"
 #include "xwa_runtime/runtime/vr_buttons.h"
+#include "xwa_runtime/snapshot/snapshot.h"
 
 #include <ctype.h>
 
@@ -526,29 +528,6 @@ static void vc_layout(void) {
 	VcButton* row[4];
 	s_vc.button_count = 0;
 	s_vc.label_count = 0;
-
-	if (s_vc.help) {
-		/* Help: the two reference cards, on two big buttons; BACK where the
-		 * "?" was. */
-		vc_label(34.0f, 22.0f, "HELP", 28, 0, 1, 0);
-		VcButton* back = vc_button(VC_W - 34.0f - 150.0f, 14.0f, 150.0f, 52.0f, "BACK", VC_LOCAL_BACK, 0);
-		back->font_size = 24.0f;
-		static const char* const l[2] = { "LIST OF VOICE\nRECOGNITION COMMANDS", "SHOW VR-CONTROLLER\nMAPPING" };
-		static const int card[2] = { VC_CARD_VOICE, VC_CARD_BUTTONS };
-		const float top = 84.0f, gap = 30.0f, w = (VC_W - 68.0f - gap) * 0.5f, h = VC_H - top - 34.0f;
-		for (int i = 0; i < 2; ++i) {
-			VcButton* b = vc_button(34.0f + (w + gap) * (float)i, top, w, h, l[i], VC_LOCAL_CARD, card[i]);
-			b->font_size = 40.0f;
-			b->lit = vc_card_visible(card[i]);
-			b->sub = b->lit ? "shown beside you - press to hide" : "press to show it beside you";
-		}
-		return;
-	}
-	{
-		/* Help ("?"), top right. */
-		VcButton* help = vc_button(VC_W - 34.0f - 64.0f, 14.0f, 64.0f, 44.0f, "?", VC_LOCAL_HELP, 0);
-		help->font_size = 30.0f;
-	}
 
 	/* Energy */
 	{
@@ -2371,11 +2350,12 @@ static int lb_from_binding(LbEntry* e, AeronXrButton button) {
 	if (key == 0u /* KEY_NONE */) {
 		return 0;
 	}
+	/* What the button does, never the keyboard key behind it. */
 	const char* action = XwaVrButtons_KeyAction(key);
-	lb_set_action(e, action ? action : XwaVrButtons_KeyName(key));
-	if (action) {
-		snprintf(e->key, sizeof e->key, "%s", XwaVrButtons_KeyName(key));
+	if (!action) {
+		return 0;
 	}
+	lb_set_action(e, action);
 	return 1;
 }
 
@@ -2863,16 +2843,12 @@ static const VcCardLabel k_card_right_lh[] = {
 	{ CTL_TRIGGER, AERON_XR_BUTTON_LEFT_TRIGGER, NULL, NULL, 452.0f },
 };
 
-/* "next target (T)" / "(A)": what a key does, with its keyboard key. */
+/* "next target": what a key does (the keyboard key itself is never
+ * shown in VR). */
 static void vc_card_key_text(char* out, size_t size, uint16_t key, int with_key) {
 	const char* action = XwaVrButtons_KeyAction(key);
-	if (!action) {
-		snprintf(out, size, "(%s)", XwaVrButtons_KeyName(key));
-	} else if (with_key) {
-		snprintf(out, size, "%s (%s)", action, XwaVrButtons_KeyName(key));
-	} else {
-		snprintf(out, size, "%s", action);
-	}
+	(void)with_key;
+	snprintf(out, size, "%s", action ? action : "");
 }
 
 /* The two label lines of a control, from its bindings. */
@@ -3025,11 +3001,11 @@ static void vc_card_controller(float cx, float cy, float sx, const VcCardLabel* 
 	}
 }
 
-static void vc_card_draw(void) {
+/* The side panel's plate (as the lap console's). */
+static void vc_card_plate(void) {
 	const float W = s_vc.cur_w_px, H = s_vc.cur_h_px;
 	const float transparent[4] = { 0, 0, 0, 0 };
 	float fill[4], border[4], glow[4];
-	/* The lap console's plate. */
 	vc_pma(glow, VC_CYAN, 0.25f);
 	vc_rrect(4.0f, 4.0f, W - 8.0f, H - 8.0f, 30.0f, 8.0f, 14.0f, transparent, glow);
 	vc_pma(fill, 0.157f, 0.549f, 0.745f, 0.14f);
@@ -3041,10 +3017,12 @@ static void vc_card_draw(void) {
 		vc_pma(line, VC_CYAN, 0.025f);
 		AeronDrawList_AddFill(s_vc.cur_list, 14.0f, y, W - 28.0f, 2.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
 	}
-	vc_text(44.0f, 30.0f, "CONTROLS", 30.0f, 0, VC_CYAN, 1.0f);
+}
+
+/* "Button Mapping" tab: both controllers with what their buttons do. */
+static void vc_card_draw(void) {
+	const float W = s_vc.cur_w_px, H = s_vc.cur_h_px;
 	const int lh = Aeron_XrLeftHanded();
-	vc_text(W - 44.0f, 38.0f, lh ? "hold the RIGHT grip: radial menu" : "hold the LEFT grip: radial menu", 18.0f, 2,
-			0.62f, 0.85f, 0.92f, 0.9f);
 	const float cy = 222.0f;
 	const VcCardLabel* left = lh ? k_card_left_lh : k_card_left;
 	const VcCardLabel* right = lh ? k_card_right_lh : k_card_right;
@@ -3066,22 +3044,6 @@ static void vc_card_draw(void) {
 			17.0f, 1, 0.62f, 0.85f, 0.92f, 0.9f);
 }
 
-/* The voice command list (left card). Keep in step with the command table
- * in xwa_app/voice_core.c: one phrase per command; close wordings work too. */
-static const char* const k_voice_wing[] = { "attack my target",  "cover me",       "ignore my target",
-											"evade",             "wait",           "go ahead",
-											"return to base",    "report in",      "call resupply",
-											"call reinforcements", "gunner attack my target" };
-static const char* const k_voice_target[] = { "target closest enemy", "next target",          "previous target",
-											  "target my attacker",  "who is attacking my target",
-											  "target incoming missile", "target objective", "newest target",
-											  "next subsystem",      "clear target",          "nav buoy" };
-static const char* const k_voice_ship[] = { "match speed",       "countermeasures",   "change weapon", "s-foils",
-											"lasers to shields", "shields to lasers", "link weapons",
-											"convergence",       "map",               "dock",
-											"pick up",           "release cargo",     "hyperspace",
-											"confirm" };
-
 static void vc_voice_column(float x, const char* title, const char* const* lines, int count) {
 	float rule[4];
 	vc_text(x, 132.0f, title, 20.0f, 0, VC_CYAN, 0.95f);
@@ -3096,43 +3058,35 @@ static void vc_voice_column(float x, const char* title, const char* const* lines
 	}
 }
 
+/* "Voice Commands" tab. */
 static void vc_voice_draw(void) {
 	const float W = s_vc.cur_w_px, H = s_vc.cur_h_px;
-	const float transparent[4] = { 0, 0, 0, 0 };
-	float fill[4], border[4], glow[4];
-	vc_pma(glow, VC_CYAN, 0.25f);
-	vc_rrect(4.0f, 4.0f, W - 8.0f, H - 8.0f, 30.0f, 8.0f, 14.0f, transparent, glow);
-	vc_pma(fill, 0.157f, 0.549f, 0.745f, 0.14f);
-	vc_pma(border, VC_CYAN, 0.6f);
-	vc_rrect(10.0f, 10.0f, W - 20.0f, H - 20.0f, 26.0f, 2.0f, 1.0f, fill, border);
-	vc_draw_handles(s_vc.cur_place);
-	for (float y = 14.0f; y < H - 14.0f; y += 6.0f) {
-		float line[4];
-		vc_pma(line, VC_CYAN, 0.025f);
-		AeronDrawList_AddFill(s_vc.cur_list, 14.0f, y, W - 28.0f, 2.0f, line, AERON_BLIT2D_BLEND_PMA, NULL);
+	{
+		const char* mode = getenv("XWA_XR_VOICE");
+		const char* how = mode && strcmp(mode, "hold") == 0 ? "hold a thumb rest and speak"
+						  : mode && (mode[0] == '0' || mode[0] == 'o' || mode[0] == 'O')
+							  ? "voice commands are off (VR Options)"
+							  : "double-tap a thumb rest, then speak - it listens until you pause";
+		vc_text(44.0f, 92.0f, how, 18.0f, 0, 0.85f, 0.97f, 1.0f, 0.95f);
 	}
-	vc_text(44.0f, 30.0f, "VOICE COMMANDS", 30.0f, 0, VC_CYAN, 1.0f);
-	vc_text(W - 44.0f, 26.0f, "double-tap a thumb rest, then speak", 18.0f, 2, 0.85f, 0.97f, 1.0f, 0.95f);
-	vc_text(W - 44.0f, 50.0f, "it listens until you pause (or tap again)", 16.0f, 2, 0.62f, 0.85f, 0.92f, 0.9f);
-	vc_voice_column(44.0f, "WINGMEN", k_voice_wing, (int)(sizeof k_voice_wing / sizeof k_voice_wing[0]));
-	vc_voice_column(366.0f, "TARGETING", k_voice_target, (int)(sizeof k_voice_target / sizeof k_voice_target[0]));
-	vc_voice_column(688.0f, "SHIP", k_voice_ship, (int)(sizeof k_voice_ship / sizeof k_voice_ship[0]));
+	/* The list: xwa_runtime/runtime/vr_buttons.c (also on the VR Options page). */
+	int groups = 0;
+	const XwaVrVoiceGroup* g = XwaVrButtons_VoiceGroups(&groups);
+	for (int i = 0; i < groups && i < 3; ++i) {
+		vc_voice_column(44.0f + 322.0f * (float)i, g[i].title, g[i].phrases, g[i].count);
+	}
 	vc_text(W * 0.5f, H - 84.0f, "Your own words work too: \"wingmen, go after my target\", \"shoot flares\"", 17.0f, 1,
 			0.62f, 0.85f, 0.92f, 0.9f);
 }
 
+/* The side panel (XWA_XR_SIDE_PANEL, on unless 0): the one card, on the
+ * right; the other card's layer is only the quick wheel's. */
 static int vc_card_enabled_kind(int card) {
-	if (card == VC_CARD_VOICE) {
-		/* The voice command list: when voice commands are on. */
-		const char* voice = getenv("XWA_XR_VOICE");
-		const char* env = getenv("XWA_XR_VOICE_CARD");
-		if (voice && (voice[0] == '0' || voice[0] == 'o' || voice[0] == 'O')) { /* 0 / off */
-			return 0;
-		}
-		return !(env && env[0] == '0');
+	if (card != VC_CARD_BUTTONS) {
+		return 0;
 	}
-	const char* env = getenv("XWA_XR_BUTTON_CARD");
-	return !(env && env[0] == '0');
+	const char* env = getenv("XWA_XR_SIDE_PANEL");
+	return !(env && (env[0] == '0' || env[0] == 'o' || env[0] == 'O'));
 }
 
 /* Shown: as the setting says, unless the help page showed or hid it. */
@@ -3147,6 +3101,394 @@ static int vc_card_visible(int card) {
 }
 
 static int vc_card_enabled(void) { return vc_card_visible(VC_CARD_BUTTONS) || vc_card_visible(VC_CARD_VOICE); }
+
+/* ---- The side panel: tabs and the tactical map -----------------------
+ * One panel on the right with three tabs (touched with the fingertip or
+ * pointed at and the trigger pulled; the trigger is not passed on to the
+ * game while the hand points at the panel). The tactical map: the area
+ * around the craft from above, turning with it (ahead is up), with a line
+ * from each contact down to the craft's plane (above or below it); its
+ * range changes with a touch on the map. */
+enum { VP_TAB_MAP, VP_TAB_VOICE, VP_TAB_BUTTONS, VP_TABS };
+static const char* const k_vp_tab_names[VP_TABS] = { "TACTICAL MAP", "VOICE COMMANDS", "BUTTON MAPPING" };
+static const char* const k_vp_tab_keys[VP_TABS] = { "map", "voice", "buttons" };
+static const float k_vp_ranges_km[] = { 2.0f, 6.0f, 20.0f };
+#define VP_TAB_TOP 18.0f
+#define VP_TAB_H 58.0f
+static struct {
+	int loaded;
+	int tab;
+	int zoom;
+	int hover[2];   /* tab under each hand's cursor, -1 none; VP_TABS = the map */
+	int poke_down[2];
+	int trigger_down[2];
+	int captured[2];
+	int tab_dirty;
+} s_vp = { .zoom = 1, .hover = { -1, -1 } };
+
+static void vp_load(void) {
+	if (s_vp.loaded) {
+		return;
+	}
+	s_vp.loaded = 1;
+	const char* env = getenv("XWA_XR_PANEL_TAB");
+	for (int t = 0; env && t < VP_TABS; ++t) {
+		if (strcmp(env, k_vp_tab_keys[t]) == 0) {
+			s_vp.tab = t;
+		}
+	}
+}
+
+int XwaVrConsole_TakePanelTab(char* out, int size) {
+	if (!s_vp.tab_dirty || !out || size <= 0) {
+		return 0;
+	}
+	s_vp.tab_dirty = 0;
+	snprintf(out, (size_t)size, "%s", k_vp_tab_keys[s_vp.tab]);
+	return 1;
+}
+
+/* What lies at panel pixel (x, y): a tab, VP_TABS for the map area, -1. */
+static int vp_hit(float x, float y, float w, float h) {
+	if (x < 0.0f || y < 0.0f || x >= w || y >= h) {
+		return -1;
+	}
+	if (y >= VP_TAB_TOP && y < VP_TAB_TOP + VP_TAB_H) {
+		const float tw = (w - 48.0f) / (float)VP_TABS;
+		const int t = (int)((x - 24.0f) / tw);
+		return x >= 24.0f && t >= 0 && t < VP_TABS ? t : -1;
+	}
+	return s_vp.tab == VP_TAB_MAP && y > VP_TAB_TOP + VP_TAB_H + 8.0f ? VP_TABS : -1;
+}
+
+static void vp_press(int hand, int what) {
+	if (what < 0) {
+		return;
+	}
+	if (what < VP_TABS) {
+		if (what != s_vp.tab) {
+			s_vp.tab = what;
+			s_vp.tab_dirty = 1;
+			setenv("XWA_XR_PANEL_TAB", k_vp_tab_keys[what], 1);
+		}
+	} else {
+		s_vp.zoom = (s_vp.zoom + 1) % (int)(sizeof k_vp_ranges_km / sizeof k_vp_ranges_km[0]);
+	}
+	Aeron_XrHapticPulse(hand, 0.35f, 15);
+}
+
+/* The hands on the panel this frame (`pose`, axes, size in metres and
+ * pixels). */
+static void vp_update_hands(const AeronXrPanel* pose, const float ax[3], const float ay[3], const float az[3],
+							float w_m, float h_m, float w_px, float h_px) {
+	for (int hand = 0; hand < 2; ++hand) {
+		AeronXrHand xh;
+		s_vp.hover[hand] = -1;
+		s_vp.captured[hand] = 0;
+		if (!Aeron_XrGetHand(hand, &xh)) {
+			s_vp.poke_down[hand] = s_vp.trigger_down[hand] = 0;
+			continue;
+		}
+		static const float minus_z[3] = { 0.0f, 0.0f, -1.0f };
+		float fwd[3];
+		vc_rotate(xh.orientation, minus_z, fwd);
+		float tip[3] = { xh.position[0] + fwd[0] * VC_TIP_M, xh.position[1] + fwd[1] * VC_TIP_M,
+						 xh.position[2] + fwd[2] * VC_TIP_M };
+		int can_poke = 1;
+		{
+			int pointing = 1;
+			if (XwaVrGloves_IndexTip(hand, tip, &pointing)) {
+				can_poke = pointing;
+			}
+		}
+		/* Fingertip. */
+		const float rel[3] = { tip[0] - pose->position[0], tip[1] - pose->position[1], tip[2] - pose->position[2] };
+		const float depth = vc_dot(rel, az);
+		const float px = (vc_dot(rel, ax) / w_m + 0.5f) * w_px;
+		const float py = (0.5f - vc_dot(rel, ay) / h_m) * h_px;
+		int what = -1, poke = 0;
+		if (can_poke && depth < VC_HOVER_M && depth > -VC_BLOCK_M) {
+			what = vp_hit(px, py, w_px, h_px);
+			poke = what >= 0 && depth < -VC_PRESS_M;
+		}
+		/* Ray. */
+		int ray = 0;
+		if (what < 0) {
+			const float from[3] = { xh.position[0] - pose->position[0], xh.position[1] - pose->position[1],
+									xh.position[2] - pose->position[2] };
+			const float d0 = vc_dot(from, az), dn = vc_dot(fwd, az);
+			if (d0 > 0.0f && dn < -1.0e-3f) {
+				const float t = -d0 / dn;
+				if (t > 0.0f && t < VC_RAY_MAX_M) {
+					const float hit[3] = { from[0] + fwd[0] * t, from[1] + fwd[1] * t, from[2] + fwd[2] * t };
+					const float rx = (vc_dot(hit, ax) / w_m + 0.5f) * w_px;
+					const float ry = (0.5f - vc_dot(hit, ay) / h_m) * h_px;
+					if (rx >= 0.0f && rx < w_px && ry >= 0.0f && ry < h_px) {
+						ray = 1;
+						what = vp_hit(rx, ry, w_px, h_px);
+					}
+				}
+			}
+		}
+		s_vp.hover[hand] = what;
+		/* A fingertip press, or the trigger pulled while pointing. */
+		if (s_vp.poke_down[hand]) {
+			s_vp.poke_down[hand] = what >= 0 && depth < -VC_RELEASE_M;
+		} else if (poke) {
+			s_vp.poke_down[hand] = 1;
+			vp_press(hand, what);
+		}
+		if (s_vp.trigger_down[hand]) {
+			s_vp.trigger_down[hand] = xh.trigger >= 0.35f;
+		} else if (ray && xh.trigger >= 0.6f) {
+			s_vp.trigger_down[hand] = 1;
+			vp_press(hand, what);
+		}
+		s_vp.captured[hand] = ray || s_vp.trigger_down[hand];
+	}
+}
+
+static void vp_draw_tabs(void) {
+	const float W = s_vc.cur_w_px;
+	const float tw = (W - 48.0f) / (float)VP_TABS;
+	for (int t = 0; t < VP_TABS; ++t) {
+		const float x = 24.0f + tw * (float)t + 4.0f, w = tw - 8.0f;
+		const int active = t == s_vp.tab;
+		const int hover = s_vp.hover[0] == t || s_vp.hover[1] == t;
+		float fill[4], border[4];
+		if (active) {
+			vc_pma(fill, VC_CYAN, 0.45f);
+			vc_pma(border, VC_CYAN, 1.0f);
+		} else {
+			vc_pma(fill, VC_CYAN, hover ? 0.22f : 0.06f);
+			vc_pma(border, VC_CYAN, hover ? 0.9f : 0.45f);
+		}
+		vc_rrect(x, VP_TAB_TOP, w, VP_TAB_H, 14.0f, 2.0f, 1.0f, fill, border);
+		if (active) {
+			vc_text(x + w * 0.5f, VP_TAB_TOP + 15.0f, k_vp_tab_names[t], 24.0f, 1, 1.0f, 1.0f, 1.0f, 1.0f);
+		} else {
+			vc_text(x + w * 0.5f, VP_TAB_TOP + 15.0f, k_vp_tab_names[t], 24.0f, 1, 0.70f, 0.90f, 1.0f, 0.9f);
+		}
+	}
+}
+
+/* The IFF colours of the targeting display. */
+static void vp_iff_color(int iff, float out[3]) {
+	static const float k[6][3] = {
+		{ 0.35f, 1.00f, 0.35f }, { 1.00f, 0.30f, 0.25f }, { 0.40f, 0.60f, 1.00f },
+		{ 1.00f, 0.95f, 0.30f }, { 1.00f, 0.30f, 0.25f }, { 0.85f, 0.45f, 1.00f },
+	};
+	const int i = iff >= 0 && iff < 6 ? iff : 2;
+	out[0] = k[i][0];
+	out[1] = k[i][1];
+	out[2] = k[i][2];
+}
+
+static void vp_map_draw(void) {
+	const float W = s_vc.cur_w_px, H = s_vc.cur_h_px;
+	const XwaSnapshot* snap = XwaSnapshot_Current();
+	const float cx = W * 0.5f, cy = 452.0f;
+	const float rx = 420.0f, ry = 230.0f; /* the plane, seen from above and behind */
+	const float lift = 0.75f;            /* stalk pixels per plane pixel of height */
+	const float range_km = k_vp_ranges_km[s_vp.zoom];
+	float c[4];
+	/* Range rings and the cross. */
+	for (int ring = 1; ring <= 3; ++ring) {
+		vc_pma(c, VC_CYAN, ring == 3 ? 0.55f : 0.28f);
+		vc_card_ellipse(cx, cy, rx * (float)ring / 3.0f, ry * (float)ring / 3.0f, 0.0f, 0.0f, 360.0f, 2.0f, c);
+	}
+	vc_pma(c, VC_CYAN, 0.22f);
+	AeronDrawList_AddLine(s_vc.cur_list, cx - rx, cy, cx + rx, cy, 1.5f, c, AERON_BLIT2D_BLEND_PMA, NULL);
+	AeronDrawList_AddLine(s_vc.cur_list, cx, cy - ry, cx, cy + ry, 1.5f, c, AERON_BLIT2D_BLEND_PMA, NULL);
+	{
+		char text[64];
+		snprintf(text, sizeof text, "RANGE %.0f KM", (double)range_km);
+		vc_text(44.0f, 96.0f, text, 20.0f, 0, VC_CYAN, 0.95f);
+		vc_text(W - 44.0f, 96.0f, "touch the map: zoom", 16.0f, 2, 0.62f, 0.85f, 0.92f, 0.9f);
+		snprintf(text, sizeof text, "%.0f", (double)(range_km / 3.0f));
+		vc_text(cx + rx / 3.0f + 6.0f, cy + 4.0f, text, 14.0f, 0, 0.62f, 0.85f, 0.92f, 0.8f);
+	}
+	/* The own craft: a chevron at the centre, nose up. */
+	{
+		float own[4];
+		vc_pma(own, 1.0f, 1.0f, 1.0f, 1.0f);
+		AeronDrawList_AddLine(s_vc.cur_list, cx, cy - 14.0f, cx - 10.0f, cy + 8.0f, 3.0f, own, AERON_BLIT2D_BLEND_PMA, NULL);
+		AeronDrawList_AddLine(s_vc.cur_list, cx, cy - 14.0f, cx + 10.0f, cy + 8.0f, 3.0f, own, AERON_BLIT2D_BLEND_PMA, NULL);
+	}
+	if (!snap || !snap->flight_camera_valid) {
+		return;
+	}
+	const XwaFlightObject* self = NULL;
+	for (uint32_t i = 0; i < snap->flight_object_count && !self; ++i) {
+		if (snap->flight_objects[i].slot == snap->hud.player_slot &&
+			snap->flight_objects[i].slot_class == XWA_SNAP_SLOT_MAIN) {
+			self = &snap->flight_objects[i];
+		}
+	}
+	if (!self) {
+		return;
+	}
+	const float* rows = snap->flight_camera.rows;
+	const double units = (double)range_km * 1000.0 * (double)AERON_OPT_UNITS_PER_METER;
+	const int blink = fmodf(s_vc.clock, 0.5f) < 0.3f;
+	const XwaHudTarget* tgt = snap->hud.target.valid ? &snap->hud.target : NULL;
+	float target_xy[2] = { 0.0f, 0.0f };
+	int target_shown = 0;
+	for (uint32_t i = 0; i < snap->flight_object_count; ++i) {
+		const XwaFlightObject* f = &snap->flight_objects[i];
+		if (f == self || f->slot_class != XWA_SNAP_SLOT_MAIN || f->render_region != self->render_region) {
+			continue;
+		}
+		int kind; /* 0 craft, 1 large, 2 huge, 3 mine, 4 small object, 5 warhead */
+		switch (f->genus) {
+			case XWA_SNAP_GENUS_FIGHTER:
+			case XWA_SNAP_GENUS_TRANSPORT:
+			case XWA_SNAP_GENUS_UTILITY:
+				kind = 0;
+				break;
+			case XWA_SNAP_GENUS_FREIGHTER:
+				kind = 1;
+				break;
+			case XWA_SNAP_GENUS_STARSHIP:
+			case XWA_SNAP_GENUS_PLATFORM:
+				kind = 2;
+				break;
+			case XWA_SNAP_GENUS_MINE:
+				kind = 3;
+				break;
+			case XWA_SNAP_GENUS_SATELLITE_BUOY:
+			case XWA_SNAP_GENUS_CONTAINER:
+			case XWA_SNAP_GENUS_PILOT_DROID:
+			case XWA_SNAP_GENUS_WEAPON_EMPLACEMENT:
+				kind = 4;
+				break;
+			case XWA_SNAP_GENUS_NPC_PROJECTILE:
+			case XWA_SNAP_GENUS_PLAYER_PROJECTILE:
+				/* Warheads only (torpedoes to ion pulses), not lasers or flares. */
+				if (f->object_type < 286 || f->object_type > 297) {
+					continue;
+				}
+				kind = 5;
+				break;
+			default:
+				continue;
+		}
+		const double d[3] = { (double)f->world_pos[0] - (double)self->world_pos[0],
+							  (double)f->world_pos[1] - (double)self->world_pos[1],
+							  (double)f->world_pos[2] - (double)self->world_pos[2] };
+		/* Eye space: x right, y down, z ahead. */
+		const double ex = rows[0] * d[0] + rows[1] * d[1] + rows[2] * d[2];
+		const double ey = rows[3] * d[0] + rows[4] * d[1] + rows[5] * d[2];
+		const double ez = rows[6] * d[0] + rows[7] * d[1] + rows[8] * d[2];
+		double mx = ex / units, mz = ez / units, mh = -ey / units;
+		const double flat = sqrt(mx * mx + mz * mz);
+		int outside = 0;
+		if (flat > 1.0) {
+			if (kind == 5) {
+				continue;
+			}
+			mx /= flat;
+			mz /= flat;
+			mh = 0.0;
+			outside = 1;
+		}
+		if (mh > 1.0) mh = 1.0;
+		if (mh < -1.0) mh = -1.0;
+		const float px = cx + (float)mx * rx;
+		const float base_y = cy - (float)mz * ry;
+		const float py = base_y - (float)mh * ry * lift;
+		float col[3];
+		vp_iff_color(f->iff, col);
+		if (kind == 5) {
+			if (!blink) {
+				continue;
+			}
+			col[0] = 1.0f;
+			col[1] = 0.25f;
+			col[2] = 0.2f;
+		}
+		const float a = outside ? 0.45f : 1.0f;
+		float cc[4];
+		vc_pma(cc, col[0], col[1], col[2], a);
+		if (!outside && fabsf(py - base_y) > 2.0f) {
+			float stalk[4];
+			vc_pma(stalk, col[0], col[1], col[2], 0.45f);
+			AeronDrawList_AddLine(s_vc.cur_list, px, base_y, px, py, 1.5f, stalk, AERON_BLIT2D_BLEND_PMA, NULL);
+			AeronDrawList_AddFill(s_vc.cur_list, px - 3.0f, base_y - 1.0f, 6.0f, 2.0f, stalk, AERON_BLIT2D_BLEND_PMA,
+								  NULL);
+		}
+		switch (kind) {
+			case 0:
+				vc_rrect(px - 6.0f, py - 6.0f, 12.0f, 12.0f, 6.0f, 0.0f, 1.0f, cc, NULL);
+				break;
+			case 1:
+				vc_rrect(px - 9.0f, py - 7.0f, 18.0f, 14.0f, 3.0f, 0.0f, 1.0f, cc, NULL);
+				break;
+			case 2:
+				vc_rrect(px - 16.0f, py - 8.0f, 32.0f, 16.0f, 3.0f, 0.0f, 1.0f, cc, NULL);
+				break;
+			case 3:
+				AeronDrawList_AddLine(s_vc.cur_list, px - 6.0f, py - 6.0f, px + 6.0f, py + 6.0f, 2.5f, cc,
+									  AERON_BLIT2D_BLEND_PMA, NULL);
+				AeronDrawList_AddLine(s_vc.cur_list, px - 6.0f, py + 6.0f, px + 6.0f, py - 6.0f, 2.5f, cc,
+									  AERON_BLIT2D_BLEND_PMA, NULL);
+				break;
+			case 4:
+				vc_card_ellipse(px, py, 7.0f, 7.0f, 45.0f, 0.0f, 360.0f, 2.5f, cc);
+				break;
+			default:
+				AeronDrawList_AddLine(s_vc.cur_list, px, py - 7.0f, px - 6.0f, py + 5.0f, 2.5f, cc,
+									  AERON_BLIT2D_BLEND_PMA, NULL);
+				AeronDrawList_AddLine(s_vc.cur_list, px, py - 7.0f, px + 6.0f, py + 5.0f, 2.5f, cc,
+									  AERON_BLIT2D_BLEND_PMA, NULL);
+				AeronDrawList_AddLine(s_vc.cur_list, px - 6.0f, py + 5.0f, px + 6.0f, py + 5.0f, 2.5f, cc,
+									  AERON_BLIT2D_BLEND_PMA, NULL);
+				break;
+		}
+		if (tgt && f->slot == tgt->slot && f->signature == tgt->signature) {
+			target_xy[0] = px;
+			target_xy[1] = py;
+			target_shown = 1;
+		}
+	}
+	/* The current target: corner brackets, its name and range below. */
+	if (target_shown) {
+		const float x = target_xy[0], y = target_xy[1], r = 20.0f, l = 8.0f;
+		float b[4];
+		vc_pma(b, 1.0f, 1.0f, 1.0f, 1.0f);
+		const float corners[4][2] = { { -1, -1 }, { 1, -1 }, { -1, 1 }, { 1, 1 } };
+		for (int k = 0; k < 4; ++k) {
+			const float sx = corners[k][0], sy = corners[k][1];
+			AeronDrawList_AddLine(s_vc.cur_list, x + sx * r, y + sy * r, x + sx * (r - l), y + sy * r, 2.5f, b,
+								  AERON_BLIT2D_BLEND_PMA, NULL);
+			AeronDrawList_AddLine(s_vc.cur_list, x + sx * r, y + sy * r, x + sx * r, y + sy * (r - l), 2.5f, b,
+								  AERON_BLIT2D_BLEND_PMA, NULL);
+		}
+	}
+	if (tgt) {
+		char text[96];
+		snprintf(text, sizeof text, "TARGET  %s   %u.%02u KM", tgt->name[0] ? tgt->name : "-",
+				 (unsigned)tgt->distance_whole, (unsigned)(tgt->distance_frac % 100u));
+		vc_text(W * 0.5f, H - 72.0f, text, 20.0f, 1, 1.0f, 1.0f, 1.0f, 0.95f);
+	}
+}
+
+/* The whole panel: plate, tabs, the tab's page. */
+static void vp_draw(void) {
+	vc_card_plate();
+	vp_draw_tabs();
+	switch (s_vp.tab) {
+		case VP_TAB_VOICE:
+			vc_voice_draw();
+			break;
+		case VP_TAB_BUTTONS:
+			vc_card_draw();
+			break;
+		default:
+			vp_map_draw();
+			break;
+	}
+}
 
 int XwaVrConsole_WheelOpen(void) { return s_vw.open; }
 
@@ -3167,6 +3509,7 @@ int XwaVrConsole_CardFrame(AeronCommandBuffer* cmd, int card, int width, int hei
 		return 0;
 	}
 	VcCard* cd = &s_vc.cards[card];
+	vp_load();
 	for (int e = 0; e < 2; ++e) {
 		if (!cd->list[e]) {
 			cd->list[e] = AeronDrawList_Create(0);
@@ -3186,8 +3529,8 @@ int XwaVrConsole_CardFrame(AeronCommandBuffer* cmd, int card, int width, int hei
 	const float yaw = card == VC_CARD_VOICE ? vc_env("XWA_XR_VOICE_CARD_YAW", -VC_CARD_YAW_DEG)
 											: vc_env("XWA_XR_CARD_YAW", VC_CARD_YAW_DEG);
 	if (!cd->logged) {
-		Aeron_LogInfo("xwa.remaster", "%s card: %dx%d layer, %.0f deg %s", card ? "voice command" : "button", width,
-					  height, (double)fabsf(yaw), yaw < 0.0f ? "left" : "right");
+		Aeron_LogInfo("xwa.remaster", "side panel: %dx%d layer, %.0f deg %s", width, height, (double)fabsf(yaw),
+					  yaw < 0.0f ? "left" : "right");
 		cd->logged = 1;
 	}
 
@@ -3200,6 +3543,11 @@ int XwaVrConsole_CardFrame(AeronCommandBuffer* cmd, int card, int width, int hei
 		if (pass == 0) {
 			vc_update_grab(&cd->place, out, ax, ay, az, VC_CARD_W_M, VC_CARD_H_M);
 		}
+	}
+	/* The tabs and the map take touches and the trigger. */
+	vp_update_hands(out, ax, ay, az, VC_CARD_W_M, VC_CARD_H_M, (float)width, (float)height);
+	for (int h = 0; h < 2; ++h) {
+		Aeron_XrCaptureTrigger(h, s_vc.hands[h].captured || s_vp.captured[h] || (s_vw.open && h == s_vw.hand));
 	}
 	/* Bright while looked at or handled. */
 	{
@@ -3245,8 +3593,11 @@ int XwaVrConsole_CardFrame(AeronCommandBuffer* cmd, int card, int width, int hei
 	uint64_t key = 1469598103934665603ull;
 	{
 		const float alpha_q = floorf(cd->alpha * 255.0f + 0.5f);
+		/* The map is drawn again 12 times a second. */
+		const int map_tick = s_vp.tab == VP_TAB_MAP ? (int)(s_vc.clock * 12.0f) : 0;
 		const int words[] = { card, (int)alpha_q, cd->place.grab_side, cd->place.hover_side[0], cd->place.hover_side[1],
-							  Aeron_XrLeftHanded(), s_vc.font_state, (int)s_vc.state.hud_argb, width, height };
+							  Aeron_XrLeftHanded(), s_vc.font_state, (int)s_vc.state.hud_argb, width, height,
+							  s_vp.tab, s_vp.zoom, s_vp.hover[0], s_vp.hover[1], map_tick };
 		for (size_t i = 0; i < sizeof words / sizeof words[0]; ++i) {
 			key = (key ^ (uint32_t)words[i]) * 1099511628211ull;
 		}
@@ -3257,7 +3608,7 @@ int XwaVrConsole_CardFrame(AeronCommandBuffer* cmd, int card, int width, int hei
 		key |= 1u; /* never 0 */
 	}
 	const int n = vc_render_panel(cmd, card == VC_CARD_VOICE ? AERON_XR_PANEL_CARD2 : AERON_XR_PANEL_CARD, cd->list,
-								  card == VC_CARD_VOICE ? vc_voice_draw : vc_card_draw, NULL /* no cursors */, views, out,
+								  card == VC_CARD_VOICE ? vc_voice_draw : vp_draw, NULL /* no cursors */, views, out,
 								  width, height,
 								  VC_CARD_W_M, VC_CARD_H_M, &cd->hash, &cd->hash_valid, key);
 	s_vc.alpha = lap_alpha;

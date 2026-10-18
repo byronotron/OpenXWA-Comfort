@@ -24,12 +24,19 @@ int XwaFlightCheckpoints_OfferAnswer(int retry);
 int XwaFlightCheckpoints_Offering(void);
 /* Drops the quick save (the mission ended). */
 void XwaFlightCheckpoints_Reset(void);
+/* The death menu: once the player's craft is lost (single player), after a
+ * moment of the death camera, the in-flight menu opens with Restart
+ * Mission / Load Quick Save / Mission Hints / Continue; the mission's end
+ * waits until it is closed. Returns 1 once when the port should open it
+ * (it sets g_configDeathMenuActive and queues the menu key). */
+int XwaFlightCheckpoints_DeathMenuDue(void);
 
 /* The in-flight menu. */
 typedef enum XwaFlightCheckpointRequest {
 	XWA_FLIGHT_CHECKPOINT_REQUEST_NONE = 0,
 	XWA_FLIGHT_CHECKPOINT_REQUEST_QUICK_SAVE,
 	XWA_FLIGHT_CHECKPOINT_REQUEST_QUICK_LOAD,
+	XWA_FLIGHT_CHECKPOINT_REQUEST_RESTART, /* the mission from its start */
 } XwaFlightCheckpointRequest;
 int XwaFlightCheckpoints_Available(void); /* single-player flight: the rows show */
 int XwaFlightCheckpoints_HasQuickSave(void);

@@ -1624,7 +1624,7 @@ typedef struct EnvScreen {
 	 * exactly). The opening is the frame's clear 4:3 area enlarged 2 %: the
 	 * bezel overlaps under 1 % of the picture's edges (no menu text), dark
 	 * backing fills any gap. The
-	 * frame sits XWA_XR_FRAME_DEPTH (12 cm) in front of the picture, so the
+	 * frame sits XWA_XR_FRAME_DEPTH (2 cm) in front of the picture, so the
 	 * whole picture is set back in it, scaled so its opening lines up from
 	 * the viewer (leaning 20 cm shifts the two by under 8 mm, which the
 	 * bezel's overlap still covers). */
@@ -1648,7 +1648,7 @@ static void env_screen(EnvScreen* out) {
 	const float overscan = fmaxf(env_float("XWA_XR_FRAME_OVERSCAN", 1.0f), 0.5f);
 	out->pic_w = out->w / overscan;
 	out->pic_h = out->h / overscan;
-	out->frame_dist = fmaxf(dist - env_float("XWA_XR_FRAME_DEPTH", 0.12f), 0.2f);
+	out->frame_dist = fmaxf(dist - env_float("XWA_XR_FRAME_DEPTH", 0.02f), 0.2f);
 	out->frame_scale = dist > 0.01f ? out->frame_dist / dist : 1.0f;
 }
 

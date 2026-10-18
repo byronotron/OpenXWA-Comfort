@@ -201,7 +201,7 @@ static float rm_stereo_strength(void) {
 		return 0.0f;
 	}
 	if (!env || !env[0]) {
-		return 1.0f;
+		return 0.5f; /* subtle */
 	}
 	{
 		const float v = (float)SDL_atof(env);
@@ -1352,7 +1352,7 @@ static int rm_cursor_eye_offset(void) {
 	if (!depth_env || !depth_env[0]) {
 		depth_env = SDL_getenv("XWA_XR_FRAME_DEPTH");
 	}
-	float depth = depth_env && depth_env[0] ? (float)SDL_atof(depth_env) : 0.12f;
+	float depth = depth_env && depth_env[0] ? (float)SDL_atof(depth_env) : 0.02f;
 	depth = depth < 0.0f ? 0.0f : (depth > distance_m - 0.2f ? distance_m - 0.2f : depth);
 	const char* ipd_env = SDL_getenv("XWA_XR_SHIP_3D_IPD");
 	const float ipd = ipd_env && SDL_atof(ipd_env) > 0.0 ? (float)SDL_atof(ipd_env) : 0.064f;

@@ -37,6 +37,7 @@ AeronTexture* XwaRemasterPreview_RenderEye(AeronCommandBuffer* cmd, const XwaMod
 										   float camera_x, const XwaDirLight* lights, uint32_t light_count,
 										   const XwaAssetRef* glow_tex);
 
+void XwaRemasterPreview_Prewarm(void);
 void XwaRemasterPreview_Shutdown(void);
 
 #ifdef __cplusplus

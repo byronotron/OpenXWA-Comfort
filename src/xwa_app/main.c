@@ -497,8 +497,10 @@ static void android_load_settings(void) {
 				  "#XWA_XR_WHEEL=1\n"
 				  "# The game runs at 45 % speed while the wheel is open (0 = off):\n"
 				  "#XWA_XR_WHEEL_SLOWMO=1\n"
-				  "# Controls reference card on your right at mission start (0 = off):\n"
-				  "#XWA_XR_BUTTON_CARD=1\n"
+				  "# Side panel on your right (tactical map, voice commands, button\n"
+				  "# mapping; 0 = off) and the tab it shows:\n"
+				  "#XWA_XR_SIDE_PANEL=1\n"
+				  "#XWA_XR_PANEL_TAB=map\n"
 				  "# HUD panels you move with the grip are kept per cockpit as\n"
 				  "# XWA_XR_HUD_POSE_<COCKPIT>=... (Reset in the VR options).\n"
 				  "# 1 = screen-space ambient occlusion in VR (darkens around the hands):\n"
@@ -526,7 +528,7 @@ static void android_load_settings(void) {
 				  "#XWA_XR_BUTTON_HINTS=1\n"
 				  "# 3D ship previews on the menu screen (mission setup, tech room):\n"
 				  "# 0 = flat, 0.5 subtle, 1 normal, 1.6 strong:\n"
-				  "#XWA_XR_SHIP_3D=1\n"
+				  "#XWA_XR_SHIP_3D=0.5\n"
 				  "#XWA_XR_ENDOR_BRIGHTNESS=0.8\n"
 				  "#XWA_XR_LOGO_SCALE=1.0\n"
 				  "# Hangar view: x,y (hangar units, ~41 per metre), turn in degrees, eye\n"
@@ -555,8 +557,6 @@ static void android_load_settings(void) {
 				  "# Voice commands: double-tap a thumb rest, then speak (doubletap), or\n"
 				  "# speak while the thumb is on the rest (hold); 0 = off:\n"
 				  "#XWA_XR_VOICE=doubletap\n"
-				  "# Voice command list on your left at mission start (0 = off):\n"
-				  "#XWA_XR_VOICE_CARD=1\n"
 				  "# Helmet HUD distance in metres and size:\n"
 				  "#XWA_XR_HUD_DISTANCE=3.0\n"
 				  "#XWA_XR_HUD_SCALE=0.65\n"
@@ -566,7 +566,7 @@ static void android_load_settings(void) {
 				  "#XWA_XR_ENV_BACK=1.1\n"
 				  "#AERON_XR_SCREEN_WIDTH=2.1\n"
 				  "# How far the menu picture sits back in its frame (metres):\n"
-				  "#XWA_XR_FRAME_DEPTH=0.12\n"
+				  "#XWA_XR_FRAME_DEPTH=0.02\n"
 				  "#AERON_XR_THROTTLE_RATE=0.8\n"
 				  "# Skip the Quest render defaults (SSAO/MSAA/... follow the in-game options):\n"
 				  "#XWA_QUEST_PROFILE=0\n",
@@ -1210,6 +1210,11 @@ int main(int argc, char** argv) {
 				char stick_pos[64];
 				if (XwaVrStick_TakePlacement(stick_pos, (int)sizeof stick_pos)) {
 					XwaModernVrOptions_SaveValue("XWA_XR_STICK_POS", stick_pos);
+				}
+				/* The side panel shows another tab. */
+				char panel_tab[16];
+				if (XwaVrConsole_TakePanelTab(panel_tab, (int)sizeof panel_tab)) {
+					XwaModernVrOptions_SaveValue("XWA_XR_PANEL_TAB", panel_tab);
 				}
 				/* A HUD panel moved: this ship's layout. */
 				char layout_key[96];

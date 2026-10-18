@@ -14,6 +14,7 @@
  * classic layers show through.
  */
 
+#include "xwa_remaster/preview.h"
 #include "xwa_remaster/xwa_remaster.h"
 
 #include "aeron/aeron.h"
@@ -558,6 +559,16 @@ void XwaRemaster_Frame(int32_t delta_us) {
 	/* VR: the right controller is a mouse pointer on the virtual screen in
 	 * menus/briefings; in flight its trigger fires instead. */
 	Aeron_XrSetPointerEnabled(snap->scene_kind != XWA_SCENE_FLIGHT);
+	{
+		/* The ship previews' render targets, made during the intro films
+		 * (or the first menu) rather than in the briefing's first frame. */
+		static int previews_prepared;
+		if (!previews_prepared &&
+			(snap->scene_kind == XWA_SCENE_CUTSCENE || snap->scene_kind == XWA_SCENE_FRONTEND)) {
+			previews_prepared = 1;
+			XwaRemasterPreview_Prewarm();
+		}
+	}
 	/* VR: the 2D screens float in the carrier hangar (every headset frame,
 	 * head tracked); flight frees it again for its own hangar. */
 	if (snap->scene_kind != XWA_SCENE_FLIGHT) {

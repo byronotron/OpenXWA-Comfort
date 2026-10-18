@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL_timer.h>
 #include <ctype.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -375,6 +376,43 @@ static CraftData* XwaPort_VrConsoleCraft(void) {
 		return NULL;
 	}
 	return g_objectTable[objIdx].mobj->pCraft;
+}
+
+/* The VR throttle lever is an absolute throttle, and the flight input only
+ * acts on it when it crosses into another 1/16 step: a lever left at full
+ * from the last mission (or moved while the game set the throttle itself:
+ * a new mission, the hangar, match speed, a collision) did nothing until
+ * pulled back past where it stood. While the lever rests, it follows the
+ * craft's real throttle instead, and the flight input's smoothed value with
+ * it (so following it sends no throttle key). */
+static void XwaPort_SyncVrThrottleLever(void) {
+	static float last_lever = -1.0f;
+	static uint64_t resting_since_us;
+	const uint64_t now_us = XwaTime_GetElapsedUs();
+	if (!Aeron_XrIsPresenting()) {
+		last_lever = -1.0f;
+		return;
+	}
+	const float lever = Aeron_XrThrottleLever();
+	if (lever != last_lever) {
+		last_lever = lever;
+		resting_since_us = now_us;
+		return;
+	}
+	const CraftData* craft = XwaPort_VrConsoleCraft();
+	/* Resting for a moment: the steps the lever sent have landed. */
+	if (!craft || now_us - resting_since_us < 600000u) {
+		return;
+	}
+	const float actual = (float)craft->throttleSpeed / 65535.0f;
+	if (fabsf(actual - lever) <= 0.6f / 16.0f) {
+		return;
+	}
+	Aeron_XrSetThrottleLever(actual);
+	last_lever = Aeron_XrThrottleLever();
+	if (g_throttleSmoothed != -1) {
+		g_throttleSmoothed = (int)lrintf(actual * 255.0f);
+	}
 }
 
 void XwaPort_GetVrConsoleState(XwaVrConsoleState* out) {
@@ -830,6 +868,11 @@ static void XwaPort_TickBody(int32_t delta_us) {
 			XwaTime_AdvanceHostClock(delta_us);
 		}
 
+		XwaPort_SyncVrThrottleLever();
+		if (XwaFlightCheckpoints_DeathMenuDue()) {
+			/* The craft is lost: the in-flight menu as the death menu. */
+			XwaPort_QueueFlightActionKey(KEY_ESCAPE);
+		}
 		XwaFlightTask_Tick();
 		if (wasPaused) {
 			/* Retain the complete paused view, including captured HUD draws.

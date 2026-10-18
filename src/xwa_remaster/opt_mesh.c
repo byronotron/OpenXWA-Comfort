@@ -189,24 +189,27 @@ static int opt_read_model(AeronVfs* vfs, const char* basename, char* resolved,
 	return 1;
 }
 
-bool XwaRemasterOptMesh_Build(AeronVfs* vfs, const char* basename,
+bool XwaRemasterOptMesh_Read(AeronVfs* vfs, const char* basename, char* path, size_t path_size,
+							 uint8_t** out_bytes, size_t* out_size) {
+	if (out_bytes) *out_bytes = NULL;
+	if (out_size) *out_size = 0;
+	if (!vfs || !basename || !basename[0] || !path || !out_bytes || !out_size) return false;
+	return opt_read_model(vfs, basename, path, path_size, out_bytes, out_size) != 0;
+}
+
+/* The conversion alone: no file or VFS access (any thread, once the asset
+ * policy is loaded). */
+bool XwaRemasterOptMesh_BuildFromMemory(const uint8_t* bytes, size_t size, const char* path,
 		float smooth_angle_degrees, float emissive_strength,
 		AeronFlightModel* out, char* error, size_t error_size) {
 	if (out) memset(out, 0, sizeof *out);
 	if (error && error_size) error[0] = '\0';
-	if (!vfs || !basename || !basename[0] || !out) {
+	if (!bytes || !size || !path || !out) {
 		opt_mesh_error(error, error_size, "invalid OPT build arguments");
 		return false;
 	}
 	if (!s_alpha_overrides.loaded || !s_alpha_overrides.valid) {
 		opt_mesh_error(error, error_size, "OPT mesh asset policy is not initialized");
-		return false;
-	}
-	uint8_t* bytes = NULL;
-	size_t size = 0;
-	char path[512];
-	if (!opt_read_model(vfs, basename, path, sizeof path, &bytes, &size)) {
-		opt_mesh_error(error, error_size, "original OPT not found or unreadable");
 		return false;
 	}
 	AeronOptModelError build_error = { 0 };
@@ -223,9 +226,30 @@ bool XwaRemasterOptMesh_Build(AeronVfs* vfs, const char* basename,
 				.alpha_override_count = alpha_override_count,
 			},
 			out, &build_error);
-	free(bytes);
 	if (!built)
 		opt_mesh_error(error, error_size,
 				build_error.message[0] ? build_error.message : "OPT conversion failed");
+	return built;
+}
+
+bool XwaRemasterOptMesh_Build(AeronVfs* vfs, const char* basename,
+		float smooth_angle_degrees, float emissive_strength,
+		AeronFlightModel* out, char* error, size_t error_size) {
+	if (out) memset(out, 0, sizeof *out);
+	if (error && error_size) error[0] = '\0';
+	if (!vfs || !basename || !basename[0] || !out) {
+		opt_mesh_error(error, error_size, "invalid OPT build arguments");
+		return false;
+	}
+	uint8_t* bytes = NULL;
+	size_t size = 0;
+	char path[512];
+	if (!opt_read_model(vfs, basename, path, sizeof path, &bytes, &size)) {
+		opt_mesh_error(error, error_size, "original OPT not found or unreadable");
+		return false;
+	}
+	const bool built = XwaRemasterOptMesh_BuildFromMemory(bytes, size, path, smooth_angle_degrees,
+														  emissive_strength, out, error, error_size);
+	free(bytes);
 	return built;
 }

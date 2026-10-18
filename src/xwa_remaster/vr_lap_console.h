@@ -47,6 +47,9 @@ int XwaVrConsole_Frame(AeronCommandBuffer* cmd, int width, int height, const Aer
  * While it is open the game runs at 45 % speed (XWA_XR_WHEEL_SLOWMO=0
  * turns that off; main.c eases the speed through XwaPort_SetSimTimeScale). */
 int XwaVrConsole_WheelOpen(void);
+/* The side panel's tab changed: its name for XWA_XR_PANEL_TAB (main saves
+ * it in openxwa-quest.cfg). */
+int XwaVrConsole_TakePanelTab(char* out, int size);
 
 /* Reference cards (`card` 0: the controller layout, on the player's right;
  * 1: the voice commands, on the left), each a panel layer of its own

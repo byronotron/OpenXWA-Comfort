@@ -1,4 +1,4 @@
-OpenXWA for Meta Quest 3 (standalone) - 1.0.0 release candidate 3
+OpenXWA for Meta Quest 3 (standalone) - 1.0.0 release candidate 4
 ==================================================================
 
 This is a release candidate. If something goes wrong, the log file (step 6)

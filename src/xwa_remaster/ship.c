@@ -10,8 +10,14 @@
 #include "xwa_remaster/glow_marks.h"
 #include "xwa_remaster/opt_mesh.h"
 
+#include <SDL3/SDL_atomic.h>
+#include <SDL3/SDL_mutex.h>
+#include <SDL3/SDL_thread.h>
+#include <SDL3/SDL_timer.h>
+
 #include <math.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -129,6 +135,156 @@ static AeronSceneMesh* ship_mesh_load(AeronCommandBuffer* cmd, const char* key, 
 	return mesh;
 }
 
+/* ---- background model builds (menus) ---------------------------------
+ * In the menus a ship model shows up in a preview (briefing, tech room),
+ * and building it (OPT conversion: geometry, normals, textures) took a
+ * frame of 50-100 ms on a Quest. There it is built on a worker thread: the
+ * file is read here (the VFS is not thread-safe), converted there, and the
+ * GPU resources are made here once it is done; the menu frame waits for it
+ * (the last one stays up) while the headset keeps its frame rate. */
+enum { SHIP_JOB_IDLE, SHIP_JOB_RUNNING, SHIP_JOB_DONE };
+static struct {
+	SDL_Thread* thread;
+	SDL_Semaphore* go;
+	SDL_AtomicInt state;
+	int quit;
+	char key[XWA_SNAP_OPT_NAME_MAX];
+	char glb_path[512];
+	char opt_path[512];
+	uint8_t* bytes;
+	size_t size;
+	AeronFlightModel model;
+	int ok;
+	int runtime_opt;
+	char error[256];
+} s_job;
+
+static int SDLCALL ship_job_main(void* unused) {
+	(void)unused;
+	for (;;) {
+		SDL_WaitSemaphore(s_job.go);
+		if (s_job.quit) {
+			return 0;
+		}
+		s_job.ok = 0;
+		s_job.runtime_opt = 0;
+		s_job.error[0] = '\0';
+		if (s_job.glb_path[0] && Aeron_FlightModelBuild(s_job.glb_path, &s_job.model)) {
+			s_job.ok = 1;
+		} else if (s_job.bytes) {
+			s_job.ok = XwaRemasterOptMesh_BuildFromMemory(s_job.bytes, s_job.size, s_job.opt_path,
+														   s_opt_smooth_angle_degrees, s_opt_emissive_strength,
+														   &s_job.model, s_job.error, sizeof s_job.error);
+			s_job.runtime_opt = 1;
+		} else {
+			snprintf(s_job.error, sizeof s_job.error, "original OPT not found or unreadable");
+		}
+		free(s_job.bytes);
+		s_job.bytes = NULL;
+		SDL_SetAtomicInt(&s_job.state, SHIP_JOB_DONE);
+	}
+}
+
+static int ship_job_start(void) {
+	if (s_job.thread) {
+		return 1;
+	}
+	s_job.go = SDL_CreateSemaphore(0);
+	if (!s_job.go) {
+		return 0;
+	}
+	SDL_SetAtomicInt(&s_job.state, SHIP_JOB_IDLE);
+	s_job.quit = 0;
+	s_job.thread = SDL_CreateThread(ship_job_main, "xwa-model-build", NULL);
+	if (!s_job.thread) {
+		SDL_DestroySemaphore(s_job.go);
+		s_job.go = NULL;
+		return 0;
+	}
+	return 1;
+}
+
+static void ship_job_stop(void) {
+	if (!s_job.thread) {
+		return;
+	}
+	while (SDL_GetAtomicInt(&s_job.state) == SHIP_JOB_RUNNING) {
+		SDL_Delay(1);
+	}
+	if (SDL_GetAtomicInt(&s_job.state) == SHIP_JOB_DONE && s_job.ok) {
+		Aeron_FlightModelFree(&s_job.model);
+	}
+	s_job.quit = 1;
+	SDL_SignalSemaphore(s_job.go);
+	SDL_WaitThread(s_job.thread, NULL);
+	SDL_DestroySemaphore(s_job.go);
+	memset(&s_job, 0, sizeof s_job);
+}
+
+/* 1: `*out` is the mesh; 0: still building (ask again next frame); -1:
+ * failed (the failure is set on `cmd`). */
+static int ship_mesh_load_async(AeronCommandBuffer* cmd, const char* key, AeronSceneMesh** out,
+								int* out_runtime_opt) {
+	*out = NULL;
+	if (!ship_job_start()) {
+		*out = ship_mesh_load(cmd, key, out_runtime_opt);
+		return *out ? 1 : -1;
+	}
+	const int state = SDL_GetAtomicInt(&s_job.state);
+	if (state == SHIP_JOB_RUNNING) {
+		return 0;
+	}
+	if (state == SHIP_JOB_DONE) {
+		SDL_SetAtomicInt(&s_job.state, SHIP_JOB_IDLE);
+		if (strcmp(s_job.key, key) == 0) {
+			if (!s_job.ok) {
+				Aeron_LogWarn("xwa.remaster", "mesh: OPT load failed '%s': %s", key, s_job.error);
+				ship_set_failure(cmd, "Ship model '%s': OPT load failed: %s", key, s_job.error);
+				return -1;
+			}
+			AeronSceneMeshCreateStatus create_status;
+			AeronSceneMesh* mesh = AeronScene_MeshCreate(cmd, &s_job.model, key, &create_status);
+			Aeron_FlightModelFree(&s_job.model);
+			if (!mesh && !s_job.runtime_opt && create_status == AERON_SCENE_MESH_CREATE_INVALID_SOURCE) {
+				/* A GLB that does not fit: the OPT, here and now. */
+				mesh = ship_mesh_load(cmd, key, out_runtime_opt);
+				*out = mesh;
+				return mesh ? 1 : -1;
+			}
+			if (!mesh) {
+				ship_set_failure(cmd, "Ship model '%s': resource creation failed (status %d)", key,
+								 (int)create_status);
+				return -1;
+			}
+			if (out_runtime_opt) {
+				*out_runtime_opt = s_job.runtime_opt;
+			}
+			Aeron_LogInfo("xwa.remaster", "mesh: '%s' built in the background", key);
+			*out = mesh;
+			return 1;
+		}
+		/* A model no longer wanted. */
+		if (s_job.ok) {
+			Aeron_FlightModelFree(&s_job.model);
+		}
+	}
+	/* Start this one. */
+	snprintf(s_job.key, sizeof s_job.key, "%s", key);
+	s_job.glb_path[0] = '\0';
+	if (!s_force_opt_models) {
+		snprintf(s_job.glb_path, sizeof s_job.glb_path, "%s/remaster/models/%s.glb", Aeron_AssetRoot(), key);
+	}
+	if (!XwaRemasterOptMesh_Read(Aeron_GetVfs(), key, s_job.opt_path, sizeof s_job.opt_path, &s_job.bytes,
+								 &s_job.size)) {
+		s_job.bytes = NULL;
+		s_job.size = 0;
+	}
+	memset(&s_job.model, 0, sizeof s_job.model);
+	SDL_SetAtomicInt(&s_job.state, SHIP_JOB_RUNNING);
+	SDL_SignalSemaphore(s_job.go);
+	return 0;
+}
+
 int XwaRemasterShip_AssetsNeedSync(const XwaSnapshot* snapshot) {
 	return snapshot && snapshot->opt_asset_generation != s_opt_asset_generation;
 }
@@ -195,6 +351,9 @@ XwaRemasterShipSyncResult XwaRemasterShip_SyncAssets(AeronCommandBuffer* cmd, co
 	s_batch_generation = snapshot->opt_asset_generation;
 	s_batch_active = 1;
 	s_batch_completes_generation = 1;
+	/* Menus: models built in the background (see ship_mesh_load_async). */
+	const int background =
+		snapshot->scene_kind == XWA_SCENE_FRONTEND || snapshot->scene_kind == XWA_SCENE_FRONTEND_MODAL;
 
 	for (uint32_t i = 0; i < desired_count; i++) {
 		uint32_t found = s_pending_mesh_count;
@@ -225,7 +384,16 @@ XwaRemasterShipSyncResult XwaRemasterShip_SyncAssets(AeronCommandBuffer* cmd, co
 			continue;
 		}
 		snprintf(asset->key, sizeof asset->key, "%s", desired[i].key);
-		asset->mesh = ship_mesh_load(cmd, asset->key, &asset->runtime_opt);
+		if (background) {
+			const int built = ship_mesh_load_async(cmd, asset->key, &asset->mesh, &asset->runtime_opt);
+			if (built == 0) {
+				memset(asset, 0, sizeof *asset);
+				s_batch_completes_generation = 0;
+				return XWA_REMASTER_SHIP_SYNC_MORE;
+			}
+		} else {
+			asset->mesh = ship_mesh_load(cmd, asset->key, &asset->runtime_opt);
+		}
 		if (!asset->mesh) {
 			memset(asset, 0, sizeof *asset);
 			return XWA_REMASTER_SHIP_SYNC_FAILED;
@@ -335,6 +503,7 @@ int XwaRemasterShip_BuildOptModel(const char* name, AeronFlightModel* out) {
 }
 
 void XwaRemasterShip_Shutdown(void) {
+	ship_job_stop();
 	ship_pending_discard();
 	for (uint32_t i = 0; i < s_mesh_count; i++) {
 		ship_mesh_asset_destroy(&s_meshes[i]);

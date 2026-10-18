@@ -169,7 +169,7 @@ int XwaVrMenuBeam_Frame(AeronCommandBuffer* cmd, AeronRenderTarget* target, int 
 		if (!depth_env || !depth_env[0]) {
 			depth_env = SDL_getenv("XWA_XR_FRAME_DEPTH");
 		}
-		const float depth = depth_env && depth_env[0] ? (float)SDL_atof(depth_env) : 0.12f;
+		const float depth = depth_env && depth_env[0] ? (float)SDL_atof(depth_env) : 0.02f;
 		const float glass_z = hit[2] + depth; /* LOCAL: -z ahead */
 		if (!(on && on[0] == '0') && depth > 0.0f && start[2] > glass_z && hit[2] < glass_z) {
 			const float f = (glass_z - start[2]) / (hit[2] - start[2]);

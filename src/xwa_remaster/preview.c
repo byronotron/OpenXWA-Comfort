@@ -112,6 +112,25 @@ static AeronSceneMesh* preview_mesh(const char* opt_name) {
 	return XwaRemasterShip_MeshForName(base);
 }
 
+/* The preview scene and the first slot's targets made ahead of the first
+ * preview (big render targets: creating them in the briefing's first
+ * frame was part of its hitch). */
+void XwaRemasterPreview_Prewarm(void) {
+	if (!preview_ensure()) {
+		return;
+	}
+	for (int eye = 0; eye < 2; ++eye) {
+		if (!s.present[eye][0]) {
+			s.present[eye][0] =
+				Aeron_CreateRenderTarget(&(AeronRenderTargetDesc) { .width = PREVIEW_RT_W,
+																	.height = PREVIEW_RT_H,
+																	.format = AERON_TEXTURE_FORMAT_RGBA16_FLOAT,
+																	.debug_name = "xwa.preview.present" });
+		}
+	}
+	Aeron_LogInfo("xwa.remaster", "preview: resources prepared ahead");
+}
+
 AeronTexture* XwaRemasterPreview_Render(AeronCommandBuffer* cmd, const XwaModelPreview* p, int slot,
 										const XwaDirLight* lights, uint32_t light_count,
 										const XwaAssetRef* glow_tex) {

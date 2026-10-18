@@ -42,7 +42,9 @@ func (a *app) doneMenu() {
 	}
 }
 
-// collectLogs pulls the app's logs from the headset into
+// collectLogs pulls the app's logs and its settings file (openxwa-quest.cfg:
+// the VR options and the hand-placed HUD, console and stick positions) from
+// the headset into
 // <exe dir>/logs-<date-time>/ together with the launcher's own log.
 func (a *app) collectLogs() {
 	dir := filepath.Join(a.exeDir, "logs-"+time.Now().Format("20060102-150405"))
@@ -54,8 +56,8 @@ func (a *app) collectLogs() {
 		}
 	}
 	got := 0
-	for _, name := range []string{"openxwa.log", "openxwa-prev.log"} {
-		if _, err := a.adb.run(2*time.Minute, "pull", remoteBase+"/"+name, filepath.Join(dir, name)); err == nil {
+	for _, name := range []string{"openxwa.log", "openxwa-prev.log", "openxwa-quest.cfg"} {
+		if _, err := a.adb.run(2*time.Minute, "pull", remoteBase+"/"+name, filepath.Join(dir, name)); err == nil && name != "openxwa-quest.cfg" {
 			got++
 		}
 	}

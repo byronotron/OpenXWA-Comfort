@@ -186,6 +186,8 @@ void Config_ApplyModernInputOptions(const struct XwaModernInputOptions* options)
  * chosen, and flight then aborts the mission like the original's Alt+Q. */
 extern int g_configExitMissionAvailable;
 extern int g_configExitMissionRequested;
+/* The in-flight menu opened by the death camera (flight_checkpoints.c). */
+extern int g_configDeathMenuActive;
 #endif
 
 #ifdef __cplusplus
