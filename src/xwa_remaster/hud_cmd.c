@@ -579,13 +579,12 @@ void XwaRemasterHudCmd_Shutdown(void) {
 	memset(&s_cmd, 0, sizeof s_cmd);
 }
 
-void XwaRemasterHudCmd_Prepare(AeronCommandBuffer* cmd, const XwaSnapshot* snapshot,
-							   XwaRemasterAssets* assets, XwaHudProfileIndex profile_id, int target_w,
-							   int target_h) {
-	memset(&s_cmd.prepared, 0, sizeof s_cmd.prepared);
-	s_cmd.output = NULL;
-	if (!cmd || !snapshot || !assets || !snapshot->hud.crt.visible)
-		return;
+/* `warm`: a render nobody sees, before the first target, so the first
+ * target shown does not stall on creating the CMD scene and its pipelines
+ * (it returns at once when the targets for this size already exist). */
+static void cmd_prepare(AeronCommandBuffer* cmd, const XwaSnapshot* snapshot, const XwaHudCrt* crt,
+						XwaRemasterAssets* assets, XwaHudProfileIndex profile_id, int target_w, int target_h,
+						int warm) {
 	const XwaHudLayoutProfile* profile = cmd_profile(profile_id);
 	if (!profile || !profile->valid)
 		return;
@@ -604,7 +603,6 @@ void XwaRemasterHudCmd_Prepare(AeronCommandBuffer* cmd, const XwaSnapshot* snaps
 	XwaRemasterHudLayout_OutputTransform(profile, target_w, target_h, NULL, NULL, &output_scale);
 	if (output_scale <= 0.0f)
 		return;
-	const XwaHudCrt* crt = &snapshot->hud.crt;
 	const XwaFlightObject* target = cmd_find_object(snapshot, crt->target_slot, crt->target_signature);
 	if (!target)
 		return;
@@ -612,6 +610,11 @@ void XwaRemasterHudCmd_Prepare(AeronCommandBuffer* cmd, const XwaSnapshot* snaps
 	const int height = (int)lround((double)rect_h_ref * (double)output_scale);
 	if (width <= 0 || height <= 0)
 		return;
+	if (warm && s_cmd.scene && s_cmd.present_rt && s_cmd.rt_w == width && s_cmd.rt_h == height &&
+		s_cmd.scene_requested_samples == XwaRemaster_MsaaSampleCount())
+		return;
+	if (warm)
+		Aeron_LogInfo("xwa.hud", "CMD display prepared ahead at %dx%d", width, height);
 	if (!cmd_ensure_targets(width, height)) {
 		Aeron_CommandBufferSetFailure(cmd, "HUD CMD render-target preparation failed");
 		return;
@@ -769,6 +772,42 @@ void XwaRemasterHudCmd_Prepare(AeronCommandBuffer* cmd, const XwaSnapshot* snaps
 			s_cmd.prepared.marker_visible = 1;
 		}
 	}
+}
+
+void XwaRemasterHudCmd_Prepare(AeronCommandBuffer* cmd, const XwaSnapshot* snapshot,
+							   XwaRemasterAssets* assets, XwaHudProfileIndex profile_id, int target_w,
+							   int target_h) {
+	memset(&s_cmd.prepared, 0, sizeof s_cmd.prepared);
+	s_cmd.output = NULL;
+	if (!cmd || !snapshot || !assets)
+		return;
+	if (snapshot->hud.crt.visible) {
+		cmd_prepare(cmd, snapshot, &snapshot->hud.crt, assets, profile_id, target_w, target_h, 0);
+		return;
+	}
+	/* No target yet: aim a hidden CMD at the player's own craft. */
+	const XwaFlightObject* self = NULL;
+	for (uint32_t i = 0; i < snapshot->flight_object_count && !self; i++) {
+		if (snapshot->flight_objects[i].slot == snapshot->hud.player_slot &&
+			snapshot->flight_objects[i].slot_class == XWA_SNAP_SLOT_MAIN)
+			self = &snapshot->flight_objects[i];
+	}
+	if (!self || !cmd_model_genus(self))
+		return;
+	XwaHudCrt crt = snapshot->hud.crt;
+	crt.visible = 1;
+	crt.self_view = 0;
+	crt.map_view = 0;
+	crt.component_marker_visible = 0;
+	crt.target_slot = self->slot;
+	crt.target_signature = self->signature;
+	crt.projectile_exclude_slots[0] = crt.projectile_exclude_slots[1] = 0xffffu;
+	crt.camera_distance = 1200;
+	memset(crt.camera_rows_q15, 0, sizeof crt.camera_rows_q15);
+	crt.camera_rows_q15[0] = crt.camera_rows_q15[4] = crt.camera_rows_q15[8] = 32767;
+	cmd_prepare(cmd, snapshot, &crt, assets, profile_id, target_w, target_h, 1);
+	memset(&s_cmd.prepared, 0, sizeof s_cmd.prepared);
+	s_cmd.output = NULL;
 }
 
 void XwaRemasterHudCmd_PrepareDrawList(AeronCommandBuffer* cmd, int target_w, int target_h) {

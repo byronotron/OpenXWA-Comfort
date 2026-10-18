@@ -37,6 +37,9 @@
 #include "xwa/flight/starfield.h"
 #include "xwa/flight/yard.h"
 #include "xwa/frontend/flight_loading.h"
+#include "xwa/frontend/frontend_flight.h"
+#include "xwa/frontend/frontend_input.h"
+#include "xwa/frontend/frontend_mission_session.h"
 #include "xwa/frontend/mission_setup.h"
 #include "xwa/input/dinput.h"
 #include "xwa/input/forcefeedback.h"
@@ -51,6 +54,7 @@
 #include "xwa_runtime/timing/host_clock.h"
 #include "xwa_runtime/timing/modern_flight_timing.h"
 
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1322,6 +1326,100 @@ int XwaFlightTask_Init(char* missionCmdLine, const char* filmFilePath) {
 	return 1;
 }
 
+/* Single-player missions: once loaded, the loading screen waits for any
+ * button before the hangar ("Press any button to enter the Hangar",
+ * pulsing), so a player who looked away does not miss the start. Returns 1
+ * when the flight may go on. */
+static int s_hangarPromptActive;
+static uint64_t s_hangarPromptStartUs;
+
+/* Everything held now, per source; a press is anything held now that was
+ * not at the last look (a stuck key or a button still held from the
+ * briefing never counts). */
+typedef struct {
+	uint32_t hands[2];
+	uint8_t keys[AERON_KEY_COUNT];
+	uint32_t mouse;
+	uint32_t pads[AERON_CONTROLLER_MAX];
+} XwaHangarPromptInput;
+static XwaHangarPromptInput s_hangarPromptInput;
+
+static void XwaFlightTask_SampleInput(XwaHangarPromptInput* out) {
+	memset(out, 0, sizeof *out);
+	for (int hand = 0; hand < 2; ++hand) {
+		AeronXrHand h;
+		if (Aeron_XrGetHand(hand, &h)) {
+			out->hands[hand] = (h.buttons & (AERON_XR_HAND_BUTTON_LOWER | AERON_XR_HAND_BUTTON_UPPER |
+											 AERON_XR_HAND_BUTTON_STICK | AERON_XR_HAND_BUTTON_MENU)) |
+							   (h.trigger > 0.6f ? 0x100u : 0u) | (h.grip > 0.7f ? 0x200u : 0u);
+		}
+	}
+	const AeronInputSnapshot* input = Aeron_InputSnapshot();
+	if (input) {
+		memcpy(out->keys, input->key_down, sizeof out->keys);
+		out->mouse = input->mouse.buttons;
+		for (int c = 0; c < AERON_CONTROLLER_MAX; ++c) {
+			out->pads[c] = input->controllers[c].gamepad_buttons;
+		}
+	}
+}
+
+static int XwaFlightTask_NewPress(const XwaHangarPromptInput* now, const XwaHangarPromptInput* before) {
+	for (int hand = 0; hand < 2; ++hand) {
+		if (now->hands[hand] & ~before->hands[hand]) {
+			return 1;
+		}
+	}
+	for (int k = 0; k < AERON_KEY_COUNT; ++k) {
+		if (now->keys[k] && !before->keys[k]) {
+			return 1;
+		}
+	}
+	if (now->mouse & ~before->mouse) {
+		return 1;
+	}
+	for (int c = 0; c < AERON_CONTROLLER_MAX; ++c) {
+		if (now->pads[c] & ~before->pads[c]) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+static int XwaFlightTask_HangarPromptDone(uint64_t nowUs) {
+	if (g_frontendMissionSessionMode != FRONTEND_MISSION_SESSION_SINGLEPLAYER || g_filmPlaybackMode ||
+		g_filmFilePath[0]) {
+		return 1;
+	}
+	XwaHangarPromptInput now;
+	XwaFlightTask_SampleInput(&now);
+	if (!s_hangarPromptActive) {
+		s_hangarPromptActive = 1;
+		s_hangarPromptStartUs = nowUs;
+		s_hangarPromptInput = now;
+		g_flightLoadingPrompt = "Press any button to enter the Hangar";
+		XwaFlightTask_Log("hangar-prompt");
+	}
+	const int pressed = XwaFlightTask_NewPress(&now, &s_hangarPromptInput);
+	s_hangarPromptInput = now;
+	if (pressed) {
+		AeronXrButton button;
+		int shifted;
+		while (Aeron_XrPollButton(&button, &shifted)) {
+		}
+		Keyboard_FlushCharBuffer();
+		g_flightLoadingPrompt = NULL;
+		s_hangarPromptActive = 0;
+		XwaFlightTask_Log("hangar-prompt-done");
+		return 1;
+	}
+	/* A slow pulse between dim and full, about 1.2 s per beat. */
+	const double t = (double)(nowUs - s_hangarPromptStartUs) / 1e6;
+	g_flightLoadingPromptLevel = (int)(150.0 + 105.0 * sin(t * 2.0 * 3.14159265 / 1.2));
+	FlightLoading_DrawProgressScreen(8);
+	return 0;
+}
+
 void XwaFlightTask_Tick(void) {
 	uint64_t nowUs;
 
@@ -1512,6 +1610,10 @@ void XwaFlightTask_Tick(void) {
 					default:
 						if (XwaTime_GetElapsedTicks() - g_xwaFlightTaskLoadingStartTick <
 							XWA_FLIGHT_LOADING_MIN_VISIBLE_MS) {
+							g_xwaFlightTaskNextWakeElapsedUs = nowUs + XWA_FLIGHT_FRAME_US;
+							return;
+						}
+						if (!XwaFlightTask_HangarPromptDone(nowUs)) {
 							g_xwaFlightTaskNextWakeElapsedUs = nowUs + XWA_FLIGHT_FRAME_US;
 							return;
 						}

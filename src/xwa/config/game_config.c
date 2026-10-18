@@ -168,22 +168,21 @@ static int s_configMissionHintsRow;
 #endif
 
 #ifdef XWA_MODERN
-/* VR: the main menu starts with "VR Options" and "Restore VR Defaults" and
- * has no Performance Tuning or Game Controller rows (the presets and the
+/* VR: the main menu starts with "VR Options" and has no Performance
+ * Tuning or Game Controller rows (the presets and the
  * original controller screens are not for VR). */
 static int Config_MainMenuVr(void) { return XwaModernVrOptions_Available(); }
-static int s_configRestoreVrConfirmPending;
 #endif
 
 /* A main menu row as the original numbers it, to where it is now. */
 static int Config_MainRow(int row) {
 #ifdef XWA_MODERN
 	if (Config_MainMenuVr()) {
-		/* 0 General, 2 Video, 3 Sound follow the two VR rows; 1 Performance
-		 * and 4 Game Controller are gone (on General if asked); from 5 on
-		 * the rows stay where they were. */
-		static const int k_vr_rows[5] = { 2, 2, 3, 4, 2 };
-		return row >= 0 && row < 5 ? k_vr_rows[row] : row;
+		/* 0 General, 2 Video, 3 Sound follow the VR Options row; 1
+		 * Performance and 4 Game Controller are gone (on General if asked);
+		 * from 5 on the rows move up by one. */
+		static const int k_vr_rows[5] = { 1, 1, 2, 3, 1 };
+		return row >= 0 && row < 5 ? k_vr_rows[row] : row - 1;
 	}
 #endif
 	return row;
@@ -210,17 +209,6 @@ int Config_MainMenuScreen(void) {
 #endif
 
 #ifdef XWA_MODERN
-	if (s_configRestoreVrConfirmPending) {
-		int confirmResult;
-
-		if (!FrontendDialog_TakeConfirmDialogResult(&confirmResult)) {
-			return 0;
-		}
-		s_configRestoreVrConfirmPending = 0;
-		if (confirmResult) {
-			XwaModernVrOptions_RestoreDefaults();
-		}
-	}
 	if (g_configExitConfirmPending) {
 		int confirmResult;
 
@@ -241,6 +229,9 @@ int Config_MainMenuScreen(void) {
 		++rowCount;
 		rowCount += Config_CheckpointRowCount();
 		rowCount += XwaModernMissionHintsScreen_Available() != 0;
+	}
+	if (Config_MainMenuVr()) {
+		--rowCount; /* VR Options in, Performance and Game Controller out */
 	}
 #else
 	rowCount = g_configRestrictedOptionsModalActive ? 7 : 10;
@@ -300,29 +291,6 @@ int Config_MainMenuScreen(void) {
 		if (buttonPressed) {
 			g_pendingMenuScreen = 23;
 			g_menuCursorRow = 0;
-		}
-		y += 25;
-		++rowIndex;
-
-		text = "Restore VR Defaults";
-		titleWidth = FrontendText_MeasureWidth(text, 20);
-		textX = g_configMenuCenterX - (int)(titleWidth >> 1);
-		buttonPressed = FrontendButton_DrawMenuButton(textX, y, text, 20, g_colorPaleBlue, 38, 0, "settingsound");
-		if (g_menuCursorRow == rowIndex) {
-			FrontendText_Draw(20, text, textX, y, g_colorGreen);
-			if (keyState == CONFIG_KEY_ENTER) {
-				FrontendSound_PlayUISound("settingsound", 1, 0, 255, 12 * g_gameConfig.sfxDatapadVolume, 63);
-				Keyboard_FlushCharBuffer();
-				keyState = 0;
-				buttonPressed = 1;
-			}
-		}
-		if (buttonPressed &&
-			FrontendDialog_BeginConfirmDialog("Restore the recommended VR settings?",
-											  "All VR options, the HUD panel, lap console and flight stick",
-											  "positions are replaced. Some apply after a restart.",
-											  FrontendString_Get(STR_OKAY), FrontendString_Get(STR_CANCEL))) {
-			s_configRestoreVrConfirmPending = 1;
 		}
 		y += 25;
 		++rowIndex;

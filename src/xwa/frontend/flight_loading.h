@@ -19,6 +19,11 @@ int FlightLoading_AttachFrontendSurfaces(void);
 int FlightLoading_DetachFrontendSurfaces(void);
 int FlightLoading_AreFrontendSurfacesAttached(void);
 
+#ifdef XWA_MODERN
+extern const char* g_flightLoadingPrompt;
+extern int g_flightLoadingPromptLevel;
+#endif
+
 #ifdef __cplusplus
 }
 #endif

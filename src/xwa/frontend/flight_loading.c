@@ -38,6 +38,13 @@ int g_flightLoadingReadyScreenStartTick;
 // GLOBAL: XWA 0xAE2A50
 int g_frontendLaunchHumanPlayerCount;
 
+#ifdef XWA_MODERN
+/* A line under the finished progress bar (the "press any button" wait
+ * before the hangar, flight_task.c), drawn at `level` (0..255) brightness. */
+const char* g_flightLoadingPrompt;
+int g_flightLoadingPromptLevel;
+#endif
+
 // FUNCTION: XWA 0x4CC920
 int FlightLoading_PulseAndDrawProgressScreen(int progressStep) {
 	FlightNet_BroadcastStillLoadingPulse();
@@ -174,6 +181,16 @@ int FlightLoading_DrawProgressScreen(int progressStep) {
 	if (progressBarWidth > 0) {
 		FrontImage_DrawSprite("sbarspark", progressBarWidth + 70, 75);
 	}
+#ifdef XWA_MODERN
+	if (g_flightLoadingPrompt) {
+		const int level = g_flightLoadingPromptLevel < 0 ? 0 : g_flightLoadingPromptLevel > 255 ? 255 : g_flightLoadingPromptLevel;
+		const int color = FrontendDisplay_PackRGB(level, level * 220 / 255, level * 70 / 255);
+		FrontendDraw_RectAssign(&rect, 0, 436, 639, 460);
+		if (!FrontendText_DrawCentered(20, g_flightLoadingPrompt, &rect, color)) {
+			FrontendText_DrawCentered(15, g_flightLoadingPrompt, &rect, color);
+		}
+	}
+#endif
 
 	FrontendDisplay_PresentFrame();
 	FrontendDisplay_UnlockBackBuffer();

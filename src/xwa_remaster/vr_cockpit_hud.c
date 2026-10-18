@@ -301,6 +301,31 @@ static void ck_layout_key(const char* name, char* out, size_t size) {
 	out[n] = '\0';
 }
 
+/* Hand-placed layouts that ship as the defaults (the cockpit's key unset
+ * in openxwa-quest.cfg; a saved layout, even an empty one, wins). */
+static const struct {
+	const char* key;
+	const char* layout;
+} k_builtin_layouts[] = {
+	{ "XWA_XR_HUD_POSE_XWINGCOCKPIT", "pod_l=-0.4130,-0.0378,-0.5794,-0.02721,0.27131,0.02440,0.96180;"
+									  "pod_r=0.4016,0.0013,-0.5742,0.01347,-0.32619,0.00733,0.94518" },
+	{ "XWA_XR_HUD_POSE_CORELLIANTRANSPORT2COCKPIT",
+	  "pod_l=-0.3468,0.0794,-0.6747,-0.00307,0.22331,-0.00042,0.97474;"
+	  "pod_r=0.4555,0.0481,-0.7340,0.01256,-0.27346,0.01234,0.96172" },
+	{ "XWA_XR_HUD_POSE_CORELLIANTRANSPORTGUNNER",
+	  "pod_l=-0.4119,-0.0053,-0.6071,0.01244,0.33782,-0.01006,0.94107;"
+	  "pod_r=0.4409,0.0234,-0.5578,0.03452,-0.34751,0.01515,0.93692" },
+};
+
+static const char* ck_builtin_layout(const char* key) {
+	for (size_t i = 0; i < sizeof k_builtin_layouts / sizeof k_builtin_layouts[0]; ++i) {
+		if (strcmp(key, k_builtin_layouts[i].key) == 0) {
+			return k_builtin_layouts[i].layout;
+		}
+	}
+	return "";
+}
+
 /* Reads this cockpit's layout ("id=x,y,z,qx,qy,qz,qw;...") when it
  * changed. */
 static void ck_read_layout(const char* cockpit) {
@@ -308,7 +333,7 @@ static void ck_read_layout(const char* cockpit) {
 	ck_layout_key(cockpit, key, sizeof key);
 	const char* v = getenv(key);
 	if (!v) {
-		v = "";
+		v = ck_builtin_layout(key);
 	}
 	if (strcmp(key, s_ck.cockpit_key) == 0 && strcmp(v, s_ck.pose_env) == 0) {
 		return;

@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 /* OS message boxes are invisible inside an immersive VR app, so the Quest
  * build (and desktop runs with XWA_INGAME_SETUP=1, for testing) shows setup
@@ -239,14 +240,73 @@ static int select_game_data(AeronVfs* vfs, char* selected, size_t selected_capac
 	}
 }
 
+/* The PC launcher (tools/launcher) leaves the list of the files it copied
+ * in the game folder: "<size>\t<relative/path>" lines after a "#" header.
+ * Returns how many listed files are missing and names the first ones in
+ * `list`. No list (copied by hand): 0. */
+static int install_list_missing(const char* dir, char* list, size_t list_size) {
+	char path[1024];
+	char line[1200];
+	int missing = 0;
+	size_t used = 0;
+	snprintf(path, sizeof path, "%s/openxwa-install-files.txt", dir);
+	FILE* f = fopen(path, "r");
+	if (!f) {
+		return 0;
+	}
+	if (list_size) {
+		list[0] = '\0';
+	}
+	while (fgets(line, sizeof line, f)) {
+		char* tab = strchr(line, '\t');
+		if (line[0] == '#' || !tab) {
+			continue;
+		}
+		char* rel = tab + 1;
+		rel[strcspn(rel, "\r\n")] = '\0';
+		if (!rel[0] || strstr(rel, "..")) {
+			continue;
+		}
+		char file[1024];
+		struct stat st;
+		snprintf(file, sizeof file, "%s/%s", dir, rel);
+		if (stat(file, &st) == 0) {
+			continue;
+		}
+		if (missing < 12 && used + strlen(rel) + 8 < list_size) {
+			used += (size_t)snprintf(list + used, list_size - used, "    %s\n", rel);
+		}
+		missing++;
+	}
+	fclose(f);
+	if (missing > 12 && used + 32 < list_size) {
+		snprintf(list + used, list_size - used, "    ... and %d more\n", missing - 12);
+	}
+	return missing;
+}
+
 static int resolve_game_data(const XwaLaunchOptions* launch, const XwaHostConfig* host_config, char* selected,
 							 size_t selected_capacity, int* cancelled, char* error, size_t error_size) {
 	AeronVfs* vfs = Aeron_GetVfs();
 
 	*cancelled = 0;
 	if (launch->game_data_path[0]) {
-		const int ok = XwaSetup_ValidateGameData(vfs, launch->game_data_path, selected, selected_capacity, error,
-												 error_size);
+		int ok = XwaSetup_ValidateGameData(vfs, launch->game_data_path, selected, selected_capacity, error,
+										   error_size);
+		if (ok && use_ingame_setup()) {
+			char list[1024];
+			const int missing = install_list_missing(launch->game_data_path, list, sizeof list);
+			if (missing > 0) {
+				Aeron_LogWarn("xwa.config", "%d game files from the launcher's copy are missing", missing);
+				snprintf(error, error_size,
+						 "%d of the X-Wing Alliance files copied from your PC are missing on the headset:\n\n"
+						 "%s\n"
+						 "Connect the headset to the PC and run the OpenXWA Launcher again:\n"
+						 "it copies only the missing files. Then choose Try Again.",
+						 missing, list);
+				return 0;
+			}
+		}
 		if (!ok && use_ingame_setup()) {
 			char detail[512];
 			snprintf(detail, sizeof detail, "%s", error);
@@ -327,6 +387,7 @@ static int resolve_game_data(const XwaLaunchOptions* launch, const XwaHostConfig
 
 #if defined(SDL_PLATFORM_ANDROID)
 #include <SDL3/SDL_system.h>
+#include <dirent.h>
 #include <sys/stat.h>
 
 /* Quest has no folder picker inside an immersive app. The game data lives in
@@ -682,6 +743,52 @@ static void android_default_game_data(XwaLaunchOptions* launch) {
 	snprintf(launch->game_data_path, sizeof launch->game_data_path, "%s", path);
 	Aeron_LogInfo("xwa.config", "Android game-data folder: %s", path);
 }
+
+/* Pilots the PC launcher copied over (.plt files in files/pilot-import) move into
+ * the app's own pilot folder. A pilot file already on the headset is kept
+ * (its progress wins); the copy is removed either way. */
+static void android_import_pilots(void) {
+	const char* external = SDL_GetAndroidExternalStoragePath();
+	char dir[1024];
+	if (!external || !external[0]) {
+		return;
+	}
+	snprintf(dir, sizeof dir, "%s/pilot-import", external);
+	DIR* d = opendir(dir);
+	if (!d) {
+		return;
+	}
+	AeronVfs* vfs = Aeron_GetVfs();
+	struct dirent* e;
+	while ((e = readdir(d)) != NULL) {
+		const char* name = e->d_name;
+		const size_t len = strlen(name);
+		if (len < 5 || len > 64 || SDL_strcasecmp(name + len - 4, ".plt") != 0 || strchr(name, '/')) {
+			continue;
+		}
+		char src[1200];
+		snprintf(src, sizeof src, "%s/%s", dir, name);
+		if (AeronVfs_Exists(vfs, AERON_VFS_ROOT_USER, name)) {
+			Aeron_LogInfo("xwa.config", "pilot import: %s is already on the headset, kept that one", name);
+			remove(src);
+			continue;
+		}
+		size_t size = 0;
+		void* data = SDL_LoadFile(src, &size);
+		if (!data) {
+			Aeron_LogWarn("xwa.config", "pilot import: could not read %s", src);
+			continue;
+		}
+		if (AeronVfs_WriteAllAtomic(vfs, AERON_VFS_ROOT_USER, name, data, size)) {
+			Aeron_LogInfo("xwa.config", "pilot import: %s (%zu bytes)", name, size);
+			remove(src);
+		} else {
+			Aeron_LogWarn("xwa.config", "pilot import: could not write %s", name);
+		}
+		SDL_free(data);
+	}
+	closedir(d);
+}
 #endif
 
 /* Mobile/standalone render defaults. Applied to options the player has not
@@ -854,6 +961,7 @@ int main(int argc, char** argv) {
 #if defined(SDL_PLATFORM_ANDROID)
 	android_shim_check();
 	android_default_game_data(&launch);
+	android_import_pilots();
 #endif
 	if (!XwaHostConfig_Load(Aeron_GetVfs(), &host_config, config_error, sizeof config_error)) {
 		char message[1536];
