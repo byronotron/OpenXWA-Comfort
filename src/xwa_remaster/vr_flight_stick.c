@@ -65,6 +65,12 @@ static struct {
 	char placement[64];
 	uint64_t last_ns;
 	int logged;
+	/* XwaVrStick_Mesh: this frame's stick in LOCAL space. */
+	float mesh_q[4];
+	float* mesh_xyz;
+	float* mesh_nrm;
+	uint16_t* mesh_idx;
+	int mesh_vn, mesh_in, mesh_ready;
 } s_st;
 
 /* ---- small math --------------------------------------------------------- */
@@ -602,6 +608,67 @@ void XwaVrStick_Submit(AeronScene3D* scene, AeronCommandBuffer* cmd, const float
 	st_instance(scene, s_st.meshes[ST_SHAFT].mesh, q, s_st.pivot, crows, cam_pos, units);
 	st_instance(scene, s_st.meshes[ST_GRIP].mesh, q, s_st.pivot, crows, cam_pos, units);
 	s_st.shown = 1;
+	s_st.mesh_ready = 0; /* XwaVrStick_Mesh builds it when asked */
+	memcpy(s_st.mesh_q, q, sizeof s_st.mesh_q);
+}
+
+int XwaVrStick_Mesh(const float** local_xyz, const float** local_normals, int* vertex_count,
+					const uint16_t** indices, int* index_count) {
+	if (!s_st.shown || !s_st.ok) {
+		return 0;
+	}
+	if (!s_st.mesh_ready) {
+		int vn = 0, in = 0;
+		for (int m = 0; m < ST_MESHES; ++m) {
+			vn += (int)s_st.meshes[m].vertex_count;
+			in += (int)s_st.meshes[m].index_count;
+		}
+		if (vn > 65535) {
+			return 0;
+		}
+		if (!s_st.mesh_xyz) {
+			s_st.mesh_xyz = (float*)malloc((size_t)vn * 3 * sizeof(float));
+			s_st.mesh_nrm = (float*)malloc((size_t)vn * 3 * sizeof(float));
+			s_st.mesh_idx = (uint16_t*)malloc((size_t)in * sizeof(uint16_t));
+			if (!s_st.mesh_xyz || !s_st.mesh_nrm || !s_st.mesh_idx) {
+				free(s_st.mesh_xyz);
+				free(s_st.mesh_nrm);
+				free(s_st.mesh_idx);
+				s_st.mesh_xyz = s_st.mesh_nrm = NULL;
+				s_st.mesh_idx = NULL;
+				return 0;
+			}
+		}
+		static const float upright[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+		int v0 = 0, i0 = 0;
+		for (int m = 0; m < ST_MESHES; ++m) {
+			const StMesh* sm = &s_st.meshes[m];
+			const float* q = m == ST_BOOT ? upright : s_st.mesh_q;
+			for (uint32_t i = 0; i < sm->vertex_count; ++i) {
+				float p[3], n[3];
+				st_rotate(q, sm->vertices[i].pos, p);
+				st_rotate(q, sm->vertices[i].normal, n);
+				for (int k = 0; k < 3; ++k) {
+					s_st.mesh_xyz[(v0 + (int)i) * 3 + k] = p[k] + s_st.pivot[k];
+					s_st.mesh_nrm[(v0 + (int)i) * 3 + k] = n[k];
+				}
+			}
+			for (uint32_t i = 0; i < sm->index_count; ++i) {
+				s_st.mesh_idx[i0 + (int)i] = (uint16_t)(sm->indices[i] + v0);
+			}
+			v0 += (int)sm->vertex_count;
+			i0 += (int)sm->index_count;
+		}
+		s_st.mesh_vn = v0;
+		s_st.mesh_in = i0;
+		s_st.mesh_ready = 1;
+	}
+	*local_xyz = s_st.mesh_xyz;
+	*local_normals = s_st.mesh_nrm;
+	*vertex_count = s_st.mesh_vn;
+	*indices = s_st.mesh_idx;
+	*index_count = s_st.mesh_in;
+	return 1;
 }
 
 int XwaVrStick_Capsules(XwaVrGloveCapsule* out, int max_out) {
@@ -653,5 +720,8 @@ void XwaVrStick_Shutdown(void) {
 		free(s_st.meshes[i].vertices);
 		free(s_st.meshes[i].indices);
 	}
+	free(s_st.mesh_xyz);
+	free(s_st.mesh_nrm);
+	free(s_st.mesh_idx);
 	memset(&s_st, 0, sizeof s_st);
 }

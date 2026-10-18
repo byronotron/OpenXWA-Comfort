@@ -302,6 +302,12 @@ if(XWA_ENABLE_DEBUG_UI)
     target_sources(xwa_remaster PRIVATE
         src/xwa_remaster/debug_tools.cpp)
 endif()
+# meshoptimizer's simplifier (MIT): light cut-out meshes of the VR
+# controller models.
+add_library(xwa_meshopt STATIC
+    third_party/meshoptimizer/simplifier.cpp
+    third_party/meshoptimizer/allocator.cpp)
+target_include_directories(xwa_meshopt PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer)
 target_include_directories(xwa_remaster
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -319,6 +325,7 @@ target_link_libraries(xwa_remaster
         # The runtime's controller models: glTF parsing, KTX2 atlas.
         aeron_cgltf
         imgbake
+        xwa_meshopt
 )
 
 # OpenXWA-owned scene shaders use Aeron's cross-platform shader pipeline and

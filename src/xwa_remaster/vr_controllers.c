@@ -38,6 +38,8 @@
 #pragma GCC diagnostic pop
 #endif
 
+#include "meshoptimizer.h"
+
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -587,6 +589,12 @@ typedef struct CtUpload {
 } CtUpload;
 
 static AeronSceneMesh* ct_upload(AeronCommandBuffer* cmd, const CtUpload* u, const char* name) {
+	/* Matte (roughness 0.9+): the lite mesh shader then skips the specular
+	 * term and the face-normal derivatives for the controllers, which can
+	 * fill much of the view when the player looks at them up close. */
+	for (uint32_t m = 0; m < u->material_count; ++m) {
+		u->materials[m].roughness_factor = fmaxf(u->materials[m].roughness_factor, 0.92f);
+	}
 	AeronFlightModel fm;
 	memset(&fm, 0, sizeof fm);
 	fm.render.vertices = u->vertices;
@@ -646,6 +654,108 @@ static AeronSceneMesh* ct_upload_generic(AeronCommandBuffer* cmd, const CtGeneri
 
 /* ---- Runtime models (glTF) ------------------------------------------------------- */
 
+/* A light copy of a model for the hands' masks (the overlay over the HUD
+ * and panels): meshoptimizer's simplifier keeps a subset of the vertices
+ * (it never moves them), part by part (mesh slot by slot, so moving parts
+ * stay whole). Positions are stored in their slot's frame. */
+typedef struct CtCut {
+	float* pos;
+	float* nrm;
+	uint8_t* slot;
+	uint16_t* idx;
+	uint32_t vn, in;
+} CtCut;
+
+static void ct_cut_free(CtCut* c) {
+	free(c->pos);
+	free(c->nrm);
+	free(c->slot);
+	free(c->idx);
+	memset(c, 0, sizeof *c);
+}
+
+/* `model_pos`: every vertex in one space (for the simplifier); `pos`, `nrm`,
+ * `slot`: what is kept per vertex. About `ratio` of the triangles stay, fewer
+ * when that keeps the shape within ~1 % of the model's size. */
+static int ct_cut_build(CtCut* out, const float* model_pos, const float* pos, const float* nrm, const uint8_t* slot,
+						uint32_t vn, const uint16_t* idx, uint32_t in, float ratio) {
+	memset(out, 0, sizeof *out);
+	if (vn == 0 || in < 3) {
+		return 0;
+	}
+	unsigned int* src = (unsigned int*)malloc(in * sizeof *src);
+	unsigned int* dst = (unsigned int*)malloc(in * sizeof *dst);
+	unsigned int* kept = (unsigned int*)malloc(in * sizeof *kept);
+	uint32_t* remap = (uint32_t*)malloc(vn * sizeof *remap);
+	int ok = src && dst && kept && remap;
+	size_t kept_n = 0;
+	/* Part by part. */
+	for (int s = 0; ok && s < 256; ++s) {
+		size_t n = 0;
+		for (uint32_t t = 0; t + 2 < in; t += 3) {
+			if (idx[t] < vn && idx[t + 1] < vn && idx[t + 2] < vn && (slot ? slot[idx[t]] : 0) == s) {
+				src[n++] = idx[t];
+				src[n++] = idx[t + 1];
+				src[n++] = idx[t + 2];
+			}
+		}
+		if (n == 0) {
+			if (!slot) {
+				break;
+			}
+			continue;
+		}
+		size_t target = (size_t)((float)n * ratio) / 3 * 3;
+		target = target < 3 ? 3 : target;
+		float err = 0.0f;
+		const size_t m = meshopt_simplify(dst, src, n, model_pos, vn, 3 * sizeof(float), target, 0.01f,
+										  meshopt_SimplifyLockBorder, &err);
+		memcpy(kept + kept_n, dst, m * sizeof *dst);
+		kept_n += m;
+		if (!slot) {
+			break;
+		}
+	}
+	if (ok) {
+		for (uint32_t i = 0; i < vn; ++i) {
+			remap[i] = UINT32_MAX;
+		}
+		uint32_t used = 0;
+		for (size_t k = 0; k < kept_n; ++k) {
+			if (remap[kept[k]] == UINT32_MAX) {
+				remap[kept[k]] = used++;
+			}
+		}
+		out->pos = (float*)malloc((used ? used : 1) * 3 * sizeof(float));
+		out->nrm = (float*)malloc((used ? used : 1) * 3 * sizeof(float));
+		out->slot = (uint8_t*)malloc(used ? used : 1);
+		out->idx = (uint16_t*)malloc((kept_n ? kept_n : 1) * sizeof(uint16_t));
+		ok = out->pos && out->nrm && out->slot && out->idx && used <= 65535u;
+		for (uint32_t i = 0; ok && i < vn; ++i) {
+			const uint32_t r = remap[i];
+			if (r != UINT32_MAX) {
+				memcpy(&out->pos[r * 3], &pos[i * 3], 3 * sizeof(float));
+				memcpy(&out->nrm[r * 3], &nrm[i * 3], 3 * sizeof(float));
+				out->slot[r] = slot ? slot[i] : 0;
+			}
+		}
+		for (size_t k = 0; ok && k < kept_n; ++k) {
+			out->idx[k] = (uint16_t)remap[kept[k]];
+		}
+		out->vn = used;
+		out->in = (uint32_t)kept_n;
+	}
+	free(src);
+	free(dst);
+	free(kept);
+	free(remap);
+	if (!ok || out->in == 0) {
+		ct_cut_free(out);
+		return 0;
+	}
+	return 1;
+}
+
 typedef struct CtNode {
 	int parent;
 	float rest_local[16];
@@ -669,12 +779,8 @@ typedef struct CtRuntime {
 	/* Labels: the node whose part a control is, and its centre there. */
 	int ctl_node[XWA_VR_CTL_COUNT];
 	float ctl_local[XWA_VR_CTL_COUNT][3];
-	/* The vertices for cut-outs (when there are few enough). */
-	float* cpu_pos;
-	float* cpu_nrm;
-	uint8_t* cpu_slot;
-	uint16_t* cpu_idx;
-	uint32_t cpu_vn, cpu_in;
+	/* The light copy for the hands' masks. */
+	CtCut cut;
 	char name[64];
 } CtRuntime;
 
@@ -683,10 +789,7 @@ static void ct_runtime_free(CtRuntime* rt) {
 		AeronScene_MeshDestroy(rt->mesh);
 	}
 	free(rt->nodes);
-	free(rt->cpu_pos);
-	free(rt->cpu_nrm);
-	free(rt->cpu_slot);
-	free(rt->cpu_idx);
+	ct_cut_free(&rt->cut);
 	const uint32_t generation = rt->generation;
 	memset(rt, 0, sizeof *rt);
 	rt->generation = generation;
@@ -700,11 +803,13 @@ static int ct_match_control(const char* name, int hand) {
 		low[n] = (char)tolower((unsigned char)name[n]);
 	}
 	low[n] = 0;
-	if (strstr(low, "trigger")) {
-		return XWA_VR_CTL_TRIGGER;
-	}
+	/* Meta's models: "b_trigger_front" is the trigger, "b_trigger_grip" the
+	 * grip button. */
 	if (strstr(low, "squeeze") || strstr(low, "grip")) {
 		return XWA_VR_CTL_GRIP;
+	}
+	if (strstr(low, "trigger")) {
+		return XWA_VR_CTL_TRIGGER;
 	}
 	if (strstr(low, "thumbrest") || strstr(low, "thumb_rest")) {
 		return XWA_VR_CTL_THUMBREST;
@@ -712,7 +817,7 @@ static int ct_match_control(const char* name, int hand) {
 	if (strstr(low, "thumbstick") || strstr(low, "joystick")) {
 		return XWA_VR_CTL_STICK;
 	}
-	if (strstr(low, "menu") || strstr(low, "system") || strstr(low, "home")) {
+	if (strstr(low, "menu") || strstr(low, "system") || strstr(low, "home") || strstr(low, "oculus")) {
 		return XWA_VR_CTL_MENU;
 	}
 	/* Face buttons: the letter as a word of its own, or glued to
@@ -992,7 +1097,7 @@ static int ct_runtime_load(CtRuntime* rt, AeronCommandBuffer* cmd, int hand, con
 			if (prim->type != cgltf_primitive_type_triangles) {
 				continue;
 			}
-			const cgltf_accessor *pos = NULL, *nrm = NULL, *uv = NULL;
+			const cgltf_accessor *pos = NULL, *nrm = NULL, *uv = NULL, *joints = NULL, *weights = NULL;
 			for (cgltf_size a = 0; a < prim->attributes_count; ++a) {
 				const cgltf_attribute* at = &prim->attributes[a];
 				if (at->type == cgltf_attribute_type_position) {
@@ -1001,7 +1106,17 @@ static int ct_runtime_load(CtRuntime* rt, AeronCommandBuffer* cmd, int hand, con
 					nrm = at->data;
 				} else if (at->type == cgltf_attribute_type_texcoord && at->index == 0) {
 					uv = at->data;
+				} else if (at->type == cgltf_attribute_type_joints && at->index == 0) {
+					joints = at->data;
+				} else if (at->type == cgltf_attribute_type_weights && at->index == 0) {
+					weights = at->data;
 				}
+			}
+			/* A skinned mesh (Meta's): its buttons are joints, not meshes of
+			 * their own; a vertex belongs to the joint that weighs most. */
+			const cgltf_skin* skin = data->nodes[i].skin;
+			if (!skin || !joints || !weights) {
+				joints = weights = NULL;
 			}
 			if (!pos) {
 				continue;
@@ -1015,8 +1130,22 @@ static int ct_runtime_load(CtRuntime* rt, AeronCommandBuffer* cmd, int hand, con
 				/* The controls' centres, in model space at rest. */
 				float rest[3];
 				m4_point(cn->rest_world, pp, rest);
+				int owner = (int)i; /* the node whose part the vertex is */
+				if (joints) {
+					float jw[4] = { 0, 0, 0, 0 }, jj[4] = { 0, 0, 0, 0 };
+					cgltf_accessor_read_float(weights, v, jw, 4);
+					cgltf_accessor_read_float(joints, v, jj, 4);
+					int best = 0;
+					for (int k = 1; k < 4; ++k) {
+						best = jw[k] > jw[best] ? k : best;
+					}
+					const cgltf_size j = (cgltf_size)(jj[best] + 0.5f);
+					if (jw[best] > 0.0f && j < skin->joints_count && skin->joints[j]) {
+						owner = (int)(skin->joints[j] - data->nodes);
+					}
+				}
 				for (int c = 0; c < XWA_VR_CTL_COUNT; ++c) {
-					for (int q = (int)i; q >= 0 && rt->ctl_node[c] >= 0; q = rt->nodes[q].parent) {
+					for (int q = owner; q >= 0 && rt->ctl_node[c] >= 0; q = rt->nodes[q].parent) {
 						if (q == rt->ctl_node[c]) {
 							for (int k = 0; k < 3; ++k) {
 								ctl_sum[c][k] += rest[k];
@@ -1137,22 +1266,30 @@ static int ct_runtime_load(CtRuntime* rt, AeronCommandBuffer* cmd, int hand, con
 		Aeron_LogWarn("xwa.remaster", "controller model: scene mesh not created");
 		goto done;
 	}
-	/* Keep the vertices for the panels' cut-outs when there are few. */
-	if (b.vn <= 12000u) {
-		rt->cpu_pos = (float*)malloc(b.vn * 3 * sizeof(float));
-		rt->cpu_nrm = (float*)malloc(b.vn * 3 * sizeof(float));
-		rt->cpu_slot = (uint8_t*)malloc(b.vn);
-		rt->cpu_idx = (uint16_t*)malloc(list_n[0] * sizeof(uint16_t));
-		if (rt->cpu_pos && rt->cpu_nrm && rt->cpu_slot && rt->cpu_idx) {
+	/* The light copy for the hands' masks (opaque parts). */
+	{
+		float* model_pos = (float*)malloc(b.vn * 3 * sizeof(float));
+		float* pos = (float*)malloc(b.vn * 3 * sizeof(float));
+		float* nrm = (float*)malloc(b.vn * 3 * sizeof(float));
+		uint8_t* slot = (uint8_t*)malloc(b.vn);
+		if (model_pos && pos && nrm && slot) {
 			for (uint32_t i = 0; i < b.vn; ++i) {
-				memcpy(&rt->cpu_pos[i * 3], b.v[i].pos, 3 * sizeof(float));
-				memcpy(&rt->cpu_nrm[i * 3], b.v[i].normal, 3 * sizeof(float));
-				rt->cpu_slot[i] = (uint8_t)b.v[i].mesh_index;
+				const int sl = (int)b.v[i].mesh_index;
+				memcpy(&pos[i * 3], b.v[i].pos, 3 * sizeof(float));
+				memcpy(&nrm[i * 3], b.v[i].normal, 3 * sizeof(float));
+				slot[i] = (uint8_t)sl;
+				if (sl > 0 && sl < rt->slot_count) {
+					m4_point(rt->nodes[rt->slot_node[sl]].rest_world, b.v[i].pos, &model_pos[i * 3]);
+				} else {
+					memcpy(&model_pos[i * 3], b.v[i].pos, 3 * sizeof(float));
+				}
 			}
-			memcpy(rt->cpu_idx, b.idx, list_n[0] * sizeof(uint16_t));
-			rt->cpu_vn = b.vn;
-			rt->cpu_in = list_n[0];
+			ct_cut_build(&rt->cut, model_pos, pos, nrm, slot, b.vn, b.idx, list_n[0], 0.2f);
 		}
+		free(model_pos);
+		free(pos);
+		free(nrm);
+		free(slot);
 	}
 	rt->kind = rm->kind;
 	snprintf(rt->name, sizeof rt->name, "%s", rm->name);
@@ -1163,10 +1300,10 @@ static int ct_runtime_load(CtRuntime* rt, AeronCommandBuffer* cmd, int hand, con
 			matched += rt->ctl_node[c] >= 0;
 		}
 		Aeron_LogInfo("xwa.remaster",
-					  "%s controller model \"%s\": %u vertices, %u triangles, %d nodes (%d moving), %d of %d "
-					  "images, %d controls found by name",
-					  hand ? "right" : "left", rm->name, b.vn, b.in / 3, rt->node_count, rt->slot_count - 1,
-					  any_image ? image_count : 0, image_count, matched);
+					  "%s controller model \"%s\": %u vertices, %u triangles (mask copy %u), %d nodes (%d moving), "
+					  "%d of %d images, %d controls found by name",
+					  hand ? "right" : "left", rm->name, b.vn, b.in / 3, rt->cut.in / 3, rt->node_count,
+					  rt->slot_count - 1, any_image ? image_count : 0, image_count, matched);
 		for (int i = 0; i < rt->node_count && i < 64; ++i) {
 			Aeron_LogInfo("xwa.remaster", "  node %d \"%s\" parent %d%s%s", i, rt->nodes[i].name, rt->nodes[i].parent,
 						  data->nodes[i].mesh ? " mesh" : "", rt->nodes[i].animatable >= 0 ? " moving" : "");
@@ -1252,7 +1389,8 @@ typedef struct CtHand {
 	int use_runtime;
 	XwaVrControllerView view;
 	XwaVrGloveCapsule capsules[2];
-	float* local;   /* cut-out mesh in LOCAL space */
+	CtCut generic_cut; /* the generic model's light copy */
+	float* local;   /* the masks' mesh in LOCAL space */
 	float* local_n;
 	uint32_t local_cap;
 	const uint16_t* cut_idx;
@@ -1280,12 +1418,27 @@ static int ct_ensure(AeronCommandBuffer* cmd) {
 	}
 	s_ct.hands[0].generic_mesh = ct_upload_generic(cmd, &s_ct.hands[0].generic, "xwa.vr_controller.generic_left");
 	s_ct.hands[1].generic_mesh = ct_upload_generic(cmd, &s_ct.hands[1].generic, "xwa.vr_controller.generic_right");
+	for (int h = 0; h < 2; ++h) {
+		const CtBuild* gb = &s_ct.hands[h].generic.build;
+		float* pos = (float*)malloc(gb->vn * 3 * sizeof(float));
+		float* nrm = (float*)malloc(gb->vn * 3 * sizeof(float));
+		if (pos && nrm) {
+			for (uint32_t i = 0; i < gb->vn; ++i) {
+				memcpy(&pos[i * 3], gb->v[i].pos, 3 * sizeof(float));
+				memcpy(&nrm[i * 3], gb->v[i].normal, 3 * sizeof(float));
+			}
+			ct_cut_build(&s_ct.hands[h].generic_cut, pos, pos, nrm, NULL, gb->vn, gb->idx, gb->in, 0.2f);
+		}
+		free(pos);
+		free(nrm);
+	}
 	s_ct.ok = s_ct.hands[0].generic_mesh && s_ct.hands[1].generic_mesh;
 	if (!s_ct.ok) {
 		Aeron_LogWarn("xwa.remaster", "VR controllers: scene meshes not created");
 	} else {
-		Aeron_LogInfo("xwa.remaster", "VR controllers: generic model %u vertices, %u triangles",
-					  s_ct.hands[1].generic.build.vn, s_ct.hands[1].generic.build.in / 3);
+		Aeron_LogInfo("xwa.remaster", "VR controllers: generic model %u vertices, %u triangles (mask copy %u)",
+					  s_ct.hands[1].generic.build.vn, s_ct.hands[1].generic.build.in / 3,
+					  s_ct.hands[1].generic_cut.in / 3);
 	}
 	return s_ct.ok;
 }
@@ -1427,25 +1580,26 @@ void XwaVrControllers_Submit(AeronScene3D* scene, AeronCommandBuffer* cmd, const
 							ct_local_point(&by_aim, h->generic.anchor[c], v->anchor[c]);
 						}
 					}
-					/* Cut-out mesh from the model's own vertices. */
-					if (h->runtime.cpu_vn && ct_reserve_local(h, h->runtime.cpu_vn)) {
-						for (uint32_t i = 0; i < h->runtime.cpu_vn; ++i) {
-							const int s = h->runtime.cpu_slot[i];
+					/* The masks' mesh: the model's light copy. */
+					const CtCut* cut = &h->runtime.cut;
+					if (cut->vn && ct_reserve_local(h, cut->vn)) {
+						for (uint32_t i = 0; i < cut->vn; ++i) {
+							const int s = cut->slot[i];
 							float p[3], n[3];
 							if (s > 0 && s < h->runtime.slot_count) {
 								const float* w = h->runtime.nodes[h->runtime.slot_node[s]].world;
-								m4_point(w, &h->runtime.cpu_pos[i * 3], p);
-								m4_vector(w, &h->runtime.cpu_nrm[i * 3], n);
+								m4_point(w, &cut->pos[i * 3], p);
+								m4_vector(w, &cut->nrm[i * 3], n);
 							} else {
-								memcpy(p, &h->runtime.cpu_pos[i * 3], sizeof p);
-								memcpy(n, &h->runtime.cpu_nrm[i * 3], sizeof n);
+								memcpy(p, &cut->pos[i * 3], sizeof p);
+								memcpy(n, &cut->nrm[i * 3], sizeof n);
 							}
 							ct_local_point(&x, p, &h->local[i * 3]);
 							ct_local_vector(&x, n, &h->local_n[i * 3]);
 						}
-						h->cut_idx = h->runtime.cpu_idx;
-						h->cut_vn = h->runtime.cpu_vn;
-						h->cut_in = h->runtime.cpu_in;
+						h->cut_idx = cut->idx;
+						h->cut_vn = cut->vn;
+						h->cut_in = cut->in;
 					} else {
 						h->cut_vn = 0;
 					}
@@ -1464,14 +1618,15 @@ void XwaVrControllers_Submit(AeronScene3D* scene, AeronCommandBuffer* cmd, const
 			}
 			h->cut_vn = 0;
 		}
-		if (h->cut_vn == 0 && ct_reserve_local(h, g->build.vn)) {
-			for (uint32_t i = 0; i < g->build.vn; ++i) {
-				ct_local_point(&aim, g->build.v[i].pos, &h->local[i * 3]);
-				ct_local_vector(&aim, g->build.v[i].normal, &h->local_n[i * 3]);
+		const CtCut* gcut = &h->generic_cut;
+		if (h->cut_vn == 0 && gcut->vn && ct_reserve_local(h, gcut->vn)) {
+			for (uint32_t i = 0; i < gcut->vn; ++i) {
+				ct_local_point(&aim, &gcut->pos[i * 3], &h->local[i * 3]);
+				ct_local_vector(&aim, &gcut->nrm[i * 3], &h->local_n[i * 3]);
 			}
-			h->cut_idx = g->build.idx;
-			h->cut_vn = g->build.vn;
-			h->cut_in = g->build.in;
+			h->cut_idx = gcut->idx;
+			h->cut_vn = gcut->vn;
+			h->cut_in = gcut->in;
 		}
 		ct_local_point(&aim, g->face_center, h->view.face_center);
 		ct_local_vector(&aim, g->face_normal, h->view.face_normal);
@@ -1538,6 +1693,7 @@ void XwaVrControllers_Shutdown(void) {
 		}
 		free(h->generic.build.v);
 		free(h->generic.build.idx);
+		ct_cut_free(&h->generic_cut);
 		free(h->local);
 		free(h->local_n);
 	}

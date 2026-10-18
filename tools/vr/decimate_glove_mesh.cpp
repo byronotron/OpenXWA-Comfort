@@ -3,10 +3,10 @@
 // and each kept vertex's skin weights as they are (the simplifier only
 // removes vertices, it never moves them).
 //
-// build: c++ -O2 -std=c++17 -I<meshoptimizer>/src decimate_glove_mesh.cpp \
-//            <meshoptimizer>/src/*.cpp -o decimate_glove_mesh
-// usage: decimate_glove_mesh <ratio 0..1> <full mesh header> > vr_glove_mesh.h
-//        (the header is compiled in: build against the full-detail one)
+// build (against the full-detail header from gen_glove_mesh.py):
+//   c++ -O2 -std=c++17 -Ithird_party/meshoptimizer '-DGLOVE_HEADER="full_glove_mesh.h"' \
+//       tools/vr/decimate_glove_mesh.cpp third_party/meshoptimizer/*.cpp -o decimate_glove_mesh
+// usage: decimate_glove_mesh <ratio 0..1> > src/xwa_remaster/vr_glove_mesh.h
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>

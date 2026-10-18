@@ -37,6 +37,17 @@ static struct {
 	AeronTexture* tex;
 	AeronDrawList2D* list;
 	int ready;
+	/* What the last mask was made for: the cockpit only moves against the
+	 * world HUD with the eyes' positions (not with the head turning), so the
+	 * mask is kept while those stay within a millimetre or two. */
+	int cached;
+	const AeronSceneMesh* cached_mesh;
+	float cached_model[16];
+	AeronSceneMeshTable cached_table;
+	int cached_has_table;
+	float cached_eye[2][3];
+	AeronXrHudQuad cached_quad;
+	int cached_w, cached_h;
 } s_ho;
 
 static int ho_enabled(void) {
@@ -274,6 +285,36 @@ int XwaVrHudOcclusion_Prepare(AeronCommandBuffer* cmd, const AeronXrView views[2
 	if (mesh->vertex_count == 0 || mesh->vertex_count > HO_MAX_VERTS || !ho_scratch((int)mesh->vertex_count)) {
 		return 0;
 	}
+	/* The same view of the same cockpit as last frame: the same mask. */
+	if (s_ho.cached && s_ho.cached_mesh == mesh && s_ho.cached_w == target_w && s_ho.cached_h == target_h &&
+		memcmp(s_ho.cached_model, s_ho.model, sizeof s_ho.model) == 0 && s_ho.cached_has_table == s_ho.has_table &&
+		(!s_ho.has_table || memcmp(&s_ho.cached_table, &s_ho.table, sizeof s_ho.table) == 0) &&
+		memcmp(&s_ho.cached_quad, quad, sizeof *quad) == 0) {
+		float moved = 0.0f;
+		for (int e = 0; e < 2; ++e) {
+			const float dx = views[e].position[0] - s_ho.cached_eye[e][0];
+			const float dy = views[e].position[1] - s_ho.cached_eye[e][1];
+			const float dz = views[e].position[2] - s_ho.cached_eye[e][2];
+			moved = fmaxf(moved, dx * dx + dy * dy + dz * dz);
+		}
+		if (moved < 0.0015f * 0.0015f) {
+			s_ho.ready = s_ho.cached > 0;
+			return s_ho.ready;
+		}
+	}
+	s_ho.cached = 0;
+	s_ho.cached_mesh = mesh;
+	memcpy(s_ho.cached_model, s_ho.model, sizeof s_ho.model);
+	s_ho.cached_has_table = s_ho.has_table;
+	if (s_ho.has_table) {
+		s_ho.cached_table = s_ho.table;
+	}
+	s_ho.cached_quad = *quad;
+	s_ho.cached_w = target_w;
+	s_ho.cached_h = target_h;
+	for (int e = 0; e < 2; ++e) {
+		memcpy(s_ho.cached_eye[e], views[e].position, sizeof s_ho.cached_eye[e]);
+	}
 	s_ho.mw = HO_MASK_W;
 	s_ho.mh = (int)((float)HO_MASK_W * (float)target_h / (float)target_w + 0.5f);
 	s_ho.mh = s_ho.mh < 16 ? 16 : (s_ho.mh > HO_MASK_H_MAX ? HO_MASK_H_MAX : s_ho.mh);
@@ -287,6 +328,7 @@ int XwaVrHudOcclusion_Prepare(AeronCommandBuffer* cmd, const AeronXrView views[2
 		any = s_ho.px[i] != 0;
 	}
 	if (!any) {
+		s_ho.cached = -1; /* nothing to cut, for this view */
 		return 0;
 	}
 	if (!s_ho.tex) {
@@ -336,6 +378,7 @@ int XwaVrHudOcclusion_Prepare(AeronCommandBuffer* cmd, const AeronXrView views[2
 	sp.filter = AERON_BLIT2D_FILTER_LINEAR;
 	AeronDrawList_AddSprite(s_ho.list, &sp);
 	s_ho.ready = AeronDrawList_Prepare(s_ho.list, cmd);
+	s_ho.cached = s_ho.ready;
 	return s_ho.ready;
 }
 

@@ -50,9 +50,9 @@ void XwaVrControllers_Submit(AeronScene3D* scene, AeronCommandBuffer* cmd, const
 void XwaVrControllers_Idle(void);
 /* Hand 0 (left) / 1 (right). Returns 0 when it is not shown. */
 int XwaVrControllers_View(int hand, XwaVrControllerView* out);
-/* For the panels' cut-outs and the flight stick (as the gloves' ones):
+/* For the panels' grab zones and the flight stick (as the gloves' ones):
  * the body as capsules (the last one is the handle, where the palm is),
- * and a mesh in LOCAL space. */
+ * and a light mesh in LOCAL space (the hands' overlay masks). */
 int XwaVrControllers_Capsules(int hand, XwaVrGloveCapsule* out, int max_out);
 int XwaVrControllers_Mesh(int hand, const float** local_xyz, const float** local_normals, int* vertex_count,
 						  const uint16_t** indices, int* index_count);

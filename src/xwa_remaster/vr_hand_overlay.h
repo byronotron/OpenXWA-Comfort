@@ -20,17 +20,24 @@ extern "C" {
 #endif
 
 /* In flight the layers to come out in front of are the HUD's (cockpit
- * panels, the helmet HUD, the world HUD with the reticle), given here
- * before Prepare, in LOCAL space (position, orientation, size of each
- * quad). The hands stay behind a panel they reach through. Without this
- * call the menu screen and its frame are the layers. Used by one Prepare. */
+ * panels, the helmet HUD, the world HUD with the reticle), the lap console
+ * and the cards, given here before Prepare, in LOCAL space (position,
+ * orientation, size of each quad). The hands and the flight stick stay
+ * behind a panel they reach through. Without this call the menu screen
+ * and its frame are the layers. Used by one Prepare. */
 void XwaVrHandOverlay_SetLayers(const AeronXrPanel* quads, int count);
 
-/* After the gloves were submitted for this frame, with no pass open on
- * `cmd`: builds each eye's alpha mask (eye images w x h). Returns 1 when a
- * glove is in view of either eye over a layer (then the overlay is worth
- * showing). */
+/* After the gloves (or controllers) and the stick were submitted for this
+ * frame, with no pass open on `cmd`: builds each eye's alpha mask (eye
+ * images w x h; the right eye's is finished by Finish). Returns 1 when a
+ * hand or the stick is in view of either eye over a layer (then the
+ * overlay is worth showing). */
 int XwaVrHandOverlay_Prepare(AeronCommandBuffer* cmd, const AeronXrView views[2], int w, int h);
+
+/* Before the right eye is drawn, with no pass open on `cmd`: takes in its
+ * mask (filled on a worker thread while the left eye was drawn). Nothing
+ * to do when Prepare returned 0. */
+void XwaVrHandOverlay_Finish(AeronCommandBuffer* cmd);
 
 /* Eye `eye`'s alpha list, to draw into the eye image after its colour
  * (it writes only the alpha, inside Rect); NULL when there is none. */

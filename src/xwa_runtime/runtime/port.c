@@ -10,6 +10,7 @@
 #include "aeron/compat/dsound.h"
 #include "aeron/compat/host.h"
 #include "xwa/assets/file_io.h"
+#include "xwa/audio/music.h"
 #include "xwa/assets/linez.h"
 #include "xwa/assets/opt_model.h"
 #include "xwa/assets/sprite_resource.h"
@@ -434,15 +435,20 @@ int XwaPort_VrInMap(void) { return Aeron_XrIsPresenting() && XwaPort_VrMapOpen()
 
 /* Slow motion while the VR quick wheel is open: the sim through its frame
  * delta, single player only (multiplayer runs in lockstep). The sound
- * effects are pitched down only part of the way (a full 0.3 would be some
- * 21 semitones: rumble, not sound) and the music stays at speed, quieter. */
+ * effects are pitched down only part of the way (fully to 0.45 would be
+ * some 14 semitones: rumble, not sound), the radio voices not at all, and
+ * the music stays at speed, quieter (its streams topped up every frame). */
 void XwaPort_SetSimTimeScale(float scale) {
 	if (!(scale > 0.0f) || scale > 1.0f || g_flightPlayerCount > 1 || !XwaPort_VrInFlight()) {
 		scale = 1.0f;
 	}
 	Time_SetFrameDeltaScale(scale);
-	const float k = scale < 0.3f ? 1.0f : (1.0f - scale) / 0.7f; /* 0 normal .. 1 at 30 % */
+	float k = (1.0f - scale) / 0.55f; /* 0 normal .. 1 at 45 % */
+	k = k > 1.0f ? 1.0f : k;
 	DSoundCompat_SetTimeEffect(1.0f - 0.28f * k, 1.0f - 0.45f * k);
+	if (scale < 1.0f) {
+		Music_ServiceStreams();
+	}
 }
 
 /* The two-trigger chord is on offer: landing in a hangar (the game's

@@ -3,6 +3,8 @@
 #ifdef XWA_MODERN
 #include "aeron/sync.h"
 #include "aeron/time.h"
+
+#include <SDL3/SDL_thread.h>
 #endif
 
 #include <math.h>
@@ -288,6 +290,13 @@ static ImTimerCallbackFn g_imTimerCallback;
 
 static void ImTimerTrampoline(void* user) {
 	(void)user;
+	/* The music is mixed on this (timer) thread: keep it ahead of the busy
+	 * render thread, or the music runs dry and stutters. */
+	static int raised;
+	if (!raised) {
+		raised = 1;
+		SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_HIGH);
+	}
 	if (g_imTimerCallback) {
 		g_imTimerCallback(0, 0, 15, 0, 0);
 	}

@@ -240,7 +240,7 @@ typedef struct GlHand {
 	float tip_local[3];
 	XwaVrGloveCapsule capsules[24];
 	int capsule_count;
-	float* local;   /* skinned vertices in LOCAL space, xyz (for panel cut-outs) */
+	float* local;   /* skinned vertices in LOCAL space, xyz (for the hands' overlay masks) */
 	float* local_n; /* their normals in LOCAL space (unnormalized) */
 } GlHand;
 

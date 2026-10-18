@@ -34,9 +34,14 @@ void XwaVrStick_Update(void);
 void XwaVrStick_Submit(AeronScene3D* scene, AeronCommandBuffer* cmd, const float crows[9], const float cam_pos[3],
 					   float units);
 
-/* The stick's shape as capsules in LOCAL space (cut-outs in panels).
- * Returns the count (0 when not shown). */
+/* The stick's shape as capsules in LOCAL space (hands near it, the
+ * panels' grab zones). Returns the count (0 when not shown). */
 int XwaVrStick_Capsules(XwaVrGloveCapsule* out, int max_out);
+
+/* The stick as shown this frame, one mesh in LOCAL space (the hands'
+ * overlay over the HUD and panels). Returns 0 when not shown. */
+int XwaVrStick_Mesh(const float** local_xyz, const float** local_normals, int* vertex_count,
+					const uint16_t** indices, int* index_count);
 
 /* Once per host frame after rendering: releases the stick when it was not
  * updated (menus, external views). */

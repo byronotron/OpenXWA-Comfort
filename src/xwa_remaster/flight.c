@@ -4038,14 +4038,15 @@ static float s_xr_eye_gain_last = 1.0f; /* the menu environment's, for its frame
 static AeronDrawList2D* s_xr_eye_alpha; /* drawn into the next eye output (its alpha) */
 static AeronTexture* s_xr_bloom_last;   /* the bloom the last eye output computed */
 
-/* Hands in front of the HUD. The HUD panels, the helmet HUD and the world
- * HUD (reticle) are compositor layers over the eyes, so they covered the
- * gloves / controllers. As in the menus, the eye images are shown once
- * more over them (Aeron_XrStereoCommitEyeOverlayRect), only in the hands'
- * box, with an alpha that is 1 on the hands (vr_hand_overlay.c). The
- * layers are last frame's (they move only when grabbed). With direct
+/* Hands in front of the HUD and the panels. The HUD panels, the helmet HUD,
+ * the world HUD (reticle), the lap console and the cards are compositor
+ * layers over the eyes, so they covered the gloves / controllers. As in
+ * the menus, the eye images are shown once more over them
+ * (Aeron_XrStereoCommitEyeOverlayRect), only in the hands' box, with an
+ * alpha that is 1 on the hands and the flight stick (vr_hand_overlay.c).
+ * The layers are last frame's (they move only when grabbed). With direct
  * output the alpha is written at the end of each eye's forward pass. */
-static AeronXrPanel s_xr_hud_layers[AERON_XR_MAX_PANELS + 2];
+static AeronXrPanel s_xr_hud_layers[AERON_XR_MAX_PANELS + 8];
 static int s_xr_hud_layer_count;
 static int s_xr_hands_over;
 static int s_xr_hook_eye;
@@ -4060,6 +4061,76 @@ static void fl_xr_hands_alpha_hook(AeronCommandBuffer* cmd, AeronRenderPass* pas
 		if (list) {
 			AeronDrawList_RenderIntoPass(list, cmd, pass, s_xr_hook_target);
 		}
+	}
+}
+
+/* VR flight CPU profile: where the render thread's time goes, logged every
+ * 5 s next to aeron.xr's "perf" line (XWA_XR_CPU_PROFILE=0: off). */
+enum {
+	FL_PROF_SCENE,   /* snapshot to scene submissions, before the hands */
+	FL_PROF_HANDS,   /* gloves / controllers, flight stick */
+	FL_PROF_OVERLAY, /* the hands' masks */
+	FL_PROF_EYES,    /* the eyes' passes recorded (and their outputs) */
+	FL_PROF_HUD,     /* HUD panels, HUD targets, occlusion */
+	FL_PROF_PANELS,  /* lap console, cards (and the wheel) */
+	FL_PROF_LABELS,  /* controller labels, beams */
+	FL_PROF_COUNT
+};
+static struct {
+	double ms[FL_PROF_COUNT];
+	int frames, overlay_frames;
+	uint64_t window_ns, mark_ns;
+	int checked, on;
+} s_fl_prof;
+
+static int fl_prof_on(void) {
+	if (!s_fl_prof.checked) {
+		const char* env = getenv("XWA_XR_CPU_PROFILE");
+		s_fl_prof.on = !(env && env[0] == '0');
+		s_fl_prof.checked = 1;
+	}
+	return s_fl_prof.on;
+}
+
+static void fl_prof_start(void) {
+	if (fl_prof_on()) {
+		s_fl_prof.mark_ns = SDL_GetTicksNS();
+	}
+}
+
+/* Time since the last mark, to `section`. */
+static void fl_prof(int section) {
+	if (!fl_prof_on()) {
+		return;
+	}
+	const uint64_t now = SDL_GetTicksNS();
+	s_fl_prof.ms[section] += (double)(now - s_fl_prof.mark_ns) * 1e-6;
+	s_fl_prof.mark_ns = now;
+}
+
+static void fl_prof_frame_end(int overlay) {
+	if (!fl_prof_on()) {
+		return;
+	}
+	const uint64_t now = SDL_GetTicksNS();
+	s_fl_prof.frames++;
+	s_fl_prof.overlay_frames += overlay != 0;
+	if (!s_fl_prof.window_ns) {
+		s_fl_prof.window_ns = now;
+	}
+	if (now - s_fl_prof.window_ns >= 5000000000ull && s_fl_prof.frames > 0) {
+		const double n = (double)s_fl_prof.frames;
+		Aeron_LogInfo("xwa.remaster",
+					  "VR flight CPU (ms/frame): scene %.2f, hands %.2f, hand masks %.2f (%d%% of frames), eyes %.2f, "
+					  "HUD %.2f, panels %.2f, labels+beams %.2f",
+					  s_fl_prof.ms[FL_PROF_SCENE] / n, s_fl_prof.ms[FL_PROF_HANDS] / n,
+					  s_fl_prof.ms[FL_PROF_OVERLAY] / n, (int)(100.0 * s_fl_prof.overlay_frames / n),
+					  s_fl_prof.ms[FL_PROF_EYES] / n, s_fl_prof.ms[FL_PROF_HUD] / n, s_fl_prof.ms[FL_PROF_PANELS] / n,
+					  s_fl_prof.ms[FL_PROF_LABELS] / n);
+		memset(s_fl_prof.ms, 0, sizeof s_fl_prof.ms);
+		s_fl_prof.frames = 0;
+		s_fl_prof.overlay_frames = 0;
+		s_fl_prof.window_ns = now;
 	}
 }
 
@@ -4447,6 +4518,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	if (!cmd || !snap || !assets || !snap->flight_camera_valid) {
 		return NULL;
 	}
+	fl_prof_start();
 	const XwaFlightCamera* cam = &snap->flight_camera;
 	if (!fl_ensure(target_w, target_h)) {
 		return NULL;
@@ -5182,14 +5254,17 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	/* VR gloves: near-field like the cockpit, so inside its range (the
 	 * depth boost moves them with each eye). */
 	if (stereo) {
+		fl_prof(FL_PROF_SCENE);
 		const float vr_units = AERON_OPT_UNITS_PER_METER * fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f);
 		/* The flight stick first: its grab decides what the grips do. */
 		XwaVrStick_Update();
 		XwaVrGloves_Submit(s.scene, cmd, s.crows, flight_view.camera.pos, vr_units);
 		XwaVrStick_Submit(s.scene, cmd, s.crows, flight_view.camera.pos, vr_units);
+		fl_prof(FL_PROF_HANDS);
 		/* The hands' alpha for the overlay over the HUD layers. */
 		XwaVrHandOverlay_SetLayers(s_xr_hud_layers, s_xr_hud_layer_count);
 		s_xr_hands_over = XwaVrHandOverlay_Prepare(cmd, xr_frame.views, xr_frame.width, xr_frame.height);
+		fl_prof(FL_PROF_OVERLAY);
 	} else {
 		XwaVrGloves_Idle();
 		s_xr_hands_over = 0;
@@ -5256,6 +5331,8 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		s_xr_eye_alpha = s_xr_hands_over && !direct_used[0] ? XwaVrHandOverlay_List(0) : NULL;
 		const int left_out = direct_used[0] || fl_xr_output_eye(cmd, xr_frame.eye_targets[0], xr_frame.format, NULL);
 		s_xr_eye_alpha = NULL;
+		/* The right eye's hand mask, filled on a worker meanwhile. */
+		XwaVrHandOverlay_Finish(cmd);
 		s_xr_hook_eye = 1;
 		s_xr_hook_target = xr_frame.eye_targets[1];
 		render_ok = left_out &&
@@ -5295,6 +5372,9 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		s.present_bloom_tex = NULL; /* the right eye computes its own */
 		s.direct_ready = 0;
 		out = s.present_scene_tex;
+	}
+	if (stereo) {
+		fl_prof(FL_PROF_EYES); /* (the right eye's output is counted with the HUD) */
 	}
 	if (out && stereo) {
 		const int layout = fl_xr_hud_layout();
@@ -5380,11 +5460,17 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 				Aeron_XrStereoCommitEyeOverlayRect(rects);
 			}
 			/* Panel layers: drawn only when they change, shown while in view. */
+			fl_prof(FL_PROF_HUD);
+			/* (and they are layers the hands come out in front of next frame) */
+			const int max_layers = (int)(sizeof s_xr_hud_layers / sizeof s_xr_hud_layers[0]);
 			if (xr_frame.console_width > 0) {
 				AeronXrPanel console[2];
 				const int n = XwaVrConsole_Frame(cmd, xr_frame.console_width, xr_frame.console_height,
 												 xr_frame.views, console);
 				Aeron_XrStereoCommitPanelLayer(AERON_XR_PANEL_CONSOLE, console, n);
+				if (n > 0 && s_xr_hud_layer_count < max_layers) {
+					s_xr_hud_layers[s_xr_hud_layer_count++] = console[0];
+				}
 			}
 			if (xr_frame.card_width > 0) {
 				for (int card = 0; card < 2; ++card) {
@@ -5392,8 +5478,12 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 					const int n = XwaVrConsole_CardFrame(cmd, card, xr_frame.card_width, xr_frame.card_height,
 														 xr_frame.views, quads);
 					Aeron_XrStereoCommitPanelLayer(card ? AERON_XR_PANEL_CARD2 : AERON_XR_PANEL_CARD, quads, n);
+					if (n > 0 && s_xr_hud_layer_count < max_layers) {
+						s_xr_hud_layers[s_xr_hud_layer_count++] = quads[0];
+					}
 				}
 			}
+			fl_prof(FL_PROF_PANELS);
 			/* Labels beside the controllers the player looks at. */
 			{
 				AeronXrPanel labels[2];
@@ -5417,7 +5507,9 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 					Aeron_XrStereoCommitBeams(beams, beam_count);
 				}
 			}
+			fl_prof(FL_PROF_LABELS);
 		}
+		fl_prof_frame_end(s_xr_hands_over);
 	}
 	return out;
 }
@@ -5624,6 +5716,7 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 	int ok = 1;
 	for (int e = 0; e < 2 && ok; ++e) {
 		if (e == 1) {
+			XwaVrHandOverlay_Finish(cmd); /* the right eye's hand mask */
 			ok = AeronScene_SetCamera(s.scene, &eyes[1]);
 			if (!ok) {
 				break;

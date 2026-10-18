@@ -22,6 +22,7 @@
 #include "xwa_runtime/timing/modern_flight_timing.h"
 
 #include <SDL3/SDL_hints.h>
+#include <SDL3/SDL_timer.h>
 #include <dlfcn.h>
 #include <math.h>
 #include <stdio.h>
@@ -416,7 +417,7 @@ static void android_load_settings(void) {
 				  "#XWA_XR_CONSOLE_POSE=\n"
 				  "# Quick wheel: hold the left grip, point, pull the left trigger (0 = off):\n"
 				  "#XWA_XR_WHEEL=1\n"
-				  "# The game runs at 30 % speed while the wheel is open (0 = off):\n"
+				  "# The game runs at 45 % speed while the wheel is open (0 = off):\n"
 				  "#XWA_XR_WHEEL_SLOWMO=1\n"
 				  "# Controls reference card on your right at mission start (0 = off):\n"
 				  "#XWA_XR_BUTTON_CARD=1\n"
@@ -771,6 +772,13 @@ static void apply_quest_render_profile(XwaHostConfig* host) {
 				  SDL_getenv("XWA_POINT_LIGHTS"));
 }
 
+/* Host frame CPU split for the VR log (see the main loop). */
+static struct {
+	double tick_ms, remaster_ms;
+	int frames;
+	uint64_t window_ns;
+} s_frame_prof;
+
 int main(int argc, char** argv) {
 	AeronConfig config;
 	XwaHostConfig host_config;
@@ -1014,8 +1022,8 @@ int main(int argc, char** argv) {
 				}
 				/* Voice commands (push-to-talk on the thumb rests). */
 				XwaVrVoice_Update();
-				/* Slow motion (30 %) while the quick wheel is open, eased in
-				 * and out; the game decides where it applies. */
+				/* Slow motion (45 % speed) while the quick wheel is open, eased
+				 * in and out; the game decides where it applies. */
 				{
 					static float slow;
 					const char* slow_env = SDL_getenv("XWA_XR_WHEEL_SLOWMO");
@@ -1024,9 +1032,11 @@ int main(int argc, char** argv) {
 					const int want = XwaVrConsole_WheelOpen() && slow_on;
 					slow = want ? fminf(1.0f, slow + dt / 0.15f) : fmaxf(0.0f, slow - dt / 0.25f);
 					const float k = slow * slow * (3.0f - 2.0f * slow);
-					XwaPort_SetSimTimeScale(1.0f - 0.7f * k);
+					XwaPort_SetSimTimeScale(1.0f - 0.55f * k);
 				}
+				const uint64_t tick_t0 = SDL_GetTicksNS();
 				XwaPort_Tick(delta_us);
+				s_frame_prof.tick_ms += (double)(SDL_GetTicksNS() - tick_t0) * 1e-6;
 			}
 			{
 				XwaVrConsoleState console_state;
@@ -1036,7 +1046,28 @@ int main(int argc, char** argv) {
 			if (Aeron_QuitRequested() || XwaPort_ShouldQuit()) {
 				break;
 			}
+			const uint64_t remaster_t0 = SDL_GetTicksNS();
 			XwaRemaster_Frame(delta_us);
+			{
+				/* VR: the game's tick and the renderer's frame, every 5 s
+				 * (XWA_XR_CPU_PROFILE=0: off). */
+				const uint64_t now = SDL_GetTicksNS();
+				s_frame_prof.remaster_ms += (double)(now - remaster_t0) * 1e-6;
+				s_frame_prof.frames++;
+				if (!s_frame_prof.window_ns) {
+					s_frame_prof.window_ns = now;
+				}
+				if (now - s_frame_prof.window_ns >= 5000000000ull) {
+					const char* env = SDL_getenv("XWA_XR_CPU_PROFILE");
+					if (Aeron_XrIsPresenting() && !(env && env[0] == '0') && s_frame_prof.frames > 0) {
+						Aeron_LogInfo("xwa", "VR frame CPU (ms/frame): game tick %.2f, renderer %.2f",
+									  s_frame_prof.tick_ms / s_frame_prof.frames,
+									  s_frame_prof.remaster_ms / s_frame_prof.frames);
+					}
+					memset(&s_frame_prof, 0, sizeof s_frame_prof);
+					s_frame_prof.window_ns = now;
+				}
+			}
 			XwaVrConsole_EndFrame();
 			XwaVrStick_EndFrame();
 			{

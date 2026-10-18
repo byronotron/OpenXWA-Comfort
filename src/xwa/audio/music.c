@@ -303,6 +303,16 @@ void Music_ResumeIfInitialized(void) {
 	}
 }
 
+#ifdef XWA_MODERN
+/* OpenXWA: tops up the music streams only (the VR slow motion calls it
+ * every host frame, whether or not the sim stepped). */
+void Music_ServiceStreams(void) {
+	if (g_musicInitialized) {
+		ImProcessStreams();
+	}
+}
+#endif
+
 // FUNCTION: XWA 0x49ADE0
 void Music_Update(void) {
 	int result;

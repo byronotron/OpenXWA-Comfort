@@ -63,6 +63,9 @@ void Music_Stop(void);
 void Music_PauseIfInitialized(void);
 void Music_ResumeIfInitialized(void);
 void Music_Update(void);
+#ifdef XWA_MODERN
+void Music_ServiceStreams(void);
+#endif
 
 #ifdef __cplusplus
 }

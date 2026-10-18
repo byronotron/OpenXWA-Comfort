@@ -1097,6 +1097,11 @@ uint8_t Sound_PlayEffectNow(int soundId, int param2, int loop, int priority, int
 			frequency = fmt.nSamplesPerSec;
 		}
 		DebugPrintfChannel(1, "Setting initial pitch to %d.\n", fmt.nSamplesPerSec);
+#ifdef XWA_MODERN
+		/* The radio voice plays as recorded through the VR slow motion. */
+		DSoundCompat_SetBufferTimeExempt(outBuffer, g_fsfxCurrentVoiceSfxSlot != 0 &&
+														soundId == g_sfxIds[g_fsfxCurrentVoiceSfxSlot]);
+#endif
 		outBuffer->lpVtbl->SetFrequency(outBuffer, frequency);
 	}
 	outBuffer->lpVtbl->SetCurrentPosition(outBuffer, 0);

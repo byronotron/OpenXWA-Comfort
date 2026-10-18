@@ -28,10 +28,10 @@ void XwaVrConsole_BeginFrame(float dt_seconds);
 void XwaVrConsole_SetState(const XwaVrConsoleState* state);
 
 /* Handles the hands and, when the console changed, redraws its panel layer
- * (AERON_XR_PANEL_CONSOLE; width x height = one panel). Fills `out` with
- * its quads (one, or one per eye while a hand is over it) and returns their
- * count for Aeron_XrStereoCommitPanelLayer: 0 when it is not shown or out
- * of view. `views` are the stereo frame's eye views. */
+ * (AERON_XR_PANEL_CONSOLE; width x height). Fills out[0] with its quad
+ * (one image for both eyes) and returns the count for
+ * Aeron_XrStereoCommitPanelLayer: 0 when it is not shown or out of view.
+ * `views` are the stereo frame's eye views. */
 int XwaVrConsole_Frame(AeronCommandBuffer* cmd, int width, int height, const AeronXrView views[2],
 					   AeronXrPanel out[2]);
 
@@ -44,7 +44,7 @@ int XwaVrConsole_Frame(AeronCommandBuffer* cmd, int width, int height, const Aer
  * (Space); each opens its commands round BACK. Drawn on the voice card's
  * layer by CardFrame(1); the console and both cards are hidden while it
  * is open, and its picks come out of PollAction like the console's.
- * While it is open the game runs in slow motion (XWA_XR_WHEEL_SLOWMO=0
+ * While it is open the game runs at 45 % speed (XWA_XR_WHEEL_SLOWMO=0
  * turns that off; main.c eases the speed through XwaPort_SetSimTimeScale). */
 int XwaVrConsole_WheelOpen(void);
 
