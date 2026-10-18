@@ -7,20 +7,19 @@
 #include <string.h>
 
 /* VR controller buttons in flight, one action each (the left grip opens the
- * quick wheel, src/xwa_remaster/vr_quick_wheel.c; there is no shifted layer
- * any more). Left-handed controls swap the controllers under these
- * (Aeron_XrLeftHanded), so the table stays as it is. Fire,
- * target-in-sights (right grip), steering, roll and the throttle lever stay
- * on the virtual gamepad. */
+ * radial menu, the quick wheel in vr_lap_console.c; there is no shifted
+ * layer). Left-handed controls swap the controllers under these
+ * (Aeron_XrLeftHanded), so the table stays as it is. Fire, steering, roll
+ * and the throttle lever stay on the virtual gamepad. */
 static const XwaVrButtonBinding k_bindings[AERON_XR_BUTTON_COUNT] = {
-	[AERON_XR_BUTTON_A]            = { KEY_R, KEY_NONE },
-	[AERON_XR_BUTTON_B]            = { KEY_T, KEY_NONE },
-	[AERON_XR_BUTTON_X]            = { KEY_C, KEY_NONE },
-	[AERON_XR_BUTTON_Y]            = { KEY_ENTER, KEY_NONE },
-	[AERON_XR_BUTTON_LEFT_TRIGGER] = { KEY_W, KEY_NONE },
-	[AERON_XR_BUTTON_LEFT_STICK]   = { KEY_X, KEY_NONE },
-	[AERON_XR_BUTTON_RIGHT_STICK]  = { KEY_E, KEY_NONE },
-	[AERON_XR_BUTTON_RIGHT_GRIP]   = { KEY_NONE, KEY_NONE },
+	[AERON_XR_BUTTON_A]            = { KEY_T, KEY_NONE },     /* next target */
+	[AERON_XR_BUTTON_B]            = { KEY_Y, KEY_NONE },     /* previous target */
+	[AERON_XR_BUTTON_X]            = { KEY_R, KEY_NONE },     /* closest enemy */
+	[AERON_XR_BUTTON_Y]            = { KEY_E, KEY_NONE },     /* my attacker */
+	[AERON_XR_BUTTON_LEFT_TRIGGER] = { KEY_W, KEY_NONE },     /* change weapon */
+	[AERON_XR_BUTTON_LEFT_STICK]   = { KEY_X, KEY_NONE },     /* link weapons */
+	[AERON_XR_BUTTON_RIGHT_STICK]  = { KEY_ALT_1, KEY_NONE }, /* target in sights */
+	[AERON_XR_BUTTON_RIGHT_GRIP]   = { KEY_C, KEY_NONE },     /* countermeasures */
 };
 
 /* The lap console's buttons (and the voice commands, which use them) that
@@ -169,6 +168,8 @@ const char* XwaVrButtons_KeyName(uint16_t key) {
 		snprintf(name, sizeof name, "%c", (char)toupper(key));
 	} else if (key >= 'A' && key <= 'Z') {
 		snprintf(name, sizeof name, "Shift+%c", (char)key);
+	} else if (key >= KEY_ALT_1 && key <= KEY_ALT_3) {
+		snprintf(name, sizeof name, "Alt+%d", key - KEY_ALT_1 + 1);
 	} else if (key >= 0x80 && key < 0x80 + 26) {
 		snprintf(name, sizeof name, "Alt+%c", (char)('A' + (key - 0x80)));
 	} else if (key >= KEY_F1 && key <= KEY_F12) {
@@ -186,7 +187,7 @@ const char* XwaVrButtons_KeyName(uint16_t key) {
 const char* XwaVrButtons_KeyAction(uint16_t key) {
 	switch (key) {
 		case KEY_R:
-			return "nearest enemy";
+			return "target closest enemy";
 		case KEY_O:
 			return "nearest objective";
 		case KEY_T:
@@ -194,7 +195,9 @@ const char* XwaVrButtons_KeyAction(uint16_t key) {
 		case KEY_Y:
 			return "previous target";
 		case KEY_C:
-			return "countermeasure";
+			return "countermeasures";
+		case KEY_ALT_1:
+			return "target in sights";
 		case KEY_SPACE:
 			return "confirm";
 		case KEY_ENTER:
@@ -202,15 +205,15 @@ const char* XwaVrButtons_KeyAction(uint16_t key) {
 		case KEY_SHIFT_P:
 			return "pick up";
 		case KEY_W:
-			return "cycle warheads";
+			return "change weapon";
 		case KEY_SHIFT_D:
 			return "dock / board";
 		case KEY_X:
-			return "fire link";
+			return "link weapons";
 		case KEY_SHIFT_R:
 			return "release";
 		case KEY_E:
-			return "my attacker";
+			return "target my attacker";
 		case KEY_A:
 			return "my target's attacker";
 		case KEY_I:

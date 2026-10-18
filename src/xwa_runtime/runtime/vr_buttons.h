@@ -50,8 +50,8 @@ const XwaVrButtonBinding* XwaVrButtons_Binding(AeronXrButton button);
 #define XWA_VR_CHORD_LABEL "both triggers"
 /* The left menu button: pause. */
 #define XWA_VR_PAUSE_LABEL "menu button"
-/* The right grip on its own: target what is in the sights. */
-#define XWA_VR_RIGHT_GRIP_ACTION "Target in sights"
+/* The right grip on its own: countermeasures (its binding above, C). */
+#define XWA_VR_RIGHT_GRIP_ACTION "Countermeasures"
 
 /* The lap console's (and voice commands') game key for `action`;
  * KEY_NONE for the ones that are not a single key. */

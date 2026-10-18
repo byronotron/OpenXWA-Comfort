@@ -167,10 +167,27 @@ static int Config_CheckpointRowCount(void) {
 static int s_configMissionHintsRow;
 #endif
 
-/* A main menu row as the original numbers it. (VR has every row too: the
- * performance presets and the original video options set the game's own
- * details, such as debris, which the VR renderer shows.) */
-static int Config_MainRow(int row) { return row; }
+#ifdef XWA_MODERN
+/* VR: the main menu starts with "VR Options" and "Restore VR Defaults" and
+ * has no Performance Tuning or Game Controller rows (the presets and the
+ * original controller screens are not for VR). */
+static int Config_MainMenuVr(void) { return XwaModernVrOptions_Available(); }
+static int s_configRestoreVrConfirmPending;
+#endif
+
+/* A main menu row as the original numbers it, to where it is now. */
+static int Config_MainRow(int row) {
+#ifdef XWA_MODERN
+	if (Config_MainMenuVr()) {
+		/* 0 General, 2 Video, 3 Sound follow the two VR rows; 1 Performance
+		 * and 4 Game Controller are gone (on General if asked); from 5 on
+		 * the rows stay where they were. */
+		static const int k_vr_rows[5] = { 2, 2, 3, 4, 2 };
+		return row >= 0 && row < 5 ? k_vr_rows[row] : row;
+	}
+#endif
+	return row;
+}
 
 // FUNCTION: XWA 0x51D3D0
 int Config_MainMenuScreen(void) {
@@ -193,6 +210,17 @@ int Config_MainMenuScreen(void) {
 #endif
 
 #ifdef XWA_MODERN
+	if (s_configRestoreVrConfirmPending) {
+		int confirmResult;
+
+		if (!FrontendDialog_TakeConfirmDialogResult(&confirmResult)) {
+			return 0;
+		}
+		s_configRestoreVrConfirmPending = 0;
+		if (confirmResult) {
+			XwaModernVrOptions_RestoreDefaults();
+		}
+	}
 	if (g_configExitConfirmPending) {
 		int confirmResult;
 
@@ -254,6 +282,52 @@ int Config_MainMenuScreen(void) {
 #endif
 
 	rowIndex = 0;
+#ifdef XWA_MODERN
+	if (Config_MainMenuVr()) {
+		text = "VR Options";
+		titleWidth = FrontendText_MeasureWidth(text, 20);
+		textX = g_configMenuCenterX - (int)(titleWidth >> 1);
+		buttonPressed = FrontendButton_DrawMenuButton(textX, y, text, 20, g_colorPaleBlue, 37, 0, "settingsound");
+		if (g_menuCursorRow == rowIndex) {
+			FrontendText_Draw(20, text, textX, y, g_colorGreen);
+			if (keyState == CONFIG_KEY_ENTER) {
+				FrontendSound_PlayUISound("settingsound", 1, 0, 255, 12 * g_gameConfig.sfxDatapadVolume, 63);
+				Keyboard_FlushCharBuffer();
+				keyState = 0;
+				buttonPressed = 1;
+			}
+		}
+		if (buttonPressed) {
+			g_pendingMenuScreen = 23;
+			g_menuCursorRow = 0;
+		}
+		y += 25;
+		++rowIndex;
+
+		text = "Restore VR Defaults";
+		titleWidth = FrontendText_MeasureWidth(text, 20);
+		textX = g_configMenuCenterX - (int)(titleWidth >> 1);
+		buttonPressed = FrontendButton_DrawMenuButton(textX, y, text, 20, g_colorPaleBlue, 38, 0, "settingsound");
+		if (g_menuCursorRow == rowIndex) {
+			FrontendText_Draw(20, text, textX, y, g_colorGreen);
+			if (keyState == CONFIG_KEY_ENTER) {
+				FrontendSound_PlayUISound("settingsound", 1, 0, 255, 12 * g_gameConfig.sfxDatapadVolume, 63);
+				Keyboard_FlushCharBuffer();
+				keyState = 0;
+				buttonPressed = 1;
+			}
+		}
+		if (buttonPressed &&
+			FrontendDialog_BeginConfirmDialog("Restore the recommended VR settings?",
+											  "All VR options, the HUD panel, lap console and flight stick",
+											  "positions are replaced. Some apply after a restart.",
+											  FrontendString_Get(STR_OKAY), FrontendString_Get(STR_CANCEL))) {
+			s_configRestoreVrConfirmPending = 1;
+		}
+		y += 25;
+		++rowIndex;
+	}
+#endif
 	text = FrontendString_Get(STR_CONFIG_GENERAL_OPTIONS);
 	titleWidth = FrontendText_MeasureWidth(text, 20);
 	textX = g_configMenuCenterX - (int)(titleWidth >> 1);
@@ -275,6 +349,9 @@ int Config_MainMenuScreen(void) {
 
 	y += 25;
 	++rowIndex;
+#ifdef XWA_MODERN
+	if (!Config_MainMenuVr()) {
+#endif
 	text = FrontendString_Get(STR_CONFIG_PERFORMANCE_OPTIONS);
 	titleWidth = FrontendText_MeasureWidth(text, 20);
 	textX = g_configMenuCenterX - (int)(titleWidth >> 1);
@@ -295,6 +372,9 @@ int Config_MainMenuScreen(void) {
 
 	y += 25;
 	++rowIndex;
+#ifdef XWA_MODERN
+	}
+#endif
 	text = FrontendString_Get(STR_CONFIG_VIDEO_OPTIONS);
 	titleWidth = FrontendText_MeasureWidth(text, 20);
 	textX = g_configMenuCenterX - (int)(titleWidth >> 1);
@@ -335,6 +415,9 @@ int Config_MainMenuScreen(void) {
 
 	y += 25;
 	++rowIndex;
+#ifdef XWA_MODERN
+	if (!Config_MainMenuVr()) {
+#endif
 	text = FrontendString_Get(STR_CONFIG_GAME_CONTROLLER_OPTIONS);
 	titleWidth = FrontendText_MeasureWidth(text, 20);
 	textX = g_configMenuCenterX - (int)(titleWidth >> 1);
@@ -355,6 +438,9 @@ int Config_MainMenuScreen(void) {
 
 	y += 25;
 	++rowIndex;
+#ifdef XWA_MODERN
+	}
+#endif
 	if (!g_configRestrictedOptionsModalActive) {
 		text = FrontendString_Get(STR_CONFIG_NETWORK_OPTIONS);
 		titleWidth = FrontendText_MeasureWidth(text, 20);
@@ -767,7 +853,7 @@ int Config_GeneralOptionsScreen(void) {
 	}
 	if (buttonPressed) {
 		g_pendingMenuScreen = 0;
-		g_menuCursorRow = 0;
+		g_menuCursorRow = Config_MainRow(0);
 	}
 
 	if (restoreDefaults) {
@@ -2155,7 +2241,7 @@ int Config_CreditsScreen(void) {
 			}
 
 			g_pendingMenuScreen = 0;
-			g_menuCursorRow = 0;
+			g_menuCursorRow = Config_MainRow(6);
 			if (!g_configRestrictedOptionsModalActive && g_gameConfig.datapadMusicEnabled) {
 				Music_PauseIfInitialized();
 			}
@@ -2671,14 +2757,14 @@ int Config_OptionsDatapadUpdate(int frameState) {
 		case 18:
 			if (XwaModernVideoOptionsScreen_Update(g_configMenuCenterX, &g_menuCursorRow)) {
 				g_pendingMenuScreen = 2;
-				g_menuCursorRow = XwaModernVrOptions_Available() ? 1 : 0;
+				g_menuCursorRow = 0;
 			}
 			done = 0;
 			break;
 		case 23:
 			if (XwaModernVrOptionsScreen_Update(g_configMenuCenterX, &g_menuCursorRow)) {
-				g_pendingMenuScreen = 2;
-				g_menuCursorRow = 0;
+				g_pendingMenuScreen = 0;
+				g_menuCursorRow = 0; /* on "VR Options" */
 			}
 			done = 0;
 			break;
@@ -3988,9 +4074,8 @@ int Config_VideoOptionsMenu(void) {
 	unsigned int titleWidth;
 	FrontendRect rect;
 #ifdef XWA_MODERN
-	/* VR: "OpenXWA VR Options" is the first row; the rest move down one. */
-	const int vr = XwaModernVrOptions_Available() ? 1 : 0;
-	const int rows = vr ? 5 : 4;
+	/* (VR Options is on the main menu.) */
+	const int rows = 4;
 #endif
 
 	keyState = (char)Config_GetMenuNavKey();
@@ -4025,34 +4110,13 @@ int Config_VideoOptionsMenu(void) {
 	FrontendDraw_Line(titleX, 195, titleX + (int)titleWidth, 195, g_colorLightBlue);
 
 #ifdef XWA_MODERN
-	if (vr) {
-		text = "OpenXWA VR Options";
-		titleWidth = FrontendText_MeasureWidth(text, 20);
-		textX = g_configMenuCenterX - (int)(titleWidth >> 1);
-		buttonPressed =
-			FrontendButton_DrawMenuButton(textX, 203, text, 20, g_colorPaleBlue, 25, 0, "settingsound");
-		if (g_menuCursorRow == 0) {
-			FrontendText_Draw(20, text, textX, 203, g_colorGreen);
-			if (keyState == CONFIG_KEY_ENTER) {
-				FrontendSound_PlayUISound("settingsound", 1, 0, 255, 12 * g_gameConfig.sfxDatapadVolume, 63);
-				Keyboard_FlushCharBuffer();
-				keyState = 0;
-				buttonPressed |= 1;
-			}
-		}
-		if (buttonPressed) {
-			g_pendingMenuScreen = 23;
-			g_menuCursorRow = 0;
-		}
-	}
-
 	text = "OpenXWA Video Options";
 	titleWidth = FrontendText_MeasureWidth(text, 20);
 	textX = g_configMenuCenterX - (int)(titleWidth >> 1);
 	buttonPressed =
-		FrontendButton_DrawMenuButton(textX, 203 + 25 * vr, text, 20, g_colorPaleBlue, 20, 0, "settingsound");
-	if (g_menuCursorRow == vr) {
-		FrontendText_Draw(20, text, textX, 203 + 25 * vr, g_colorGreen);
+		FrontendButton_DrawMenuButton(textX, 203, text, 20, g_colorPaleBlue, 20, 0, "settingsound");
+	if (g_menuCursorRow == 0) {
+		FrontendText_Draw(20, text, textX, 203, g_colorGreen);
 		if (keyState == CONFIG_KEY_ENTER) {
 			FrontendSound_PlayUISound("settingsound", 1, 0, 255, 12 * g_gameConfig.sfxDatapadVolume, 63);
 			Keyboard_FlushCharBuffer();
@@ -4071,9 +4135,9 @@ int Config_VideoOptionsMenu(void) {
 	textX = g_configMenuCenterX - (int)(titleWidth >> 1);
 #ifdef XWA_MODERN
 	buttonPressed =
-		FrontendButton_DrawMenuButton(textX, 228 + 25 * vr, text, 20, g_colorPaleBlue, 21, 0, "settingsound");
-	if (g_menuCursorRow == 1 + vr) {
-		FrontendText_Draw(20, text, textX, 228 + 25 * vr, g_colorGreen);
+		FrontendButton_DrawMenuButton(textX, 228, text, 20, g_colorPaleBlue, 21, 0, "settingsound");
+	if (g_menuCursorRow == 1) {
+		FrontendText_Draw(20, text, textX, 228, g_colorGreen);
 #else
 	buttonPressed =
 		FrontendButton_DrawMenuButton(textX, 203, text, 20, g_colorPaleBlue, 20, 0, "settingsound");
@@ -4097,9 +4161,9 @@ int Config_VideoOptionsMenu(void) {
 	textX = g_configMenuCenterX - (int)(titleWidth >> 1);
 #ifdef XWA_MODERN
 	buttonPressed =
-		FrontendButton_DrawMenuButton(textX, 253 + 25 * vr, text, 20, g_colorPaleBlue, 22, 0, "settingsound");
-	if (g_menuCursorRow == 2 + vr) {
-		FrontendText_Draw(20, text, textX, 253 + 25 * vr, g_colorGreen);
+		FrontendButton_DrawMenuButton(textX, 253, text, 20, g_colorPaleBlue, 22, 0, "settingsound");
+	if (g_menuCursorRow == 2) {
+		FrontendText_Draw(20, text, textX, 253, g_colorGreen);
 #else
 	buttonPressed =
 		FrontendButton_DrawMenuButton(textX, 228, text, 20, g_colorPaleBlue, 21, 0, "settingsound");
@@ -4123,9 +4187,9 @@ int Config_VideoOptionsMenu(void) {
 	titleWidth = FrontendText_MeasureWidth(text, 20);
 	textX = g_configMenuCenterX - (int)(titleWidth >> 1);
 	buttonPressed =
-		FrontendButton_DrawMenuButton(textX, 278 + 25 * vr, text, 20, g_colorPaleBlue, 24, 0, "settingsound");
+		FrontendButton_DrawMenuButton(textX, 278, text, 20, g_colorPaleBlue, 24, 0, "settingsound");
 	if (g_menuCursorRow == rows - 1) {
-		FrontendText_Draw(20, text, textX, 278 + 25 * vr, g_colorGreen);
+		FrontendText_Draw(20, text, textX, 278, g_colorGreen);
 		if (keyState == CONFIG_KEY_ENTER) {
 			FrontendSound_PlayUISound("settingsound", 1, 0, 255, 12 * g_gameConfig.sfxDatapadVolume, 63);
 			Keyboard_FlushCharBuffer();

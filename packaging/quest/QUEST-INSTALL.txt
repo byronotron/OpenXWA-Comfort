@@ -1,9 +1,8 @@
-OpenXWA for Meta Quest 3 (standalone) - test build 0.0.17-quest1
-================================================================
+OpenXWA for Meta Quest 3 (standalone) - 1.0.0 release candidate 1
+==================================================================
 
-This is an UNTESTED first build: it was compiled and checked on a build server
-with no Quest. Expect problems on first launch. The log file (step 6) is
-what's needed to fix them.
+This is a release candidate. If something goes wrong, the log file (step 6)
+is what's needed to fix it.
 
 What you need
   * Quest 3 / 3S (Quest 2 and Pro may also work) in Developer Mode
@@ -41,8 +40,12 @@ What you need
    name: a keyboard appears on the virtual screen, type with the laser
    pointer and press Enter. Controls are the same as the PC VR build:
      right stick = pitch/yaw, left stick X = roll, left stick Y = throttle lever,
-     right trigger = fire, right grip = target in sights, A/B/X/Y = buttons,
-     left menu button = Esc. In menus the right controller is a laser pointer.
+     right trigger = fire, right stick click = target in sights,
+     right grip = countermeasures, A = next target, B = previous target,
+     X = target closest enemy, Y = target my attacker,
+     left trigger = change weapon, left stick click = link weapons,
+     left grip (hold) = radial menu, left menu button = Esc.
+     In menus the right controller is a laser pointer.
    Taking the headset off or opening the Meta menu pauses the game.
    Hold the Meta button to recenter.
 

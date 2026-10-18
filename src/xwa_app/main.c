@@ -250,13 +250,25 @@ static int resolve_game_data(const XwaLaunchOptions* launch, const XwaHostConfig
 		if (!ok && use_ingame_setup()) {
 			char detail[512];
 			snprintf(detail, sizeof detail, "%s", error);
+			/* The install guide, in the headset: the first thing a new player
+			 * sees (packaging/quest/QUEST-INSTALL.txt step 3 says the same). */
 			snprintf(error, error_size,
-					 "The original X-Wing Alliance game files were not found (%s).\n\n"
-					 "Copy the contents of your installed game folder (GOG or Steam) to:\n%s\n\n"
-					 "From a PC with the headset connected by USB:\n"
-					 "adb push \"<XWA folder>/.\" %s\n\n"
-					 "Then choose Try Again.",
-					 detail, launch->game_data_path, launch->game_data_path);
+					 "OpenXWA needs the files of your own X-Wing Alliance (GOG or Steam, about 1 GB).\n"
+					 "Copy everything inside your installed game folder into this folder on the headset:\n"
+					 "%s\n\n"
+					 "1. On the PC, find the game folder: the one with RESDATA.TXT, FLIGHTMODELS and MISSIONS,\n"
+					 "    e.g. C:\\GOG Games\\Star Wars - X-Wing Alliance\n"
+					 "2. Connect the headset to the PC with a USB-C cable and allow USB debugging in the headset.\n"
+					 "3. Copy the files, either way:\n"
+					 "    - adb, in PowerShell:  adb push \"<game folder>\\.\" %s\n"
+					 "      (get adb with: winget install Google.PlatformTools; SideQuest and Meta Quest\n"
+					 "      Developer Hub bring it too)\n"
+					 "    - SideQuest: its file browser, into Android/data/org.openxwa.quest/files/XWA\n"
+					 "    Windows Explorer usually can't see Android/data on the headset: use adb or SideQuest.\n"
+					 "4. RESDATA.TXT must end up directly in .../files/XWA, not in a subfolder.\n"
+					 "5. Choose Try Again below.\n\n"
+					 "Missing now: %s",
+					 launch->game_data_path, launch->game_data_path, detail);
 		}
 		return ok;
 	}
@@ -324,6 +336,10 @@ static int resolve_game_data(const XwaLaunchOptions* launch, const XwaHostConfig
  * The folder is created on first launch so it shows up for copying. */
 /* Quest settings file: KEY=VALUE lines applied as environment variables
  * before startup (the headset has no way to set them otherwise). */
+/* Set when openxwa-quest.cfg did not exist yet (a fresh install): the
+ * recommended VR settings are then written into it (main). */
+static int s_android_fresh_settings;
+
 static void android_load_settings(void) {
 	const char* external = SDL_GetAndroidExternalStoragePath();
 	char path[1024];
@@ -349,6 +365,7 @@ static void android_load_settings(void) {
 	f = fopen(path, "r");
 	if (!f) {
 		f = fopen(path, "w");
+		s_android_fresh_settings = f != NULL;
 		if (f) {
 			fputs("# OpenXWA Quest settings. Remove the leading '#' to change a value.\n"
 				  "# Headset class, picked from the GPU (low: Quest 2, Pico 4; mid: Quest 3,\n"
@@ -415,7 +432,7 @@ static void android_load_settings(void) {
 				  "#XWA_XR_CONSOLE_DISTANCE=0.52\n"
 				  "# Where you put it with the grip handles (Reset in the VR options):\n"
 				  "#XWA_XR_CONSOLE_POSE=\n"
-				  "# Quick wheel: hold the left grip, point, pull the left trigger (0 = off):\n"
+				  "# Radial menu: hold the left grip, point, pull the left trigger (0 = off):\n"
 				  "#XWA_XR_WHEEL=1\n"
 				  "# The game runs at 45 % speed while the wheel is open (0 = off):\n"
 				  "#XWA_XR_WHEEL_SLOWMO=1\n"
@@ -784,7 +801,7 @@ int main(int argc, char** argv) {
 	XwaHostConfig host_config;
 	XwaLaunchOptions launch;
 	char selected_game_data[XWA_HOST_CONFIG_PATH_CAPACITY];
-	char config_error[1024];
+	char config_error[2048]; /* also the install guide (resolve_game_data) */
 	XwaModernWindowMode initial_window_mode;
 	int exit_code;
 	int setup_cancelled;
@@ -795,6 +812,11 @@ int main(int argc, char** argv) {
 	}
 #if defined(SDL_PLATFORM_ANDROID)
 	android_load_settings();
+	if (s_android_fresh_settings) {
+		/* A fresh install starts from the recommended VR settings (what
+		 * "Restore VR Defaults" sets); the headset tier fills in the rest. */
+		XwaModernVrOptions_RestoreDefaults();
+	}
 	android_xr_defaults();
 #endif
 	memset(&config, 0, sizeof(config));

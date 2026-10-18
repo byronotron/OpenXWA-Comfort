@@ -597,6 +597,10 @@ static void gl_instance(AeronScene3D* scene, const AeronSceneMesh* mesh, const G
 	inst.zero_velocity = 1;
 	inst.draw_first = 1; /* hides cockpit: drawn first, the cockpit behind it is not shaded */
 	inst.no_local_lights = 1;
+	/* Never in the bloom: with one bloom for both eyes it would glow beside
+	 * them in the right eye (doubled), so they stay just below the bloom
+	 * threshold (as the cockpit does, flight.c fl_xr_cockpit_bloom_cap). */
+	inst.base_color_emissive_strength = -0.98f;
 	inst.shadow_flags = AERON_SCENE_INSTANCE_NO_CAST_SHADOW | AERON_SCENE_INSTANCE_NO_RECEIVE_SHADOW |
 						AERON_SCENE_INSTANCE_EXCLUDE_FROM_RECEIVER_LOCAL_SHADOW;
 	AeronScene_AddMeshInstance(scene, &inst);

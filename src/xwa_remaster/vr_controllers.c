@@ -11,6 +11,7 @@
  * the rest is baked. Base colour textures are packed into one atlas. */
 
 #include "xwa_remaster/vr_controllers.h"
+#include "xwa_remaster/vr_ktx2_decode.h"
 
 #include "aeron/aeron.h"
 #include "aeron/asset/flight_model.h"
@@ -913,6 +914,15 @@ static void ct_read(const cgltf_accessor* a, cgltf_size i, float* out, int n) {
 
 /* Loads `glb` as the runtime model of `hand`. `names`: the runtime's
  * animatable node names (SPACE models). */
+/* A texture's image: its own, or its KHR_texture_basisu one (KTX2). */
+static const cgltf_image* ct_texture_image(const cgltf_texture* tex) {
+	if (!tex) {
+		return NULL;
+	}
+	const cgltf_image* img = tex->image ? tex->image : tex->has_basisu ? tex->basisu_image : NULL;
+	return img && img->buffer_view ? img : NULL;
+}
+
 /* A copy of the runtime's model in the app's files folder
  * (controller_left.glb / controller_right.glb, next to openxwa.log), so it
  * can be looked at off the headset. Written when the model loads. */
@@ -988,12 +998,14 @@ static int ct_runtime_load(CtRuntime* rt, AeronCommandBuffer* cmd, int hand, con
 			}
 		}
 	}
-	/* Base colour images -> one atlas (up to four, 2x2). */
+	/* Base colour images -> one atlas (up to four, 2x2). PNG / JPEG, or
+	 * KTX2 (Basis Universal: KHR_texture_basisu, Meta's models; their
+	 * texture carries the button letters). */
 	const cgltf_image* images[4] = { NULL };
 	int image_count = 0;
 	for (cgltf_size m = 0; m < data->materials_count; ++m) {
 		const cgltf_texture* tex = data->materials[m].pbr_metallic_roughness.base_color_texture.texture;
-		const cgltf_image* img = tex ? tex->image : NULL;
+		const cgltf_image* img = ct_texture_image(tex);
 		if (!img || !img->buffer_view) {
 			continue;
 		}
@@ -1009,19 +1021,25 @@ static int ct_runtime_load(CtRuntime* rt, AeronCommandBuffer* cmd, int hand, con
 	int image_ok[4] = { 0, 0, 0, 0 };
 	if (image_count > 0) {
 		uint8_t* decoded[4] = { NULL };
+		uint8_t* decoded_ktx2[4] = { NULL }; /* the ones from XwaKtx2_DecodeRgba (free()) */
 		int dw[4] = { 0 }, dh[4] = { 0 };
 		int biggest = 0;
 		for (int k = 0; k < image_count; ++k) {
 			const cgltf_buffer_view* bv = images[k]->buffer_view;
 			const uint8_t* bytes = (const uint8_t*)bv->buffer->data + bv->offset;
 			int ch = 0;
-			decoded[k] = stbi_load_from_memory(bytes, (int)bv->size, &dw[k], &dh[k], &ch, 4);
+			if (bv->size >= 12 && memcmp(bytes, "\xABKTX 20\xBB\r\n\x1A\n", 12) == 0) {
+				decoded_ktx2[k] = XwaKtx2_DecodeRgba(bytes, bv->size, &dw[k], &dh[k]);
+				decoded[k] = decoded_ktx2[k];
+			} else {
+				decoded[k] = stbi_load_from_memory(bytes, (int)bv->size, &dw[k], &dh[k], &ch, 4);
+			}
 			if (decoded[k]) {
 				biggest = dw[k] > biggest ? dw[k] : biggest;
 				biggest = dh[k] > biggest ? dh[k] : biggest;
 			} else {
-				Aeron_LogInfo("xwa.remaster", "controller model: image %d (%s) not decoded: %s", k,
-							  images[k]->mime_type ? images[k]->mime_type : "?", stbi_failure_reason());
+				Aeron_LogInfo("xwa.remaster", "controller model: image %d (%s) not decoded", k,
+							  images[k]->mime_type ? images[k]->mime_type : "?");
 			}
 		}
 		cell = 64;
@@ -1040,7 +1058,11 @@ static int ct_runtime_load(CtRuntime* rt, AeronCommandBuffer* cmd, int hand, con
 			}
 		}
 		for (int k = 0; k < image_count; ++k) {
-			stbi_image_free(decoded[k]);
+			if (decoded_ktx2[k]) {
+				free(decoded_ktx2[k]);
+			} else {
+				stbi_image_free(decoded[k]);
+			}
 		}
 	}
 	int any_image = 0;
@@ -1076,9 +1098,9 @@ static int ct_runtime_load(CtRuntime* rt, AeronCommandBuffer* cmd, int hand, con
 							 : gm->alpha_mode == cgltf_alpha_mode_blend ? AERON_GLTF_ALPHA_BLEND
 																		: AERON_GLTF_ALPHA_OPAQUE;
 		mats[m].alpha_cutoff = gm->alpha_cutoff;
-		const cgltf_texture* tex = gm->pbr_metallic_roughness.base_color_texture.texture;
+		const cgltf_image* tex_image = ct_texture_image(gm->pbr_metallic_roughness.base_color_texture.texture);
 		for (int k = 0; k < image_count; ++k) {
-			if (tex && tex->image == images[k] && image_ok[k]) {
+			if (tex_image && tex_image == images[k] && image_ok[k]) {
 				const float aw = (float)(cell * grid_w), ah = (float)(cell * grid_h);
 				mats[m].uv_xform[AERON_GLTF_CHANNEL_BASE_COLOR][0] = (float)((k % 2) * cell) / aw;
 				mats[m].uv_xform[AERON_GLTF_CHANNEL_BASE_COLOR][1] = (float)((k / 2) * cell) / ah;
@@ -1263,6 +1285,37 @@ static int ct_runtime_load(CtRuntime* rt, AeronCommandBuffer* cmd, int hand, con
 		Aeron_LogInfo("xwa.remaster", "  %s control %s: node \"%s\", %d vertices, centre %.1f %.1f %.1f mm",
 					  hand ? "right" : "left", k_ctl_names[c], rt->nodes[rt->ctl_node[c]].name, ctl_cnt[c],
 					  (double)(centre[0] * 1000.0f), (double)(centre[1] * 1000.0f), (double)(centre[2] * 1000.0f));
+	}
+	/* The thumb rest has no part of its own in Meta's models (a touch patch
+	 * of the shell): beside A / X, level with the gap below B / Y, i.e.
+	 * A + 0.767 (A - stick) + 1.087 (B - A), measured on the Quest 3 Touch
+	 * Plus (both hands, mirrored), lifted 1.5 mm onto the shell (away from
+	 * the trigger, which is under the face). On the controller's body. */
+	if (rt->ctl_node[XWA_VR_CTL_THUMBREST] < 0 && rt->ctl_node[XWA_VR_CTL_UPPER] >= 0 &&
+		rt->ctl_node[XWA_VR_CTL_LOWER] >= 0 && rt->ctl_node[XWA_VR_CTL_STICK] >= 0 &&
+		rt->ctl_node[XWA_VR_CTL_TRIGGER] >= 0) {
+		float up_c[3], lo_c[3], st_c[3], tr_c[3], rest[3], lift[3];
+		for (int k = 0; k < 3; ++k) {
+			up_c[k] = ctl_sum[XWA_VR_CTL_UPPER][k] / (float)ctl_cnt[XWA_VR_CTL_UPPER];
+			lo_c[k] = ctl_sum[XWA_VR_CTL_LOWER][k] / (float)ctl_cnt[XWA_VR_CTL_LOWER];
+			st_c[k] = ctl_sum[XWA_VR_CTL_STICK][k] / (float)ctl_cnt[XWA_VR_CTL_STICK];
+			tr_c[k] = ctl_sum[XWA_VR_CTL_TRIGGER][k] / (float)ctl_cnt[XWA_VR_CTL_TRIGGER];
+			rest[k] = lo_c[k] + 0.767f * (lo_c[k] - st_c[k]) + 1.087f * (up_c[k] - lo_c[k]);
+			lift[k] = lo_c[k] - tr_c[k];
+		}
+		ct_norm(lift);
+		for (int k = 0; k < 3; ++k) {
+			rest[k] += lift[k] * 0.0015f;
+		}
+		const int lower = rt->ctl_node[XWA_VR_CTL_LOWER];
+		const int body = rt->nodes[lower].parent >= 0 ? rt->nodes[lower].parent : lower;
+		float inv[16];
+		rt->ctl_node[XWA_VR_CTL_THUMBREST] = body;
+		m4_inverse_affine(rt->nodes[body].rest_world, inv);
+		m4_point(inv, rest, rt->ctl_local[XWA_VR_CTL_THUMBREST]);
+		Aeron_LogInfo("xwa.remaster", "  %s control thumb rest: beside %s on \"%s\", centre %.1f %.1f %.1f mm",
+					  hand ? "right" : "left", hand ? "A" : "X", rt->nodes[body].name, (double)(rest[0] * 1000.0f),
+					  (double)(rest[1] * 1000.0f), (double)(rest[2] * 1000.0f));
 	}
 	/* Index lists: opaque, mask, blend. */
 	const uint32_t total = list_n[0] + list_n[1] + list_n[2];
@@ -1561,6 +1614,10 @@ static void ct_instance(AeronScene3D* scene, const AeronSceneMesh* mesh, const C
 	inst.zero_velocity = 1;
 	inst.draw_first = 1;
 	inst.no_local_lights = 1;
+	/* Never in the bloom: with one bloom for both eyes it would glow beside
+	 * them in the right eye (doubled), so they stay just below the bloom
+	 * threshold (as the cockpit does, flight.c fl_xr_cockpit_bloom_cap). */
+	inst.base_color_emissive_strength = -0.98f;
 	inst.shadow_flags = AERON_SCENE_INSTANCE_NO_CAST_SHADOW | AERON_SCENE_INSTANCE_NO_RECEIVE_SHADOW |
 						AERON_SCENE_INSTANCE_EXCLUDE_FROM_RECEIVER_LOCAL_SHADOW;
 	AeronScene_AddMeshInstance(scene, &inst);

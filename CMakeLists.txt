@@ -292,6 +292,7 @@ add_library(xwa_remaster STATIC
     src/xwa_remaster/vr_hand_overlay.c
     src/xwa_remaster/vr_gloves.c
     src/xwa_remaster/vr_controllers.c
+    src/xwa_remaster/vr_ktx2_decode.cpp
     src/xwa_remaster/vr_flight_stick.c
     src/xwa_remaster/vr_env.c
     src/xwa_remaster/vr_menu_beam.c
@@ -308,6 +309,20 @@ add_library(xwa_meshopt STATIC
     third_party/meshoptimizer/simplifier.cpp
     third_party/meshoptimizer/allocator.cpp)
 target_include_directories(xwa_meshopt PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer)
+# Basis Universal's transcoder (Apache 2.0): the KTX2 textures of the
+# runtime's controller models (button letters, shading), to RGBA. The
+# GPU-format targets the game does not use are switched off.
+find_package(zstd REQUIRED CONFIG)
+add_library(xwa_basisu STATIC third_party/basisu/transcoder/basisu_transcoder.cpp)
+target_include_directories(xwa_basisu PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/basisu/transcoder)
+target_compile_definitions(xwa_basisu PUBLIC
+    BASISD_SUPPORT_KTX2=1 BASISD_SUPPORT_KTX2_ZSTD=1
+    BASISD_SUPPORT_DXT1=0 BASISD_SUPPORT_DXT5A=0 BASISD_SUPPORT_PVRTC1=0 BASISD_SUPPORT_PVRTC2=0
+    BASISD_SUPPORT_ETC2_EAC_A8=0 BASISD_SUPPORT_ETC2_EAC_RG11=0 BASISD_SUPPORT_ATC=0 BASISD_SUPPORT_FXT1=0)
+target_link_libraries(xwa_basisu PRIVATE zstd::libzstd)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(xwa_basisu PRIVATE -w -O2)
+endif()
 target_include_directories(xwa_remaster
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -326,6 +341,7 @@ target_link_libraries(xwa_remaster
         aeron_cgltf
         imgbake
         xwa_meshopt
+        xwa_basisu
 )
 
 # OpenXWA-owned scene shaders use Aeron's cross-platform shader pipeline and

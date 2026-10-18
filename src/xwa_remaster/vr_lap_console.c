@@ -583,7 +583,10 @@ static void vc_layout(void) {
 		const float x = 538.0f, w = 460.0f;
 		vc_label(x, 22.0f, "TARGET COMPUTER", 28, 0, 1, 0);
 		{
-			static const char* const l[4] = { "NEAREST\nENEMY", "ATTACKING\nME", "ATTACKING\nMY TARGET",
+			/* Under the TARGET COMPUTER heading: "Target closest enemy" and
+			 * "Target my attacker" (the controller labels' wording) fit
+			 * these buttons only without the "target". */
+			static const char* const l[4] = { "CLOSEST\nENEMY", "MY\nATTACKER", "ATTACKING\nMY TARGET",
 											  "MATCH\nSPEED" };
 			static const XwaVrConsoleAction a[4] = { XWA_VRC_TARGET_NEAREST_ENEMY, XWA_VRC_TARGET_ATTACKER,
 													 XWA_VRC_TARGET_TARGETS_ATTACKER, XWA_VRC_MATCH_SPEED };
@@ -629,7 +632,7 @@ static void vc_layout(void) {
 		{
 			s_vc.divider_y = 366.0f;
 			vc_label(x, 376.0f, "WEAPONS", 28, 0, 1, 0);
-			static const char* const l[3] = { "FIRE-LINK", "CONVERGE", "S-FOILS" };
+			static const char* const l[3] = { "LINK\nWEAPONS", "CONVERGE", "S-FOILS" };
 			static const XwaVrConsoleAction a[3] = { XWA_VRC_FIRE_LINK, XWA_VRC_CONVERGENCE, XWA_VRC_SFOILS };
 			vc_row(x, 412.0f, w, 58.0f, 3, l, a, row);
 			row[2]->enabled = st->has_sfoils;
@@ -668,15 +671,24 @@ static void vc_layout(void) {
 			vc_row(x, 326.0f, w, 52.0f, 4, l, a, NULL);
 		}
 		{
-			static const char* const l[4] = { "GUNNER", "GUNNERS", "FLARE", "HYPERSPACE" };
+			static const char* const l[4] = { "TURRET SEAT", "GUNNERS", "COUNTER-\nMEASURES", "HYPERSPACE" };
 			static const XwaVrConsoleAction a[4] = { XWA_VRC_GUNNER, XWA_VRC_GUNNER_ATTACK, XWA_VRC_COUNTERMEASURE,
 													 XWA_VRC_HYPERSPACE };
-			vc_row(x, 388.0f, w, 52.0f, 4, l, a, row);
+			/* The two turret buttons a little wider (their names and lines
+			 * are the longest). */
+			static const float bw[4] = { 118.0f, 118.0f, 102.0f, 102.0f };
+			float bx = x;
+			for (int i = 0; i < 4; ++i) {
+				row[i] = vc_button(bx, 388.0f, bw[i], 52.0f, l[i], a[i], 0);
+				bx += bw[i] + 10.0f;
+			}
+			/* Turret seat: the game's G, pilot seat -> turrets -> back. */
+			row[0]->sub = "switch seat";
 			/* Gunners: at my target; held, the game's own toggle (back to
 			 * defending the ship when they are on it). */
 			row[1]->enabled = st->has_turrets;
 			row[1]->hold_action = XWA_VRC_AUTO_GUNNER;
-			row[1]->sub = !st->has_turrets ? NULL : st->gunners_on_target ? "on target" : "my target";
+			row[1]->sub = !st->has_turrets ? NULL : st->gunners_on_target ? "on target" : "attack my target";
 			row[1]->lit = st->gunners_on_target;
 			/* Away from a hyperspace buoy the button finds one (the N key). */
 			row[3]->hyper = st->hyper_ready;
@@ -1151,17 +1163,28 @@ static void vc_draw_button_look(const VcButton* b, int hover, int pressed, float
 			size *= (b->w - 14.0f) / width;
 		}
 	}
+	/* The small state line, shrunk to fit like the name. */
+	float sub_size = line2[0] ? fmaxf(15.0f, size * 0.5f) : 15.0f;
+	if (b->sub && s_vc.font_state == 1) {
+		AeronTextStyle probe;
+		memset(&probe, 0, sizeof probe);
+		probe.font = &s_vc.font;
+		probe.scale = sub_size / (float)s_vc.font.cell_h;
+		const float width = AeronText_MeasureWidth(&probe, b->sub, -1);
+		if (width > b->w - 14.0f && width > 0.0f) {
+			sub_size *= (b->w - 14.0f) / width;
+		}
+	}
 	if (line2[0] && b->sub) {
 		vc_text(b->x + b->w * 0.5f, b->y + b->h * 0.5f - size * 1.5f, line1, size, 1, tr, tg, tb, text_a);
 		vc_text(b->x + b->w * 0.5f, b->y + b->h * 0.5f - size * 0.45f, line2, size, 1, tr, tg, tb, text_a);
-		vc_text(b->x + b->w * 0.5f, b->y + b->h * 0.5f + size * 0.9f, b->sub, fmaxf(15.0f, size * 0.5f), 1, tr, tg, tb,
-				0.65f);
+		vc_text(b->x + b->w * 0.5f, b->y + b->h * 0.5f + size * 0.9f, b->sub, sub_size, 1, tr, tg, tb, 0.65f);
 	} else if (line2[0]) {
 		vc_text(b->x + b->w * 0.5f, b->y + b->h * 0.5f - size * 1.05f, line1, size, 1, tr, tg, tb, text_a);
 		vc_text(b->x + b->w * 0.5f, b->y + b->h * 0.5f + size * 0.02f, line2, size, 1, tr, tg, tb, text_a);
 	} else if (b->sub) {
 		vc_text(b->x + b->w * 0.5f, b->y + b->h * 0.5f - size * 0.95f, b->label, size, 1, tr, tg, tb, text_a);
-		vc_text(b->x + b->w * 0.5f, b->y + b->h * 0.5f + 2.0f, b->sub, 15.0f, 1, tr, tg, tb, 0.65f);
+		vc_text(b->x + b->w * 0.5f, b->y + b->h * 0.5f + 2.0f, b->sub, sub_size, 1, tr, tg, tb, 0.65f);
 	} else {
 		vc_text(b->x + b->w * 0.5f, b->y + b->h * 0.5f - size * 0.55f, b->label, size, 1, tr, tg, tb, text_a);
 	}
@@ -1839,9 +1862,9 @@ static void vw_layout(void) {
 		case 1 + VW_CAT_SHIP:
 			b = vw_item("MATCH\nSPEED", XWA_VRC_MATCH_SPEED, 0);
 			b->enabled = st->has_target;
-			vw_item("CYCLE\nWARHEADS", XWA_VRC_CYCLE_WARHEAD, 0);
-			vw_item("FIRE-LINK", XWA_VRC_FIRE_LINK, 0);
-			vw_item("FLARE", XWA_VRC_COUNTERMEASURE, 0);
+			vw_item("CHANGE\nWEAPON", XWA_VRC_CYCLE_WARHEAD, 0);
+			vw_item("LINK\nWEAPONS", XWA_VRC_FIRE_LINK, 0);
+			vw_item("COUNTER-\nMEASURES", XWA_VRC_COUNTERMEASURE, 0);
 			b = vw_item("HYPERSPACE", XWA_VRC_HYPERSPACE, 0);
 			b->hyper = st->hyper_ready;
 			if (st->hyper_ready) {
@@ -1888,9 +1911,9 @@ static void vw_layout(void) {
 			b->enabled = st->has_shields;
 			break;
 		case 1 + VW_CAT_TARGETING:
-			vw_item("NEAREST\nENEMY", XWA_VRC_TARGET_NEAREST_ENEMY, 0);
+			vw_item("TARGET\nCLOSEST ENEMY", XWA_VRC_TARGET_NEAREST_ENEMY, 0);
 			vw_item("NEXT\nTARGET", XWA_VRC_TARGET_NEXT, 0);
-			vw_item("ATTACKING\nME", XWA_VRC_TARGET_ATTACKER, 0);
+			vw_item("TARGET\nMY ATTACKER", XWA_VRC_TARGET_ATTACKER, 0);
 			b = vw_item("ATTACKING\nMY TARGET", XWA_VRC_TARGET_TARGETS_ATTACKER, 0);
 			b->enabled = st->has_target;
 			vw_item("INCOMING\nMISSILE", XWA_VRC_TARGET_INCOMING, 0);
@@ -2383,7 +2406,7 @@ static int lb_entries(int hand, const AeronXrHand* xh, LbEntry* out) {
 				if (right_role) {
 					lb_set_action(e, XWA_VR_RIGHT_GRIP_ACTION);
 				} else if (vw_enabled()) {
-					lb_set_action(e, "Quick wheel");
+					lb_set_action(e, "Radial menu");
 					e->more = "hold, point, pull the trigger";
 				} else {
 					ok = 0;
@@ -2805,7 +2828,7 @@ static const VcCardLabel k_card_left[] = {
 	{ CTL_UPPER, AERON_XR_BUTTON_Y, NULL, NULL, 168.0f },
 	{ CTL_LOWER, AERON_XR_BUTTON_X, NULL, NULL, 232.0f },
 	{ CTL_MENU, -1, "Pause / menu", NULL, 296.0f },
-	{ CTL_GRIP, -1, "Hold: quick wheel", "on a panel or the stick: move it", 380.0f },
+	{ CTL_GRIP, -1, "Hold: radial menu", "on a panel or the stick: move it", 380.0f },
 	{ CTL_TRIGGER, AERON_XR_BUTTON_LEFT_TRIGGER, NULL, NULL, 452.0f },
 };
 
@@ -2836,7 +2859,7 @@ static const VcCardLabel k_card_right_lh[] = {
 	{ CTL_UPPER, AERON_XR_BUTTON_Y, NULL, NULL, 168.0f },
 	{ CTL_LOWER, AERON_XR_BUTTON_X, NULL, NULL, 232.0f },
 	{ CTL_MENU, -1, "Meta: system menu", NULL, 296.0f },
-	{ CTL_GRIP, -1, "Hold: quick wheel", "on the flight stick: fly with it", 380.0f },
+	{ CTL_GRIP, -1, "Hold: radial menu", "on the flight stick: fly with it", 380.0f },
 	{ CTL_TRIGGER, AERON_XR_BUTTON_LEFT_TRIGGER, NULL, NULL, 452.0f },
 };
 
@@ -3020,7 +3043,7 @@ static void vc_card_draw(void) {
 	}
 	vc_text(44.0f, 30.0f, "CONTROLS", 30.0f, 0, VC_CYAN, 1.0f);
 	const int lh = Aeron_XrLeftHanded();
-	vc_text(W - 44.0f, 38.0f, lh ? "hold the RIGHT grip: quick wheel" : "hold the LEFT grip: quick wheel", 18.0f, 2,
+	vc_text(W - 44.0f, 38.0f, lh ? "hold the RIGHT grip: radial menu" : "hold the LEFT grip: radial menu", 18.0f, 2,
 			0.62f, 0.85f, 0.92f, 0.9f);
 	const float cy = 222.0f;
 	const VcCardLabel* left = lh ? k_card_left_lh : k_card_left;
@@ -3035,11 +3058,11 @@ static void vc_card_draw(void) {
 	vc_text(W * 0.5f + 148.0f + 80.0f, cy + 318.0f, "RIGHT", 22.0f, 1, VC_CYAN, 0.9f);
 	vc_text(W * 0.5f, H - 158.0f, "Flight stick (between your knees): right grip on it = fly, left grip = move it", 17.0f,
 			1, 0.85f, 0.97f, 1.0f, 0.95f);
-	vc_text(W * 0.5f, H - 132.0f, "Voice: double-tap a thumb rest, then say e.g. \"attack my target\", \"nearest enemy\"",
+	vc_text(W * 0.5f, H - 132.0f, "Voice: double-tap a thumb rest, then say e.g. \"attack my target\", \"target closest enemy\"",
 			17.0f, 1, 0.85f, 0.97f, 1.0f, 0.95f);
 	vc_text(W * 0.5f, H - 104.0f,
-			lh ? "Quick wheel: hold the RIGHT grip, point at a command, pull the right trigger"
-			   : "Quick wheel: hold the LEFT grip, point at a command, pull the left trigger",
+			lh ? "Radial menu: hold the RIGHT grip, point at a command, pull the right trigger"
+			   : "Radial menu: hold the LEFT grip, point at a command, pull the left trigger",
 			17.0f, 1, 0.62f, 0.85f, 0.92f, 0.9f);
 }
 
@@ -3049,12 +3072,12 @@ static const char* const k_voice_wing[] = { "attack my target",  "cover me",    
 											"evade",             "wait",           "go ahead",
 											"return to base",    "report in",      "call resupply",
 											"call reinforcements", "gunner attack my target" };
-static const char* const k_voice_target[] = { "nearest enemy",       "next target",           "previous target",
+static const char* const k_voice_target[] = { "target closest enemy", "next target",          "previous target",
 											  "target my attacker",  "who is attacking my target",
 											  "target incoming missile", "target objective", "newest target",
 											  "next subsystem",      "clear target",          "nav buoy" };
-static const char* const k_voice_ship[] = { "match speed",       "countermeasures",   "s-foils",
-											"lasers to shields", "shields to lasers", "fire link",
+static const char* const k_voice_ship[] = { "match speed",       "countermeasures",   "change weapon", "s-foils",
+											"lasers to shields", "shields to lasers", "link weapons",
 											"convergence",       "map",               "dock",
 											"pick up",           "release cargo",     "hyperspace",
 											"confirm" };
@@ -3064,10 +3087,12 @@ static void vc_voice_column(float x, const char* title, const char* const* lines
 	vc_text(x, 132.0f, title, 20.0f, 0, VC_CYAN, 0.95f);
 	vc_pma(rule, VC_CYAN, 0.45f);
 	AeronDrawList_AddFill(s_vc.cur_list, x, 160.0f, 270.0f, 2.0f, rule, AERON_BLIT2D_BLEND_PMA, NULL);
+	/* Closer rows past 13 lines, clear of the footer line. */
+	const float step = count > 13 ? 34.0f : 38.0f;
 	for (int i = 0; i < count; ++i) {
 		char text[64];
 		snprintf(text, sizeof text, "\"%s\"", lines[i]);
-		vc_text(x, 176.0f + 38.0f * (float)i, text, 20.0f, 0, 0.85f, 0.97f, 1.0f, 1.0f);
+		vc_text(x, 176.0f + step * (float)i, text, 20.0f, 0, 0.85f, 0.97f, 1.0f, 1.0f);
 	}
 }
 

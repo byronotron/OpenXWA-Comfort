@@ -62,9 +62,9 @@ static const char* const k_layout_texts[] = { "Cockpit", "Helmet", "Fixed" };
 static const char* const k_layout_values[] = { "cockpit", "helmet", "fixed" };
 static const char* const k_size_texts[] = { "Small", "Medium", "Large", "Larger", "Largest" };
 static const char* const k_size_values[] = { "0.45", "0.55", "0.65", "0.75", "0.85" };
-static const char* const k_boost_texts[] = { "1x (real)", "1.5x", "2x", "3x", "4x", "5x", "6x", "8x", "10x" };
+static const char* const k_boost_texts[] = { "1x (real)", "1.5x", "2x (Recommended)", "3x", "4x", "5x", "6x", "8x", "10x" };
 static const char* const k_boost_values[] = { "1.0", "1.5", "2", "3", "4", "5", "6", "8", "10" };
-static const char* const k_scale_texts[] = { "0.60 (huge)", "0.70", "0.75", "0.80", "0.85",
+static const char* const k_scale_texts[] = { "0.60 (huge)", "0.70", "0.75 (Recommended)", "0.80", "0.85",
 											  "0.90",        "1.00 (real)", "1.10", "1.20" };
 static const char* const k_scale_values[] = { "0.6", "0.7", "0.75", "0.8", "0.85", "0.9", "1.0", "1.1", "1.2" };
 static const char* const k_toggle_texts[] = { "Off", "On" };
@@ -102,7 +102,7 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "XWA_XR_SHADOWS", "Cockpit Shadows", k_toggle_texts, k_toggle_values, 2, 0, 85, 1 },
 	{ "XWA_XR_CONSOLE", "Lap Console", k_toggle_texts, k_toggle_values, 2, 1, 88, 0 },
 	/* Held open with the grip of the hand that has the left controls. */
-	{ "XWA_XR_WHEEL", "Quick Wheel (grip)", k_toggle_texts, k_toggle_values, 2, 1, 67, 0 },
+	{ "XWA_XR_WHEEL", "Radial Menu (grip)", k_toggle_texts, k_toggle_values, 2, 1, 67, 0 },
 	/* The game at 45 % speed while the wheel is open (single player). */
 	{ "XWA_XR_WHEEL_SLOWMO", "Wheel Slow Motion", k_toggle_texts, k_toggle_values, 2, 1, 70, 0 },
 	/* What your hands are: the gloves or the controllers (with labels of
@@ -378,6 +378,83 @@ static void vr_reset_hud_layouts(void) {
 	Aeron_LogInfo("xwa.config", "VR HUD panels back at their default spots (%d cockpit layouts cleared)", n);
 }
 
+/* "Restore VR Defaults" (main menu): the recommended settings, tuned on a
+ * Quest 3. A VR option not listed gets its built-in default; the resolution
+ * stays within each headset's pixel budget (the device tier clamps it). */
+static const struct {
+	const char* key;
+	const char* value;
+} k_recommended[] = {
+	{ "XWA_XR_WORLD_SCALE", "0.75" },
+	{ "XWA_POINT_LIGHTS", "0" },
+	{ "XWA_XR_DEPTH_BOOST", "2" },
+	{ "XWA_XR_FOVEATION", "high" },
+	{ "AERON_XR_RESOLUTION_SCALE", "1.1" },
+	{ "XWA_XR_FLIGHT_STICK", "0" },
+	{ "AERON_XR_REFRESH_RATE", "72" },
+	{ "XWA_XR_HUD_LAYOUT", "cockpit" },
+	{ "XWA_XR_HUD_SCALE", "0.55" },
+	{ "XWA_XR_SHADING", "lite" },
+	{ "XWA_XR_DIRECT_OUTPUT", "0" },
+	{ "XWA_XR_ENVIRONMENT", "tiefighter" },
+	{ "XWA_XR_VOICE", "doubletap" },
+	{ "XWA_XR_GPU_OPT", "1" },
+	{ "XWA_XR_GPU_TIMING", "0" },
+	{ "XWA_XR_ASTC", "1" },
+	{ "XWA_XR_BLOOM", "1" },
+	{ "XWA_XR_SHIP_3D", "0.5" },
+	{ "AERON_XR_INVERT_PITCH", "0" },
+	{ "XWA_XR_HANDS", "controllers" },
+};
+
+/* Hand-placed spots that come with them (LOCAL space, metres; HUD panels
+ * per cockpit). Every other cockpit's HUD, and the flight stick, go back
+ * to their default spots. */
+static const struct {
+	const char* key;
+	const char* value;
+} k_recommended_places[] = {
+	{ "XWA_XR_CONSOLE_POSE", "0.0120,-0.5343,-0.5958,-0.48705,-0.00045,0.00323,0.87337" },
+	{ "XWA_XR_STICK_POS", "" },
+	{ "XWA_XR_HUD_POSE_XWINGCOCKPIT", "pod_l=-0.4130,-0.0378,-0.5794,-0.02721,0.27131,0.02440,0.96180;"
+									  "pod_r=0.4016,0.0013,-0.5742,0.01347,-0.32619,0.00733,0.94518" },
+	{ "XWA_XR_HUD_POSE_CORELLIANTRANSPORT2COCKPIT",
+	  "pod_l=-0.3468,0.0794,-0.6747,-0.00307,0.22331,-0.00042,0.97474;"
+	  "pod_r=0.4555,0.0481,-0.7340,0.01256,-0.27346,0.01234,0.96172" },
+	{ "XWA_XR_HUD_POSE_CORELLIANTRANSPORTGUNNER",
+	  "pod_l=-0.4119,-0.0053,-0.6071,0.01244,0.33782,-0.01006,0.94107;"
+	  "pod_r=0.4409,0.0234,-0.5578,0.03452,-0.34751,0.01515,0.93692" },
+};
+
+void XwaModernVrOptions_RestoreDefaults(void) {
+	const char* keys[VR_COUNT];
+	const char* values[VR_COUNT];
+	for (int i = 0; i < VR_COUNT; i++) {
+		keys[i] = k_settings[i].key;
+		values[i] = k_settings[i].values[k_settings[i].fallback];
+		for (size_t r = 0; r < sizeof k_recommended / sizeof k_recommended[0]; r++) {
+			if (strcmp(k_recommended[r].key, keys[i]) == 0) {
+				values[i] = k_recommended[r].value;
+			}
+		}
+		SDL_setenv_unsafe(keys[i], values[i], 1);
+	}
+	SDL_setenv_unsafe("AERON_XR_PERF_LEVEL", strcmp(SDL_getenv("XWA_XR_GPU_OPT"), "0") ? "high" : "0", 1);
+	vr_write_cfg(keys, values, VR_COUNT);
+	vr_reset_hud_layouts();
+	const char* place_keys[sizeof k_recommended_places / sizeof k_recommended_places[0]];
+	const char* place_values[sizeof k_recommended_places / sizeof k_recommended_places[0]];
+	const int places = (int)(sizeof k_recommended_places / sizeof k_recommended_places[0]);
+	for (int i = 0; i < places; i++) {
+		place_keys[i] = k_recommended_places[i].key;
+		place_values[i] = k_recommended_places[i].value;
+		SDL_setenv_unsafe(place_keys[i], place_values[i], 1);
+	}
+	vr_write_cfg(place_keys, place_values, places);
+	g_vr.loaded = 0; /* the VR Options screen reads them again */
+	Aeron_LogInfo("xwa.config", "VR settings restored to the recommended defaults");
+}
+
 /* One cycle row per setting of `page`. */
 static void vr_draw_settings(XwaModernOptionsMenu* menu, int page) {
 	for (int i = 0; i < VR_COUNT; i++) {
@@ -440,7 +517,7 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 		return 0;
 	}
 	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 38, cursor_row, vr_page_rows(0) + 5);
-	XwaModernOptionsMenu_DrawTitle(&menu, "OpenXWA VR Options");
+	XwaModernOptionsMenu_DrawTitle(&menu, "VR Options");
 	vr_draw_settings(&menu, 0);
 
 	if (XwaModernOptionsMenu_DrawAction(&menu, "Reset HUD Panel Positions", 93, 0)) {

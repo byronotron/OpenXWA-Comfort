@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-/* VR settings screen (Video Options > OpenXWA VR Options). The settings are
+/* VR settings screen (main menu > VR Options). The settings are
  * the XWA_XR_* / XWA_POINT_LIGHTS / AERON_XR_RESOLUTION_SCALE environment
  * values that openxwa-quest.cfg sets at startup: a change takes effect by
  * updating the environment (the renderer reads them every frame) and is
@@ -20,6 +20,10 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row);
 
 /* Writes KEY=value into openxwa-quest.cfg (Android; elsewhere a no-op). */
 void XwaModernVrOptions_SaveValue(const char* key, const char* value);
+/* "Restore VR Defaults": every VR option and hand-placed spot back to the
+ * recommended settings (applied now and saved; "(restart)" options take
+ * effect at the next start). */
+void XwaModernVrOptions_RestoreDefaults(void);
 
 #ifdef __cplusplus
 }
