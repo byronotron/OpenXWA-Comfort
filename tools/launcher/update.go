@@ -19,7 +19,8 @@ import (
 const (
 	defaultUpdateAPI = "https://api.github.com"
 	releasesPath     = "/repos/neitey/OpenXWA-Quest/releases"
-	launcherExeName  = "OpenXWA-Launcher.exe"
+	launcherExeName  = "OpenXWA-VR-Launcher.exe"
+	oldLauncherName  = "OpenXWA-Launcher.exe" // up to 1.0.0-rc5
 )
 
 var errNoRelease = errors.New("no release found")
@@ -323,6 +324,9 @@ func (a *app) downloadUpdate(rel *ghRelease) bool {
 		return false
 	}
 	exe := findFileNamed(dest, launcherExeName, 2)
+	if exe == "" {
+		exe = findFileNamed(dest, oldLauncherName, 2)
+	}
 	if runtime.GOOS == "windows" && exe != "" {
 		if err := startLauncher(exe); err == nil {
 			logf("started %s", exe)

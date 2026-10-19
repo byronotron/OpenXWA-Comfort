@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Builds the OpenXWA launcher.
+# Builds the OpenXWA-VR Launcher.
 #   ./build.sh 1.0.0-rc3
-# Produces dist/OpenXWA-Launcher.exe (Windows GUI program, the release build) and
-# dist/openxwa-launcher-linux (for testing).
+# Produces dist/OpenXWA-VR-Launcher.exe (Windows GUI program, the release build) and
+# dist/openxwa-vr-launcher-linux (for testing).
 set -euo pipefail
 
 if [ $# -ne 1 ] || [ -z "$1" ]; then
@@ -21,8 +21,8 @@ mkdir -p dist
 LDFLAGS="-s -w -X main.version=$VER"
 
 # -H windowsgui: a GUI program, so no console window opens (--console makes one).
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 "$GO" build -trimpath -ldflags "$LDFLAGS -H windowsgui" -o dist/OpenXWA-Launcher.exe .
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 "$GO" build -trimpath -ldflags "$LDFLAGS" -o dist/openxwa-launcher-linux .
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 "$GO" build -trimpath -ldflags "$LDFLAGS -H windowsgui" -o dist/OpenXWA-VR-Launcher.exe .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 "$GO" build -trimpath -ldflags "$LDFLAGS" -o dist/openxwa-vr-launcher-linux .
 
 echo "Built version $VER:"
-ls -l dist/OpenXWA-Launcher.exe dist/openxwa-launcher-linux
+ls -l dist/OpenXWA-VR-Launcher.exe dist/openxwa-vr-launcher-linux

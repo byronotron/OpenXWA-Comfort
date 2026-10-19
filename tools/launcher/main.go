@@ -1,4 +1,4 @@
-// OpenXWA Launcher: puts the OpenXWA VR app and the user's own X-Wing
+// OpenXWA-VR Launcher: puts the OpenXWA VR app and the user's own X-Wing
 // Alliance game files on a standalone VR headset over USB, using adb.
 //
 // The design is recorded in PLAN.md. Standard library only. The user sees
@@ -59,15 +59,15 @@ func fail(format string, args ...any) error {
 }
 
 func usage() string {
-	return `OpenXWA Launcher ` + version + `
+	return `OpenXWA-VR Launcher ` + version + `
 
 Puts OpenXWA and your own X-Wing Alliance game files on your VR headset
 (Meta Quest, Pico, Steam Frame) over a USB cable.
 
 Usage:
-  OpenXWA-Launcher [options] [game folder]
+  OpenXWA-VR-Launcher [options] [game folder]
 
-You can also drag your X-Wing Alliance folder onto OpenXWA-Launcher.exe.
+You can also drag your X-Wing Alliance folder onto OpenXWA-VR-Launcher.exe.
 
 Options:
   --console           use a console window instead of the launcher window
@@ -124,13 +124,13 @@ func main() {
 		return
 	}
 	if opts.showVersion {
-		fmt.Println("OpenXWA Launcher " + version)
+		fmt.Println("OpenXWA-VR Launcher " + version)
 		return
 	}
 
 	a := newApp()
 	openLog(a.exeDir)
-	logf("OpenXWA Launcher %s starting; exe dir %s; args %q", version, a.exeDir, os.Args[1:])
+	logf("OpenXWA-VR Launcher %s starting; exe dir %s; args %q", version, a.exeDir, os.Args[1:])
 
 	var closed <-chan struct{}
 	if !opts.console {
@@ -188,13 +188,15 @@ type app struct {
 	adb       *ADB
 	skipPause bool // the final question was already the closing one
 
-	apkPath    string
-	apkVersion string
-	gameDir    string
-	storage    string // "/sdcard" or a fallback such as "/storage/emulated/0"
-	logsDir    string // last folder logs were collected into
-	uid        int    // the app's Linux uid on the headset (0 = not known yet)
-	mkdirOK    bool   // folders made with mkdir belong to the app on this headset
+	apkPath     string
+	apkVersion  string
+	gameDir     string
+	storage     string // "/sdcard" or a fallback such as "/storage/emulated/0"
+	logsDir     string // last folder logs were collected into
+	uid         int    // the app's Linux uid on the headset (0 = not known yet)
+	mkdirOK     bool   // folders made with mkdir belong to the app on this headset
+	helper      bool   // the app's helper (SetupProvider) copies the files
+	helperTried bool
 
 	// Steam Frame: the Android layer (Lepton) is reached over a second adb
 	// connection.
@@ -214,7 +216,7 @@ func (a *app) remotePilots() string { return a.remoteBase() + "/pilot-import" }
 
 // run executes the whole flow and returns the process exit code.
 func (a *app) run(opts options) int {
-	say("OpenXWA Launcher %s", version)
+	say("OpenXWA-VR Launcher %s", version)
 	say("Puts OpenXWA and your own X-Wing Alliance files on your VR headset.")
 	err := a.flow(opts)
 	a.cleanupLepton()

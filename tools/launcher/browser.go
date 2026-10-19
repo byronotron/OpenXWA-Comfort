@@ -51,12 +51,12 @@ func pickFolder(initial string) (string, bool, error) {
 // mix with the user's own browser session.
 func browserProfileDir(exeDir string) string {
 	if d := os.Getenv("LOCALAPPDATA"); d != "" && runtime.GOOS == "windows" {
-		return filepath.Join(d, "OpenXWA-Launcher", "edge")
+		return filepath.Join(d, "OpenXWA-VR-Launcher", "edge")
 	}
 	if d, err := os.UserCacheDir(); err == nil {
-		return filepath.Join(d, "OpenXWA-Launcher", "browser")
+		return filepath.Join(d, "OpenXWA-VR-Launcher", "browser")
 	}
-	return filepath.Join(exeDir, "OpenXWA-Launcher", "browser")
+	return filepath.Join(exeDir, "OpenXWA-VR-Launcher", "browser")
 }
 
 // appWindowArgs are the arguments for Edge/Chrome in app mode. Background

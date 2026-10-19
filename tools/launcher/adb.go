@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,7 +35,16 @@ func (a *ADB) runQuiet(timeout time.Duration, args ...string) (string, error) {
 	return a.exec(timeout, false, args...)
 }
 
+// stream is run with stdin feeding adb's standard input (for exec-in).
+func (a *ADB) stream(timeout time.Duration, stdin io.Reader, args ...string) (string, error) {
+	return a.execIn(timeout, true, stdin, args...)
+}
+
 func (a *ADB) exec(timeout time.Duration, logOK bool, args ...string) (string, error) {
+	return a.execIn(timeout, logOK, nil, args...)
+}
+
+func (a *ADB) execIn(timeout time.Duration, logOK bool, stdin io.Reader, args ...string) (string, error) {
 	full := args
 	if a.Serial != "" {
 		full = append([]string{"-s", a.Serial}, args...)
@@ -52,6 +62,7 @@ func (a *ADB) exec(timeout time.Duration, logOK bool, args ...string) (string, e
 	cmd := exec.CommandContext(ctx, a.Path, full...)
 	noConsoleWindow(cmd)
 	var buf bytes.Buffer
+	cmd.Stdin = stdin
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 	// adb may start its background server, which can inherit our output

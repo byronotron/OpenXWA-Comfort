@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const logFileName = "openxwa-launcher.log"
+const logFileName = "openxwa-vr-launcher.log"
 
 var logState struct {
 	mu   sync.Mutex
@@ -17,14 +17,14 @@ var logState struct {
 	path string
 }
 
-// openLog opens openxwa-launcher.log next to the exe (or in the temp folder
+// openLog opens openxwa-vr-launcher.log next to the exe (or in the temp folder
 // if that is not writable) for appending. A log over 5 MB is moved to
-// openxwa-launcher.old.log first. Returns the log path ("" if none).
+// openxwa-vr-launcher.old.log first. Returns the log path ("" if none).
 func openLog(dir string) string {
 	for _, d := range []string{dir, os.TempDir()} {
 		p := filepath.Join(d, logFileName)
 		if st, err := os.Stat(p); err == nil && st.Size() > 5<<20 {
-			_ = os.Rename(p, filepath.Join(d, "openxwa-launcher.old.log"))
+			_ = os.Rename(p, filepath.Join(d, "openxwa-vr-launcher.old.log"))
 		}
 		f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 		if err != nil {

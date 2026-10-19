@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -411,5 +412,41 @@ func TestReflow(t *testing.T) {
 	want := "OpenXWA could not be updated: the copy was signed differently.\n\nWARNING: uninstalling deletes files. These files:\n  a.txt\n  b.txt"
 	if got := reflow(in); got != want {
 		t.Errorf("reflow:\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestParseBundle(t *testing.T) {
+	r, ok := parseBundle("Result: Bundle[{made=1, asked=1, base=/storage/emulated/0/Android/data/org.openxwa.quest/files/}]\n")
+	if !ok || r["made"] != "1" || r["asked"] != "1" || r["base"] != "/storage/emulated/0/Android/data/org.openxwa.quest/files/" {
+		t.Errorf("parseBundle: %v %v", r, ok)
+	}
+	r, ok = parseBundle("Result: Bundle[{error=java.io.FileNotFoundException: /x/y (Permission denied), base=/b/}]")
+	if !ok || r["error"] != "java.io.FileNotFoundException: /x/y (Permission denied)" || r["base"] != "/b/" {
+		t.Errorf("parseBundle error: %v", r)
+	}
+	if _, ok := parseBundle("Result: null"); ok {
+		t.Error("null result parsed")
+	}
+	if _, ok := parseBundle("Error while accessing provider:org.openxwa.quest.setup\njava.lang.IllegalArgumentException: Unknown authority"); ok {
+		t.Error("error parsed")
+	}
+}
+
+func TestImportBatches(t *testing.T) {
+	var items []importItem
+	for i := 0; i < 6000; i++ {
+		items = append(items, importItem{Rel: fmt.Sprint(i), Size: 10})
+	}
+	items = append(items, importItem{Rel: "big1", Size: importBatchSize - 5}, importItem{Rel: "big2", Size: importBatchSize + 5})
+	b := importBatches(items)
+	n := 0
+	for _, x := range b {
+		n += len(x)
+		if len(x) > importBatchMax {
+			t.Errorf("batch of %d files", len(x))
+		}
+	}
+	if n != len(items) || len(b) != 5 {
+		t.Errorf("%d items in %d batches", n, len(b))
 	}
 }

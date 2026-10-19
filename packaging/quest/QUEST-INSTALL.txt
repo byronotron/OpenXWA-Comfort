@@ -1,4 +1,4 @@
-OpenXWA for Meta Quest 3 (standalone) - 1.0.0 release candidate 5
+OpenXWA for Meta Quest 3 (standalone) - 1.0.0 release candidate 6
 ==================================================================
 
 This is a release candidate. If something goes wrong, the log file (step 6)
@@ -20,23 +20,25 @@ What you need
    (SideQuest: drag the APK onto the window.) A newer APK installs over the
    old one the same way; the copied game files stay.
 
-2. Start it once
-   In the headset: Library -> filter "Unknown sources" -> OpenXWA.
-   It creates its game folder and shows "X-Wing Alliance game files needed".
-   Leave it open or quit; either is fine.
+2. Copy the game files (from the PC, headset connected via USB; it can stay
+   on the desk)
+   Files copied with "adb push" belong to the wrong user on Quest and the game
+   cannot read them, so the app unpacks a zip itself:
+   * Zip the CONTENTS of your X-Wing Alliance folder into xwa.zip (select
+     everything inside the folder -> Send to -> Compressed (zipped) folder),
+     so RESDATA.TXT is at the top of the zip.
+   * In Command Prompt (cmd, not PowerShell):
+       adb exec-in content write --uri content://org.openxwa.quest.setup/import < xwa.zip
+       adb shell content call --uri content://org.openxwa.quest.setup --method unzip --arg XWA
+     The last command prints the number of files unpacked.
+   The OpenXWA-VR Launcher does all of this for you.
 
-3. Copy the game files (from the PC, headset connected via USB)
-     adb push "C:\GOG Games\Star Wars - X-Wing Alliance\." /sdcard/Android/data/org.openxwa.quest/files/XWA
-   Use your own install path. The "\." at the end copies the folder's
-   CONTENTS, so RESDATA.TXT etc. must end up directly in .../files/XWA/.
-   Check with:
+3. Check
      adb shell ls /sdcard/Android/data/org.openxwa.quest/files/XWA
-   (Windows Explorer often can't see Android/data on the Quest, so adb or
-   the SideQuest file browser is the reliable way.)
+   should list RESDATA.TXT and the game folders.
 
 4. Play
-   In the headset choose "Try Again" (point with the right controller, pull
-   the trigger) or restart the app. On first start the game asks for a pilot
+   In the headset: Library -> filter "Unknown sources" -> OpenXWA. On first start the game asks for a pilot
    name: a keyboard appears on the virtual screen, type with the laser
    pointer and press Enter. Controls are the same as the PC VR build:
      right stick = pitch/yaw, left stick X = roll, left stick Y = throttle lever,

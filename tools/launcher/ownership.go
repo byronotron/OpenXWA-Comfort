@@ -82,7 +82,8 @@ func foreignOwner(o owner, appUID int) bool {
 	return false
 }
 
-var userIDRe = regexp.MustCompile(`(?m)^\s*userId=(\d+)`)
+// Android 13 and older print "userId=", Android 14 "appId=".
+var userIDRe = regexp.MustCompile(`(?m)^\s*(?:userId|appId)=(\d+)`)
 
 // parseAppUID reads the app's uid from dumpsys package output.
 func parseAppUID(dumpsys string) int {
@@ -91,7 +92,7 @@ func parseAppUID(dumpsys string) int {
 		return 0
 	}
 	if m := userIDRe.FindStringSubmatch(dumpsys[i:]); m != nil {
-		n, _ := strconv.Atoi(m[1])
+		n, _ := strconv.Atoi(m[len(m)-1])
 		return n
 	}
 	return 0
@@ -132,12 +133,23 @@ func (a *app) remoteOwners(paths ...string) map[string]owner {
 // the app is started to make them again.
 func (a *app) prepareAppFolder() error {
 	fixed := false
+	a.tryHelper() // also makes XWA when it has the helper
 	for {
 		if appCtx.Err() != nil {
 			return errClosed
 		}
 		base, game := a.remoteBase(), a.remoteGame()
 		if !a.remoteHasEntry(base, "XWA") {
+			if a.helper {
+				if err := a.helperMkdirs("XWA"); err != nil {
+					return fail("OpenXWA could not create its game folder on the headset:\n  %v", err)
+				}
+				if !a.remoteHasEntry(base, "XWA") {
+					return fail("OpenXWA created its game folder, but the launcher cannot see it.\n" +
+						"Please collect the logs and report this, naming your headset model.")
+				}
+				continue
+			}
 			if err := a.waitForAppFolder(); err != nil {
 				return err
 			}
@@ -169,7 +181,11 @@ func (a *app) prepareAppFolder() error {
 		break
 	}
 	a.cleanupUnreadableCopies()
-	if err := a.probeCopyOwnership(); err != nil {
+	if a.helper {
+		if err := a.removeShellLeftovers(); err != nil {
+			return err
+		}
+	} else if err := a.probeCopyOwnership(); err != nil {
 		return err
 	}
 	say("The OpenXWA folder on the headset is ready.")

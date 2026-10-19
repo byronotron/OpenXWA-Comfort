@@ -77,6 +77,12 @@ func (a *app) copyPilots() error {
 		say("Pilots are not copied.")
 		return nil
 	}
+	if a.helper {
+		if err := a.importFiles("Copying pilots", itemsOf(files), "pilot-import"); err != nil {
+			return err
+		}
+		return a.pilotsDone()
+	}
 	// pilot-import is made by mkdir only where such folders belong to the app
 	// (see probeCopyOwnership); otherwise adb push makes it.
 	if a.mkdirOK {

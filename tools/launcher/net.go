@@ -15,7 +15,7 @@ import (
 
 var errNotWritable = errors.New("folder is not writable")
 
-func userAgent() string { return "OpenXWA-Launcher/" + version }
+func userAgent() string { return "OpenXWA-VR-Launcher/" + version }
 
 // downloadClient has no overall time limit (downloads can be slow) but gives
 // up when the server does not answer at all. Proxies come from the

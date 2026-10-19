@@ -20,7 +20,7 @@ Install (and update)
 --------------------
 1. Unzip this folder anywhere on the PC.
 2. Connect the headset to the PC with the USB cable.
-3. Double-click OpenXWA-Launcher.exe and follow the steps in the window.
+3. Double-click OpenXWA-VR-Launcher.exe and follow the steps in the window.
    It finds your X-Wing Alliance, installs the app on the headset, copies
    the game files (about 1 GB, a few minutes), checks every file arrived
    and asks whether to bring your PC pilots along.
@@ -28,8 +28,9 @@ Install (and update)
    "Always allow from this computer").
 4. Put on the headset: Library -> filter "Unknown sources" -> OpenXWA.
 
-Keep the headset on your head when the launcher asks you to: OpenXWA has
-to start once on the headset to create its own folder.
+After you have allowed USB debugging once, the headset can stay on the desk
+(switched on, cable connected) while the launcher copies: the OpenXWA app
+receives and unpacks the files itself, without starting the game.
 
 Steam Frame: turn on Developer Mode, start "Lepton Development" from your
 Steam Library and keep it running; the launcher then connects to it over
@@ -48,7 +49,7 @@ app and copies only missing or changed files; your pilots and settings
 stay. The launcher also tells you when a new version is out.
 
 If the game was found somewhere unusual: drag the X-Wing Alliance folder
-onto OpenXWA-Launcher.exe, or paste its path when the launcher asks.
+onto OpenXWA-VR-Launcher.exe, or paste its path when the launcher asks.
 
 
 Controls
@@ -79,11 +80,16 @@ game files and your pilots on the headset.
 
 Manual install without the launcher
 -----------------------------------
+Files copied with "adb push" belong to the wrong user on Quest, so the game
+cannot read them. Let the app unpack a zip instead:
   adb install -r OpenXWA-quest-@VERSION@.apk
-  (start the app once, then)
-  adb push "<your X-Wing Alliance folder>\." /sdcard/Android/data/org.openxwa.quest/files/XWA
-RESDATA.TXT must end up directly in .../files/XWA. Large copies with adb
-push can silently skip files, which is why the launcher exists.
+  Zip the CONTENTS of your X-Wing Alliance folder into xwa.zip (select
+  everything inside the folder -> Send to -> Compressed (zipped) folder), so
+  RESDATA.TXT sits at the top of the zip. Then, in Command Prompt (cmd, not
+  PowerShell):
+  adb exec-in content write --uri content://org.openxwa.quest.setup/import < xwa.zip
+  adb shell content call --uri content://org.openxwa.quest.setup --method unzip --arg XWA
+The last command prints the number of files unpacked.
 
 
 Licence

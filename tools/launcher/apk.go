@@ -37,7 +37,7 @@ func (a *app) findAPK() error {
 		return fail("%s", "The OpenXWA app (OpenXWA-quest-<version>.apk) was not found next to the\n"+
 			"launcher in:\n  "+a.exeDir+"\n"+
 			"Please unzip the whole OpenXWA zip file into a folder first, then start\n"+
-			"OpenXWA-Launcher.exe from that folder.")
+			"OpenXWA-VR-Launcher.exe from that folder.")
 	}
 	a.apkPath = filepath.Join(a.exeDir, best)
 	a.apkVersion = bestVer

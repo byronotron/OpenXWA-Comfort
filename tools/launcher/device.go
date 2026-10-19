@@ -66,13 +66,14 @@ func waitState(devs []adbDevice) string {
 func waitMessage(state string) string {
 	switch state {
 	case "none":
-		return "Connect the headset to this computer with a USB-C cable and put it on.\n" +
+		return "Connect the headset to this computer with a USB-C cable and switch it on.\n" +
 			"(Developer mode must be on for the headset. See README.txt.)"
 	case "unauthorized":
 		return "The headset is connected but has not allowed this computer yet.\n" +
 			"Put on the headset and look for the \"Allow USB debugging?\" prompt. Choose\n" +
 			"Allow (tick \"Always allow from this computer\"). On Steam Frame the prompt may\n" +
-			"appear in the Android (Lepton) environment."
+			"appear in the Android (Lepton) environment.\n" +
+			"This is needed once per computer; after that the headset can stay on the desk."
 	case "offline":
 		return "The headset is connected but not responding (offline).\n" +
 			"Unplug the cable and plug it in again, or try another USB port or cable."

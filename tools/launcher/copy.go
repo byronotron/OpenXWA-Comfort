@@ -280,6 +280,45 @@ func (c *copyProgress) add(files []gameFile) {
 	ui.Progress(&p)
 }
 
+// For streamed copies: bytes and files as they are read, the current
+// folder, a snapshot to roll back to when a batch is retried.
+func (c *copyProgress) addBytes(n int64) {
+	c.mu.Lock()
+	c.p.Bytes += n
+	c.p.Busy = false
+	c.mu.Unlock()
+}
+
+func (c *copyProgress) addFiles(n int) {
+	c.mu.Lock()
+	c.p.Files += n
+	c.mu.Unlock()
+}
+
+func (c *copyProgress) setFolder(label string) {
+	c.mu.Lock()
+	c.p.Folder = label
+	c.mu.Unlock()
+}
+
+func (c *copyProgress) unpacking() {
+	c.mu.Lock()
+	c.p.Folder, c.p.Busy = "unpacking on the headset", true
+	c.mu.Unlock()
+}
+
+func (c *copyProgress) snapshot() Progress {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.p
+}
+
+func (c *copyProgress) restore(p Progress) {
+	c.mu.Lock()
+	c.p.Files, c.p.Bytes = p.Files, p.Bytes
+	c.mu.Unlock()
+}
+
 func (c *copyProgress) finish() {
 	close(c.stop)
 	c.mu.Lock()
@@ -457,6 +496,16 @@ func (a *app) copyMissing(files []gameFile) error {
 	} else {
 		say("%s to copy (new or changed, %s).", plural(len(todo), "file"), humanSize(totalSize(todo)))
 	}
+	if a.helper {
+		// The zip of one batch sits on the headset while it is unpacked.
+		if err := a.checkFreeSpace(totalSize(todo) + importBatchSize); err != nil {
+			return err
+		}
+		if err := a.importFiles("Copying", itemsOf(todo), "XWA"); err != nil {
+			return err
+		}
+		return a.verifyGame(files)
+	}
 	if err := a.checkFreeSpace(totalSize(todo)); err != nil {
 		return err
 	}
@@ -513,6 +562,12 @@ func (a *app) verifyGame(files []gameFile) error {
 			return &userError{msg: b.String()}
 		}
 		say("%s did not arrive correctly. Copying again (try %d of %d)...", plural(len(bad), "file"), round, rounds)
+		if a.helper {
+			if err := a.importFiles("Copying again", itemsOf(bad), "XWA"); err != nil {
+				return err
+			}
+			continue
+		}
 		var jobs []pushJob
 		for _, f := range bad {
 			jobs = append(jobs, singleFileJob(a.remoteGame(), f))
@@ -536,6 +591,14 @@ func manifestText(files []gameFile) string {
 
 func (a *app) writeManifest(files []gameFile) error {
 	text := manifestText(files)
+	if a.helper {
+		item := importItem{Rel: manifestName, Data: []byte(text), Size: int64(len(text))}
+		if err := a.importFiles("", []importItem{item}, "XWA"); err != nil {
+			return err
+		}
+		logf("install file list written (%d files)", len(files))
+		return nil
+	}
 	tmp, err := os.CreateTemp("", "openxwa-install-files-*.txt")
 	if err != nil {
 		return fail("Could not write a temporary file: %v", err)

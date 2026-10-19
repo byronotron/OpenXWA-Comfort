@@ -1,4 +1,4 @@
-# OpenXWA Launcher (PC) - plan
+# OpenXWA-VR Launcher (PC) - plan
 
 Windows PC app (one portable .exe, no install) that puts OpenXWA and the
 user's own X-Wing Alliance game files on a standalone headset over USB.
@@ -6,14 +6,22 @@ Quest, Pico and Steam Frame use the same steps. Mac/Linux later.
 Implemented in this folder (Go, standard library only; build.sh): a window UI
 (embedded page in an Edge/Chrome app window, web/index.html) or --console.
 This file records the original design; see the code for the current flow
-(never creating the app folder, ownership checks, Steam Frame via Lepton).
+(ownership checks, Steam Frame via Lepton).
+
+Since 1.0.0-rc6 the files are not pushed: on Quest (Horizon OS 14) every
+file and folder adb makes belongs to the "shell" user and the app cannot
+read it. The APK has a helper (SetupProvider, see appimport.go) that adb
+reaches without starting the game: the launcher zips the files while
+streaming them into the app (exec-in content write), and the app unpacks
+them itself (content call unzip), in batches of 256 MB. So the headset can
+stay on the desk. Older apps without the helper fall back to pushing.
 
 ## Distribution
 
 One zip per release on GitHub Releases (neitey/OpenXWA-Quest):
 
     OpenXWA-Quest-<version>.zip
-      OpenXWA-Launcher.exe
+      OpenXWA-VR-Launcher.exe
       OpenXWA-quest-<version>.apk
       README.txt
       THIRD-PARTY-NOTICES.txt
@@ -45,8 +53,7 @@ repo. The APK keeps being signed locally; its key stays out of the repo.
    authorised; read the device model (Quest / Pico / Steam Frame).
 3. Install or update the APK (`adb install -r`). On a signature mismatch,
    stop and explain; never uninstall (that deletes the game files).
-4. Start the app once in the background so it creates its own folder,
-   then stop it.
+4. Let the app create its own folder (rc6+: through its helper).
 5. Build the PC file list with sizes; skip files the port doesn't use
    (.exe, .dll).
 6. Ask whether to bring existing PC pilot files over.

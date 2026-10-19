@@ -8,11 +8,11 @@ R=/root/OpenXWA
 OUT=/root/out/release
 NAME=OpenXWA-Quest-$VER
 APK=/root/out/OpenXWA-quest-$VER.apk
-EXE=$R/tools/launcher/dist/OpenXWA-Launcher.exe
+EXE=$R/tools/launcher/dist/OpenXWA-VR-Launcher.exe
 test -f "$APK" && test -f "$EXE"
 rm -rf "$OUT/$NAME" "$OUT/$NAME.zip"
 mkdir -p "$OUT/$NAME"
-cp "$EXE" "$OUT/$NAME/OpenXWA-Launcher.exe"
+cp "$EXE" "$OUT/$NAME/OpenXWA-VR-Launcher.exe"
 cp "$APK" "$OUT/$NAME/OpenXWA-quest-$VER.apk"
 sed "s/@VERSION@/$VER/g" $R/packaging/quest/README-RELEASE.txt | sed 's/$/\r/' > "$OUT/$NAME/README.txt"
 sed 's/$/\r/' $R/packaging/quest/THIRD-PARTY-NOTICES.txt > "$OUT/$NAME/THIRD-PARTY-NOTICES.txt"

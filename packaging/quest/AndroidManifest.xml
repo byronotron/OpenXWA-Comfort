@@ -79,5 +79,13 @@
                 <category android:name="org.khronos.openxr.intent.category.IMMERSIVE_HMD" />
             </intent-filter>
         </activity>
+
+        <!-- For the PC launcher over USB (adb only, checked in the code): makes
+             the app's folders and unpacks the game files as the app, so they
+             belong to it. See SetupProvider.java. -->
+        <provider
+            android:name="org.openxwa.quest.SetupProvider"
+            android:authorities="org.openxwa.quest.setup"
+            android:exported="true" />
     </application>
 </manifest>
