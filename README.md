@@ -99,7 +99,6 @@ OpenXR is part of the same source. The upstream build notes are below.
 
 - **AI assisted coding:** Neitey
 - **VR design, menu environments & QA:** MarkD
-- **Radial menu:** code borrowed from Team Beef's JK:Academy VR
 - **OpenXWA:** Adrien Moulin and contributors
 
 VR-specific code was generated using Claude AI; additional artwork was created
