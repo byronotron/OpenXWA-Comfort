@@ -9,7 +9,11 @@ open-source reimplementation of the 1999 game by Adrien Moulin. It runs the
 original game data with a VR cockpit, motion controllers and a full VR menu
 environment.
 
-![Screenshot of the Azzameen hangar in OpenXWA](assets/openxwa_hangar.jpg)
+[![OpenXWA VR gameplay on Meta Quest 3: click for the video](assets/vr/gameplay.gif)](assets/vr/openxwa-vr-trailer.mp4)
+
+*Recorded on a Meta Quest 3. Click the picture for an 80-second video.*
+
+![In the X-wing cockpit, with the HUD panels around the canopy](assets/vr/cockpit_flight.jpg)
 
 > [!IMPORTANT]
 > No content from the original game is included. You need your own installed
@@ -21,6 +25,8 @@ environment.
 ## Features
 
 - Seated VR cockpits for the playable craft, with the HUD placed per cockpit
+- A touch console on your lap: energy, shields, targeting, wingmen and ship
+  commands at your fingertips
 - Motion controllers: flight stick and throttle lever in the cockpit, or the
   thumbsticks
 - Laser pointer for every menu, and a virtual keyboard for pilot names
@@ -33,6 +39,17 @@ environment.
 - Death menu with Restart Mission and an in-mission Quick Save / Quick Load
 - Pause menu pages for Review Briefing and Mission Hints
 - Your PC pilots can be brought along
+
+## Screenshots
+
+| | |
+|---|---|
+| ![The touch console on the pilot's lap](assets/vr/cockpit_console.jpg) | ![The radial menu, opened with a grip](assets/vr/radial_menu.jpg) |
+| Touch console: energy, targeting, wingmen, ship | Radial menu: hold a grip, point, pull the trigger |
+| ![The tactical map on the side panel](assets/vr/tactical_map.jpg) | ![Controller labels showing each button](assets/vr/controller_labels.jpg) |
+| Side panel with the tactical map | Every button labelled on the controller |
+
+![The VR menu environment around the game screen](assets/vr/menu_environment.jpg)
 
 ## Install
 
