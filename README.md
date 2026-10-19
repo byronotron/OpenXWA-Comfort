@@ -1,24 +1,127 @@
-# OpenXWA
+# OpenXWA VR
+
+*Star Wars: X-Wing Alliance* in virtual reality, standalone on Meta Quest 3 /
+3S: no PC needed while you play. Pico and Steam Frame are supported but
+experimental.
+
+OpenXWA VR is a fork of [OpenXWA](https://github.com/elyosh/OpenXWA), the
+open-source reimplementation of the 1999 game by Adrien Moulin. It runs the
+original game data with a VR cockpit, motion controllers and a full VR menu
+environment.
+
+![Screenshot of the Azzameen hangar in OpenXWA](assets/openxwa_hangar.jpg)
+
+> [!IMPORTANT]
+> No content from the original game is included. You need your own installed
+> *X-Wing Alliance* on a Windows PC, from
+> [GOG](https://www.gog.com/en/game/star_wars_xwing_alliance) or
+> [Steam](https://store.steampowered.com/app/361670/STAR_WARS__XWing_Alliance/)
+> (the original CD version works too).
+
+## Features
+
+- Seated VR cockpits for the playable craft, with the HUD placed per cockpit
+- Motion controllers: flight stick and throttle lever in the cockpit, or the
+  thumbsticks
+- Laser pointer for every menu, and a virtual keyboard for pilot names
+- Side panel on your right: tactical map, voice commands and the button
+  mapping
+- Radial menu (hold a grip) for wingman orders and other commands
+- Voice commands, recognised on the headset: double-tap a thumb rest and
+  say e.g. "attack my target"
+- VR menu environments around the game screen
+- Death menu with Restart Mission and an in-mission Quick Save / Quick Load
+- Pause menu pages for Review Briefing and Mission Hints
+- Your PC pilots can be brought along
+
+## Install
+
+You need a headset in Developer Mode (Meta Horizon phone app -> Devices ->
+your headset -> Headset settings -> Developer Mode) and a USB-C cable that
+carries data.
+
+1. Download `OpenXWA-Quest-<version>.zip` from
+   [Releases](https://github.com/neitey/OpenXWA-Quest/releases/latest) and
+   unzip it on your Windows PC.
+2. Connect the headset by USB and run `OpenXWA-VR-Launcher.exe`.
+3. The launcher finds your X-Wing Alliance, installs the app, copies the game
+   files (about a minute) and checks them. Put the headset on once to allow
+   USB debugging ("Always allow from this computer"); after that it can stay
+   on the desk.
+4. In the headset: Library -> "Unknown sources" -> OpenXWA.
+
+Updating works the same way: run the new launcher; it updates the app and
+copies only what changed. Your pilots and settings stay. `README.txt` in the
+zip has the manual install steps without the launcher.
+
+Windows may warn that the launcher is not code-signed: "More info" -> "Run
+anyway". If it cannot find Google's adb tool (SideQuest and Meta Quest
+Developer Hub bring their own), it offers to download it from Google.
+
+**Steam Frame:** turn on Developer Mode, start "Lepton Development" and keep
+it running; the launcher connects to it over USB (or Wi-Fi).
+
+## Controls
+
+| Control | Action |
+|---|---|
+| Right stick | Pitch / yaw |
+| Left stick | Roll (X), throttle (Y) |
+| Right trigger | Fire |
+| Left trigger | Change weapon |
+| Right grip | Countermeasures |
+| Left grip (hold) | Radial menu |
+| A / B | Next / previous target |
+| X | Target closest enemy |
+| Y | Target my attacker |
+| Right stick click | Target in sights |
+| Left stick click | Link weapons |
+| Left menu button | Game menu |
+| Thumb rest (double-tap, then speak) | Voice command |
+
+In menus the right controller is a laser pointer. Taking the headset off or
+opening the Meta menu pauses the game. VR settings and a controller help page
+are in the game menu under **VR Options**.
+
+## Problems
+
+Run the launcher and choose **Collect logs** at the end (or start it with
+`--logs`); it saves the game's log files next to the launcher. Please include
+them with a report.
+
+## Building
+
+The Android build uses the Android NDK with CMake (`packaging/quest`); the
+PC launcher is a Go program in `tools/launcher` (`build.sh`). PC VR through
+OpenXR is part of the same source. The upstream build notes are below.
+
+## Credits
+
+- **AI assisted coding:** Neitey
+- **VR design, menu environments & QA:** MarkD
+- **Radial menu:** code borrowed from Team Beef's JK:Academy VR
+- **OpenXWA:** Adrien Moulin and contributors
+
+VR-specific code was generated using Claude AI; additional artwork was created
+using ChatGPT. Third-party components and their licences are listed in
+`packaging/quest/THIRD-PARTY-NOTICES.txt`.
+
+## Licence
+
+GPL version 3 (`LICENSE`). Star Wars and X-Wing Alliance are trademarks of
+their owners; this is an unofficial fan project and contains no game data.
+
+## About OpenXWA (upstream)
 
 [![GitHub Release](https://img.shields.io/github/v/release/elyosh/OpenXWA)](https://github.com/elyosh/OpenXWA/releases/latest)
 [![Visit our Discord server](https://img.shields.io/discord/1533001488391995442)](https://discord.gg/WBvYzczWfG)
 
-![Screenshot of the Azzameen hangar in OpenXWA](assets/openxwa_hangar.jpg)
+OpenXWA is an open-source reimplementation of *Star Wars: X-Wing Alliance*
+for Windows, macOS, and Linux. It runs the original game data natively on
+current systems while preserving the original experience and offering
+optional modern enhancements. The sections below are from its README.
 
-OpenXWA is an open-source reimplementation of the 1999 game *Star Wars:
-X-Wing Alliance* for Windows, macOS, and Linux. It runs the original game data
-natively on current systems while preserving the original experience and
-offering optional modern enhancements.
-
-> [!IMPORTANT]
-> OpenXWA does not include any content from the original game. A complete
-> installation of *X-Wing Alliance* is required.
->
-> The game is available from
-> [GOG](https://www.gog.com/en/game/star_wars_xwing_alliance) and
-> [Steam](https://store.steampowered.com/app/361670/STAR_WARS__XWing_Alliance/).
-
-## Graphics
+### Graphics
 
 OpenXWA offers classic and modern graphics modes. Classic mode preserves the
 original game's appearance, while modern mode adds high-resolution rendering
@@ -37,7 +140,7 @@ Original OPT models work in both modes. Modern mode can also load optional
 replacement models, textures, interface art, and videos without modifying the
 original game data.
 
-## Smoother flight and modern controls
+### Smoother flight and modern controls
 
 Single-player flight can run at a higher simulation rate for smoother motion
 and more responsive input on modern displays. A classic timing mode remains
@@ -49,7 +152,7 @@ and keyboard, so a joystick or gamepad is no longer required. Modern gamepads
 and joysticks are also supported, with force-feedback effects translated to
 gamepad rumble.
 
-## Getting started
+### Getting started
 
 1. Download the latest package for your platform from
    [GitHub Releases](https://github.com/elyosh/OpenXWA/releases/latest).
@@ -82,7 +185,7 @@ command line:
 OpenXWA --game-data /path/to/xwa-data
 ```
 
-## Supported platforms
+### Supported platforms
 
 | Platform | Target | Graphics backend |
 |---|---|---|
@@ -90,7 +193,7 @@ OpenXWA --game-data /path/to/xwa-data
 | macOS | macOS 13 or later; arm64 or x86-64 | Metal |
 | Linux | x86-64; glibc 2.35 or later | Vulkan |
 
-## Current state
+### Current state
 
 Every original function not dedicated to multiplayer has been reimplemented,
 including the digital iMUSE audio engine.
@@ -99,18 +202,18 @@ OpenXWA remains under active development. Bugs and differences from the
 original game are still possible despite this level of coverage. Multiplayer
 is not implemented.
 
-## OpenTIE
+### OpenTIE
 
 Fans of Totally Games' space simulators may also be interested in
 [OpenTIE](https://github.com/elyosh/OpenTIE), an open-source reimplementation
 of *Star Wars: TIE Fighter* for Windows, macOS, and Linux.
 
-## Community
+### Community
 
 Join the [TotallyOpen Discord server](https://discord.gg/WBvYzczWfG) to discuss
 OpenXWA, OpenTIE, development, and the Totally Games flight simulators.
 
-## System requirements
+### System requirements
 
 - a 64-bit system with a modern GPU
 - a complete installation of *X-Wing Alliance*
@@ -120,7 +223,7 @@ Release packages include the required runtime libraries. Keep the executable,
 libraries, resources, and shader directories together when moving an
 installation.
 
-## Building from source
+### Building from source
 
 The build requires CMake 3.20 or later, a C/C++ toolchain, SDL3 3.4, zstd,
 FFmpeg, and SDL_shadercross. Release packaging pins its dependencies and
