@@ -301,9 +301,17 @@ func (c *copyProgress) setFolder(label string) {
 	c.mu.Unlock()
 }
 
-func (c *copyProgress) unpacking() {
+// setPhase changes the label ("Packing (part 2 of 5)", ...); busy shows the
+// busy stripes and hides the folder while one long step runs.
+func (c *copyProgress) setPhase(label string, busy bool) {
 	c.mu.Lock()
-	c.p.Folder, c.p.Busy = "unpacking on the headset", true
+	if label != "" {
+		c.p.Label = label
+	}
+	c.p.Busy = busy
+	if busy {
+		c.p.Folder = ""
+	}
 	c.mu.Unlock()
 }
 

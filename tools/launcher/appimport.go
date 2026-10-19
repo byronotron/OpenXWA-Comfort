@@ -17,18 +17,21 @@ import (
 // The OpenXWA app has a small helper (SetupProvider in the APK) that adb
 // can call without starting the game, so the headset can stay on the desk:
 //
-//	content call --method mkdirs --arg 'XWA'   makes folders as the app
-//	exec-in content write .../import < zip     the app writes a zip we stream
+//	content call --method mkdirs --arg 'XWA'   makes folders (and the obb
+//	                                          folder) as the app
+//	push part.zip <obb>/openxwa-import.zip     the app can read its obb folder
 //	content call --method unzip --arg 'XWA'    the app unpacks it
 //
-// Everything is written by the app, so it belongs to the app. Files and
-// folders made over USB belong to the "shell" user, and on Quest (Horizon
-// OS 14) the app cannot use them.
+// Everything in the files folder is written by the app, so it belongs to
+// the app. Files and folders adb makes there belong to the "shell" user,
+// and on Quest (Horizon OS 14) the app cannot use them. Fallback when the
+// obb folder is not readable: the zip is streamed into the app
+// (exec-in content write).
 
 const (
 	helperURI       = "content://org.openxwa.quest.setup"
 	importZipName   = ".openxwa-import.zip"
-	importBatchSize = 256 << 20 // bytes of game files per zip
+	importBatchSize = 128 << 20 // bytes of game files per zip
 	importBatchMax  = 2500      // files per zip
 )
 
@@ -175,8 +178,8 @@ func importBatches(items []importItem) [][]importItem {
 }
 
 // importFiles puts the items into dest (relative to the app's files folder,
-// e.g. "XWA") through the app: zipped while sending, unpacked by the app.
-// verb labels the progress display ("" shows none).
+// e.g. "XWA") through the app, in zips of up to importBatchSize that the
+// app unpacks. verb labels the progress display ("" shows none).
 func (a *app) importFiles(verb string, items []importItem, dest string) error {
 	var files []gameFile
 	for _, it := range items {
@@ -191,28 +194,59 @@ func (a *app) importFiles(verb string, items []importItem, dest string) error {
 	defer p.finish()
 	batches := importBatches(items)
 	for bi, b := range batches {
+		part := ""
+		if len(batches) > 1 {
+			part = fmt.Sprintf(" (part %d of %d)", bi+1, len(batches))
+		}
 		for try := 1; ; try++ {
 			mark := p.snapshot()
-			err := a.importBatch(p, b, dest)
+			err := a.importBatch(p, b, dest, verb, part)
 			if err == nil {
 				break
 			}
 			if err == errClosed || appCtx.Err() != nil {
 				return errClosed
 			}
+			p.restore(mark)
+			if err == errImportModeChanged {
+				try--
+				continue
+			}
 			logf("import %d of %d failed (try %d): %v", bi+1, len(batches), try, err)
-			if a.headsetGone() {
+			if a.headsetGone() && !a.waitForHeadset() {
 				return errDisconnected
 			}
-			if try == 3 {
+			if try == 4 {
 				return fail("Could not copy the files to the headset:\n  %v\n\n"+
 					"Check the USB cable (try another cable or USB port) and that the headset\n"+
 					"has enough free space, then try again. Only what is missing is copied.", err)
 			}
-			p.restore(mark)
 		}
 	}
 	return nil
+}
+
+// waitForHeadset waits up to 90 s for a dropped USB connection to come back.
+func (a *app) waitForHeadset() bool {
+	say("The connection to the headset dropped. Waiting for it to come back...")
+	start := time.Now()
+	for time.Since(start) < 90*time.Second {
+		if !sleepCtx(2 * time.Second) {
+			return false
+		}
+		out, err := a.adb.runQuiet(10*time.Second, "get-state")
+		if err == nil && strings.TrimSpace(out) == "device" {
+			logf("headset back after %.0f s", time.Since(start).Seconds())
+			say("The headset is back. Continuing.")
+			sleepCtx(2 * time.Second)
+			return true
+		}
+		if int(time.Since(start).Seconds())%20 < 2 {
+			a.adb.runQuiet(15*time.Second, "reconnect", "offline")
+		}
+	}
+	logf("headset did not come back")
+	return false
 }
 
 type countWriter struct {
@@ -286,82 +320,190 @@ func writeZip(w io.Writer, items []importItem, p *copyProgress) error {
 	return zw.Close()
 }
 
-// importBatch streams one zip into the app and lets it unpack it.
-func (a *app) importBatch(p *copyProgress, items []importItem, dest string) error {
+var errImportModeChanged = errors.New("import mode changed")
+
+// remoteObb is the app's obb folder: the app can read what adb copies there
+// (it is where stores and sideloading tools put game data), unlike
+// anything adb copies into its files folder.
+func (a *app) remoteObb() string { return a.storage + "/Android/obb/" + appPackage }
+
+const obbZipName = "openxwa-import.zip"
+
+// importBatch puts one zip on the headset and lets the app unpack it. The
+// zip is packed into a temporary file and copied with adb push into the
+// app's obb folder. If the app cannot read it there, the remaining zips are
+// streamed into the app instead (importMode "stream").
+func (a *app) importBatch(p *copyProgress, items []importItem, dest, verb, part string) error {
+	if a.importMode == "stream" {
+		p.setPhase(verb+part, false)
+		return a.importBatchStream(p, items, dest, verb, part)
+	}
+	p.setPhase("Packing"+part, false)
+	tmp, err := os.CreateTemp("", "openxwa-import-*.zip")
+	if err != nil {
+		return fmt.Errorf("cannot create a temporary file: %v", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	werr := writeZip(tmp, items, p)
+	cerr := tmp.Close()
+	if werr != nil {
+		return fmt.Errorf("packing failed: %v", werr)
+	}
+	if cerr != nil {
+		return fmt.Errorf("packing failed: %v", cerr)
+	}
+	st, err := os.Stat(tmpPath)
+	if err != nil {
+		return err
+	}
+	remote := a.remoteObb() + "/" + obbZipName
+	p.setPhase("Sending"+part, true)
+	out, err := a.adb.run(0, "push", tmpPath, remote)
+	if err == errClosed {
+		return err
+	}
+	if err != nil || strings.Contains(out, "adb: error") {
+		return fmt.Errorf("sending failed: %s", firstLine(strings.TrimSpace(out)))
+	}
+	if sz, err := a.adb.runQuiet(30*time.Second, "shell", "stat -c %s "+shQuote(remote)); err == nil {
+		if n, perr := strconv.ParseInt(firstLine(strings.TrimSpace(sz)), 10, 64); perr == nil && n != st.Size() {
+			return fmt.Errorf("only %s of %s arrived", humanSize(n), humanSize(st.Size()))
+		}
+	}
+	p.setPhase("Unpacking on the headset"+part, true)
+	r, err := a.helperCall(0, "unzip", dest)
+	defer a.adb.runQuiet(30*time.Second, "shell", "rm -f "+shQuote(remote))
+	if err != nil {
+		if strings.Contains(err.Error(), obbZipName) && a.importMode == "" {
+			// The app cannot read what adb put in its obb folder on this
+			// headset: stream the zips into the app from now on.
+			logf("the app cannot read the zip in its obb folder (%v); streaming from now on", err)
+			a.importMode = "stream"
+			return errImportModeChanged
+		}
+		return fmt.Errorf("unpacking on the headset failed: %v", err)
+	}
+	logf("unpacked: %v", r)
+	if err := checkUnpacked(r, len(items)); err != nil {
+		return err
+	}
+	a.importMode = "obb" // confirmed working
+	return nil
+}
+
+func checkUnpacked(r helperResult, want int) error {
+	if r["files"] != strconv.Itoa(want) || (r["skipped"] != "" && r["skipped"] != "0") {
+		return fmt.Errorf("the headset unpacked %s of %d files (%s skipped)", r["files"], want, r["skipped"])
+	}
+	return nil
+}
+
+// importBatchStream streams one zip into the app (adb exec-in, content
+// write) and lets it unpack it. adb's input stays open until the headset
+// has every byte: closing it earlier drops data still on its way and
+// upset the adb server on Windows.
+func (a *app) importBatchStream(p *copyProgress, items []importItem, dest, verb, part string) error {
+	a.adb.runQuiet(30*time.Second, "shell", "rm -f "+shQuote(a.remoteObb()+"/"+obbZipName))
 	pr, pw := io.Pipe()
-	type result struct {
+	type zipResult struct {
 		n   int64
 		err error
 	}
-	done := make(chan result, 1)
+	zipDone := make(chan zipResult, 1)
+	adbDone := make(chan adbResult, 1)
 	go func() {
 		cw := &countWriter{w: pw}
 		err := writeZip(cw, items, p)
-		pw.CloseWithError(err)
-		done <- result{cw.n, err}
+		if err != nil {
+			pw.CloseWithError(err)
+		}
+		zipDone <- zipResult{cw.n, err}
 	}()
-	out, err := a.adb.stream(0, pr, "exec-in", "content", "write", "--uri", helperURI+"/import")
-	pr.CloseWithError(io.ErrClosedPipe) // adb stopped early: unblock the zip writer
-	res := <-done
-	if err != nil {
-		return fmt.Errorf("sending failed: %v %s", err, strings.TrimSpace(out))
+	go func() {
+		out, err := a.adb.stream(0, pr, "exec-in", "content", "write", "--uri", helperURI+"/import")
+		pr.CloseWithError(io.ErrClosedPipe) // unblock the zip writer
+		adbDone <- adbResult{out, err}
+	}()
+	var zr zipResult
+	select {
+	case zr = <-zipDone:
+	case ar := <-adbDone:
+		<-zipDone
+		return fmt.Errorf("sending stopped early: %v %s", ar.err, strings.TrimSpace(ar.out))
 	}
-	if res.err != nil {
-		return fmt.Errorf("sending failed: %v", res.err)
+	if zr.err != nil {
+		<-adbDone
+		return fmt.Errorf("sending failed: %v", zr.err)
 	}
-	if msg := strings.TrimSpace(out); msg != "" {
-		logf("content write said: %s", msg)
+	p.setPhase("Sending"+part, true)
+	werr := a.waitImportSize(zr.n, adbDone)
+	pw.Close()
+	select {
+	case ar := <-adbDone:
+		if msg := strings.TrimSpace(ar.out); msg != "" {
+			logf("content write said: %s", msg)
+		}
+	case <-time.After(60 * time.Second):
+		logf("adb exec-in did not end")
 	}
-	if err := a.waitImportSize(res.n); err != nil {
-		return err
+	if werr != nil {
+		return werr
 	}
-	p.unpacking()
+	p.setPhase("Unpacking on the headset"+part, true)
 	r, err := a.helperCall(0, "unzip", dest)
 	if err != nil {
 		return fmt.Errorf("unpacking on the headset failed: %v", err)
 	}
 	logf("unpacked: %v", r)
-	if r["files"] != strconv.Itoa(len(items)) || (r["skipped"] != "" && r["skipped"] != "0") {
-		return fmt.Errorf("the headset unpacked %s of %d files (%s skipped)", r["files"], len(items), r["skipped"])
-	}
-	return nil
+	return checkUnpacked(r, len(items))
 }
 
-// waitImportSize waits until the zip on the headset has all n bytes (the
-// app may still be writing the end when adb returns).
-func (a *app) waitImportSize(n int64) error {
+type adbResult struct {
+	out string
+	err error
+}
+
+// waitImportSize waits until the streamed zip on the headset has all n
+// bytes. It stops when adb ends (the result is put back for the caller) or
+// the size stops growing for 20 s.
+func (a *app) waitImportSize(n int64, adbDone chan adbResult) error {
 	remote := a.remoteBase() + "/" + importZipName
 	var last int64 = -1
-	stable := 0
-	for i := 0; i < 120; i++ {
+	lastChange := time.Now()
+	adbEnded := false
+	unreadable := 0
+	for {
 		out, err := a.adb.runQuiet(30*time.Second, "shell", "stat -c %s "+shQuote(remote))
 		if err == errClosed {
 			return err
 		}
 		size, perr := strconv.ParseInt(firstLine(strings.TrimSpace(out)), 10, 64)
-		if perr != nil {
-			if i >= 4 {
-				logf("cannot read the size of the zip on the headset (%q); the app checks it", strings.TrimSpace(out))
-				return nil
+		switch {
+		case perr != nil:
+			unreadable++
+			if unreadable >= 20 {
+				return fmt.Errorf("cannot read the size of the zip on the headset: %s", firstLine(strings.TrimSpace(out)))
 			}
-		} else {
-			if size == n {
-				logf("zip on the headset: %d bytes", n)
-				return nil
-			}
-			if size == last {
-				stable++
-				if stable >= 10 {
-					return fmt.Errorf("only %s of %s arrived", humanSize(size), humanSize(n))
-				}
-			} else {
-				stable = 0
-			}
-			last = size
+		case size == n:
+			logf("zip on the headset: %d bytes", n)
+			return nil
+		case size != last:
+			last, lastChange = size, time.Now()
 		}
-		if !sleepCtx(500 * time.Millisecond) {
+		if adbEnded {
+			return fmt.Errorf("only %s of %s arrived", humanSize(max(last, 0)), humanSize(n))
+		}
+		if time.Since(lastChange) > 20*time.Second {
+			return fmt.Errorf("only %s of %s arrived (stopped)", humanSize(max(last, 0)), humanSize(n))
+		}
+		select {
+		case ar := <-adbDone:
+			adbDone <- ar
+			adbEnded = true // check the size once more
+		case <-time.After(500 * time.Millisecond):
+		case <-appCtx.Done():
 			return errClosed
 		}
 	}
-	return fmt.Errorf("the headset did not finish writing the files")
 }

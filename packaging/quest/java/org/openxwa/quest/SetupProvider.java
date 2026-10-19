@@ -23,11 +23,16 @@ import java.util.zip.ZipInputStream;
  * user and the app cannot read them.
  *
  *   adb shell content call --uri content://org.openxwa.quest.setup --method mkdirs --arg 'XWA:pilot-import'
- *       makes folders (':' separated, relative to the app's files folder).
+ *       makes folders (':' separated, relative to the app's files folder),
+ *       and the app's obb folder.
+ *   adb push files.zip /sdcard/Android/obb/org.openxwa.quest/openxwa-import.zip
+ *       (the obb folder is the one place where the app reads what adb copied;
+ *       or, slower and only a fallback:
  *   adb exec-in content write --uri content://org.openxwa.quest.setup/import < files.zip
- *       streams a zip into files/.openxwa-import.zip (written by the app).
+ *       streams it into files/.openxwa-import.zip, written by the app)
  *   adb shell content call --uri content://org.openxwa.quest.setup --method unzip --arg XWA
- *       unpacks it into files/XWA (CRC checked by ZipInputStream), then deletes it.
+ *       unpacks the zip (obb first) into files/XWA (CRC checked by
+ *       ZipInputStream), then deletes it.
  *
  * Paths outside the files folder are skipped. Only adb (shell) or root may
  * call it. Results are Bundles: base, made/asked (mkdirs), files/skipped
@@ -77,6 +82,7 @@ public class SetupProvider extends ContentProvider {
             return null;
         }
         String prefix = base.getCanonicalPath().concat("/");
+        getContext().getObbDir(); // made by the system, so it belongs to the app
         if ("unzip".equals(method)) {
             return unzip(base, prefix, arg);
         }
@@ -110,7 +116,10 @@ public class SetupProvider extends ContentProvider {
             arg = "XWA";
         }
         File dest = new File(base, arg);
-        File zip = new File(base, ".openxwa-import.zip");
+        File zip = new File(getContext().getObbDir(), "openxwa-import.zip");
+        if (!zip.exists()) {
+            zip = new File(base, ".openxwa-import.zip");
+        }
         ZipInputStream in = new ZipInputStream(new BufferedInputStream(new FileInputStream(zip), 65536));
         byte[] buf = new byte[65536];
         int files = 0;
@@ -140,6 +149,7 @@ public class SetupProvider extends ContentProvider {
         zip.delete();
         Bundle out = new Bundle();
         out.putString("base", prefix);
+        out.putString("zip", zip.getPath());
         out.putInt("files", files);
         out.putInt("skipped", skipped);
         return out;

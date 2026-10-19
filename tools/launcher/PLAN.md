@@ -8,13 +8,18 @@ Implemented in this folder (Go, standard library only; build.sh): a window UI
 This file records the original design; see the code for the current flow
 (ownership checks, Steam Frame via Lepton).
 
-Since 1.0.0-rc6 the files are not pushed: on Quest (Horizon OS 14) every
-file and folder adb makes belongs to the "shell" user and the app cannot
-read it. The APK has a helper (SetupProvider, see appimport.go) that adb
-reaches without starting the game: the launcher zips the files while
-streaming them into the app (exec-in content write), and the app unpacks
-them itself (content call unzip), in batches of 256 MB. So the headset can
-stay on the desk. Older apps without the helper fall back to pushing.
+Since 1.0.0-rc6 the game files are not pushed one by one: on Quest
+(Horizon OS 14) every file and folder adb makes in the app's files folder
+belongs to the "shell" user and the app cannot read it. The APK has a
+helper (SetupProvider, see appimport.go) that adb reaches without starting
+the game. rc7: the launcher packs the files into zips of 128 MB, copies
+each with adb push into the app's obb folder (where the app can read what
+adb copies), and the app unpacks it into its files folder. If the app
+cannot read the obb folder, the zips are streamed into the app instead
+(exec-in content write; adb's input is kept open until every byte has
+arrived, since closing it early crashed the adb server in rc6). A dropped
+USB connection is waited for (90 s). The headset can stay on the desk.
+Older apps without the helper fall back to pushing.
 
 ## Distribution
 

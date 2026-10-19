@@ -85,11 +85,12 @@ cannot read them. Let the app unpack a zip instead:
   adb install -r OpenXWA-quest-@VERSION@.apk
   Zip the CONTENTS of your X-Wing Alliance folder into xwa.zip (select
   everything inside the folder -> Send to -> Compressed (zipped) folder), so
-  RESDATA.TXT sits at the top of the zip. Then, in Command Prompt (cmd, not
-  PowerShell):
-  adb exec-in content write --uri content://org.openxwa.quest.setup/import < xwa.zip
+  RESDATA.TXT sits at the top of the zip. Then:
+  adb shell content call --uri content://org.openxwa.quest.setup --method mkdirs --arg XWA
+  adb push xwa.zip /sdcard/Android/obb/org.openxwa.quest/openxwa-import.zip
   adb shell content call --uri content://org.openxwa.quest.setup --method unzip --arg XWA
-The last command prints the number of files unpacked.
+The last command prints the number of files unpacked; the app deletes the
+zip afterwards.
 
 
 Licence

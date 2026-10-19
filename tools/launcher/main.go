@@ -197,6 +197,7 @@ type app struct {
 	mkdirOK     bool   // folders made with mkdir belong to the app on this headset
 	helper      bool   // the app's helper (SetupProvider) copies the files
 	helperTried bool
+	importMode  string // "" (try obb), "obb" (works), "stream" (fallback)
 
 	// Steam Frame: the Android layer (Lepton) is reached over a second adb
 	// connection.
