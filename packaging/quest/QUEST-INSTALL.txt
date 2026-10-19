@@ -1,8 +1,7 @@
-OpenXWA for Meta Quest 3 (standalone) - 1.0.0 release candidate 8
-==================================================================
+OpenXWA for Meta Quest 3 (standalone) - 1.0.0
+=============================================
 
-This is a release candidate. If something goes wrong, the log file (step 6)
-is what's needed to fix it.
+If something goes wrong, the log file (step 6) is what's needed to fix it.
 
 What you need
   * Quest 3 / 3S (Quest 2 and Pro may also work) in Developer Mode
