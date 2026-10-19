@@ -9,6 +9,7 @@
 #include "xwa/frontend/frontend_text.h"
 #include "xwa_runtime/input/input_bridge.h"
 
+#include <SDL3/SDL.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -151,17 +152,29 @@ void XwaVrKeyboard_BeginFrame(int32_t delta_us) {
 	memset(ui_input.controllers, 0, sizeof ui_input.controllers);
 
 	AeronUi_BeginFrame(g_vrk.ui, &(AeronUiFrameDesc) { .input = &ui_input, .dt_seconds = (float)delta_us * 1e-6f });
+	/* The UI's reference space is 1080 px high; its width follows the game
+	 * screen, which is 4:3 in VR (1440 wide), so fit the keyboard into it
+	 * instead of assuming 1920. */
+	float view_w_ref = 1920.0f;
+	{
+		AeronRectI rect;
+		if (Aeron_GetContentPixelRect(&rect) && rect.height > 0) {
+			view_w_ref = 1080.0f * (float)rect.width / (float)rect.height;
+		}
+	}
+	const float width_ref = SDL_min(1400.0f, view_w_ref - 80.0f);
+	const float x_ref     = (view_w_ref - width_ref) * 0.5f;
 	if (g_vrk.dismissed) {
 		/* Closed: a small button where it was brings it back. */
 		if (AeronUi_BeginWindow(g_vrk.ui, "Keyboard (closed)",
-								&(AeronUiWindowDesc) { .width_ref = 300.0f, .x_ref = 260.0f, .y_ref = 120.0f })) {
+								&(AeronUiWindowDesc) { .width_ref = 300.0f, .x_ref = x_ref, .y_ref = 120.0f })) {
 			if (AeronUi_Button(g_vrk.ui, "Keyboard")) {
 				g_vrk.dismissed = 0;
 			}
 			AeronUi_EndWindow(g_vrk.ui);
 		}
 	} else if (AeronUi_BeginWindow(g_vrk.ui, "Keyboard",
-							&(AeronUiWindowDesc) { .width_ref = 1400.0f, .x_ref = 260.0f, .y_ref = 120.0f })) {
+								   &(AeronUiWindowDesc) { .width_ref = width_ref, .x_ref = x_ref, .y_ref = 120.0f })) {
 		vrk_row("1234567890", 1, "Del", 8);
 		vrk_row("QWERTYUIOP", 0, NULL, 0);
 		vrk_row("ASDFGHJKL", 1, "Enter", 13);

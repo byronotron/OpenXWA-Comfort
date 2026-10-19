@@ -124,6 +124,15 @@ int Frontend_LoadResources(void) {
 	}
 
 	Music_Init(FrontendSound_GetDirectSound());
+#ifdef XWA_MODERN
+	/* The pilot screens before the concourse are silent in the original;
+	 * play the mission-won theme there (the concourse changes it). */
+	if (g_gameConfig.datapadMusicEnabled) {
+		musicState = MUSIC_STATE_FRONTEND_1280;
+		Music_SetState(MUSIC_STATE_FRONTEND_1280);
+		Music_SetVolume(127 * g_gameConfig.datapadMusicVolume / 10);
+	}
+#endif
 	FrontendFileStream_InitSlotBuffer(FRONTEND_FILE_STREAM_SLOT, 1024000, 512000);
 	stream = File_Open(AERON_VFS_ROOT_ASSET, "disk1.id", "r");
 	if (stream) {

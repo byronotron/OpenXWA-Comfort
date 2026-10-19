@@ -3041,8 +3041,16 @@ static void vc_card_draw(void) {
 	vc_text(W * 0.5f + 148.0f + 80.0f, cy + 318.0f, "RIGHT", 22.0f, 1, VC_CYAN, 0.9f);
 	vc_text(W * 0.5f, H - 158.0f, "Flight stick (between your knees): right grip on it = fly, left grip = move it", 17.0f,
 			1, 0.85f, 0.97f, 1.0f, 0.95f);
-	vc_text(W * 0.5f, H - 132.0f, "Voice: double-tap a thumb rest, then say e.g. \"attack my target\", \"target closest enemy\"",
-			17.0f, 1, 0.85f, 0.97f, 1.0f, 0.95f);
+	{
+		const char* voice = getenv("XWA_XR_VOICE");
+		const char* line =
+			voice && (voice[0] == '0' || voice[0] == 'o' || voice[0] == 'O')
+				? "Voice commands are off (game menu -> VR Options -> Voice Commands)"
+			: voice && (voice[0] == 'h' || voice[0] == 'H')
+				? "Voice: hold a thumb rest and say e.g. \"attack my target\", \"target closest enemy\""
+				: "Voice: double-tap a thumb rest, then say e.g. \"attack my target\", \"target closest enemy\"";
+		vc_text(W * 0.5f, H - 132.0f, line, 17.0f, 1, 0.85f, 0.97f, 1.0f, 0.95f);
+	}
 	vc_text(W * 0.5f, H - 104.0f,
 			lh ? "Radial menu: hold the RIGHT grip, point at a command, pull the right trigger"
 			   : "Radial menu: hold the LEFT grip, point at a command, pull the left trigger",

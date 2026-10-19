@@ -22,6 +22,9 @@ int FlightLoading_AreFrontendSurfacesAttached(void);
 #ifdef XWA_MODERN
 extern const char* g_flightLoadingPrompt;
 extern int g_flightLoadingPromptLevel;
+/* The briefing summary the loading screen showed (plain text, "* " lines),
+ * empty when it showed none; the pause menu's Review Briefing page. */
+extern char g_flightLoadingBriefingSummary[4096];
 #endif
 
 #ifdef __cplusplus

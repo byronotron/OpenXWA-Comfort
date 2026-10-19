@@ -164,8 +164,10 @@ static int Config_CheckpointRowCount(void) {
 }
 
 #ifdef XWA_MODERN
-/* The pause menu's "Mission Hints" row, to come back to from its page. */
+/* The pause menu's "Mission Hints" and "Review Briefing" rows, to come
+ * back to from their pages. */
 static int s_configMissionHintsRow;
+static int s_configBriefingRow;
 #endif
 
 #ifdef XWA_MODERN
@@ -301,6 +303,7 @@ int Config_MainMenuScreen(void) {
 		++rowCount;
 		rowCount += Config_CheckpointRowCount();
 		rowCount += XwaModernMissionHintsScreen_Available() != 0;
+		rowCount += XwaModernBriefingReviewScreen_Available() != 0;
 	}
 	if (Config_MainMenuVr()) {
 		--rowCount; /* VR Options in, Performance and Game Controller out */
@@ -592,6 +595,32 @@ int Config_MainMenuScreen(void) {
 	}
 	y += 25;
 	++rowIndex;
+
+	if (g_configRestrictedOptionsModalActive && g_configExitMissionAvailable &&
+		XwaModernBriefingReviewScreen_Available()) {
+		/* The briefing summary the loading screen showed, again. */
+		text = "Review Briefing";
+		titleWidth = FrontendText_MeasureWidth(text, 20);
+		textX = g_configMenuCenterX - (int)(titleWidth >> 1);
+		buttonPressed = FrontendButton_DrawMenuButton(textX, y, text, 20, g_colorPaleBlue, 38, 0, "settingsound");
+		if (g_menuCursorRow == rowIndex) {
+			FrontendText_Draw(20, text, textX, y, g_colorGreen);
+			if (keyState == CONFIG_KEY_ENTER) {
+				FrontendSound_PlayUISound("settingsound", 1, 0, 255, 12 * g_gameConfig.sfxDatapadVolume, 63);
+				Keyboard_FlushCharBuffer();
+				keyState = 0;
+				buttonPressed = 1;
+			}
+		}
+		if (buttonPressed) {
+			s_configBriefingRow = rowIndex;
+			XwaModernBriefingReviewScreen_Reset();
+			g_pendingMenuScreen = 26;
+			g_menuCursorRow = 0;
+		}
+		y += 25;
+		++rowIndex;
+	}
 
 	if (g_configRestrictedOptionsModalActive && g_configExitMissionAvailable && XwaModernMissionHintsScreen_Available()) {
 		/* The debriefing's hints for this mission, on a page of their own. */
@@ -2812,6 +2841,13 @@ int Config_OptionsDatapadUpdate(int frameState) {
 			if (XwaModernMissionHintsScreen_Update(g_configMenuCenterX, &g_menuCursorRow)) {
 				g_pendingMenuScreen = 0;
 				g_menuCursorRow = s_configMissionHintsRow;
+			}
+			done = 0;
+			break;
+		case 26:
+			if (XwaModernBriefingReviewScreen_Update(g_configMenuCenterX, &g_menuCursorRow)) {
+				g_pendingMenuScreen = 0;
+				g_menuCursorRow = s_configBriefingRow;
 			}
 			done = 0;
 			break;

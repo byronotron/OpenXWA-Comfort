@@ -1,4 +1,4 @@
-OpenXWA for Meta Quest 3 (standalone) - 1.0.0 release candidate 7
+OpenXWA for Meta Quest 3 (standalone) - 1.0.0 release candidate 8
 ==================================================================
 
 This is a release candidate. If something goes wrong, the log file (step 6)
@@ -47,7 +47,8 @@ What you need
      right grip = countermeasures, A = next target, B = previous target,
      X = target closest enemy, Y = target my attacker,
      left trigger = change weapon, left stick click = link weapons,
-     left grip (hold) = radial menu, left menu button = Esc.
+     left grip (hold) = radial menu, left menu button = Esc,
+     thumb rest (double-tap, then speak) = voice command.
      In menus the right controller is a laser pointer.
    Taking the headset off or opening the Meta menu pauses the game.
    Hold the Meta button to recenter.
@@ -102,4 +103,5 @@ Other headsets (same APK, from 0.0.17-quest100)
   The game picks its defaults from the GPU (see the log's "device tier"
   line): Quest 2 and Pico 4 render fewer pixels at 72 Hz with stronger
   foveation; Quest 3 is unchanged; Steam Frame gets a larger pixel budget.
-  Voice commands need the Quest controllers' thumb rests (not on Pico yet).
+  Voice commands need the Quest controllers' thumb rests (not on Pico yet);
+  the speech model is in the APK.

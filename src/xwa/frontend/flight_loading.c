@@ -45,6 +45,30 @@ int g_frontendLaunchHumanPlayerCount;
  * before the hangar, flight_task.c), drawn at `level` (0..255) brightness. */
 const char* g_flightLoadingPrompt;
 int g_flightLoadingPromptLevel;
+char g_flightLoadingBriefingSummary[4096];
+
+/* Adds one summary line as plain text (no [highlight] marks; '$' breaks the
+ * line) for the pause menu's Review Briefing page. */
+static void FlightLoading_AddSummaryLine(const char* text) {
+	size_t n = strlen(g_flightLoadingBriefingSummary);
+	const size_t cap = sizeof g_flightLoadingBriefingSummary - 4;
+	if (n + 2 >= cap) {
+		return;
+	}
+	if (n) {
+		g_flightLoadingBriefingSummary[n++] = '\n';
+	}
+	g_flightLoadingBriefingSummary[n++] = '*';
+	g_flightLoadingBriefingSummary[n++] = ' ';
+	for (; text && *text && n < cap; ++text) {
+		if (*text == '[' || *text == ']') {
+			continue;
+		}
+		g_flightLoadingBriefingSummary[n++] = *text == '$' ? ' ' : *text;
+	}
+	g_flightLoadingBriefingSummary[n++] = '\n';
+	g_flightLoadingBriefingSummary[n] = '\0';
+}
 #endif
 
 // FUNCTION: XWA 0x4CC920
@@ -64,6 +88,9 @@ int FlightLoading_DrawProgressScreen(int progressStep) {
 
 	if (progressStep < 0) {
 		if (progressStep == -2) {
+#ifdef XWA_MODERN
+			g_flightLoadingBriefingSummary[0] = '\0'; /* a new mission */
+#endif
 			FrontImage_BuildAtlasBlendLut();
 			FrontImage_RebuildPaletteCache();
 			FrontendColor_Init();
@@ -103,6 +130,9 @@ int FlightLoading_DrawProgressScreen(int progressStep) {
 		BriefingScript_ResetState();
 		BriefingScript_AdvanceToNextVisibleLine();
 		firstTextBlock = g_briefingTextSlotBlockIdx[1];
+#ifdef XWA_MODERN
+		g_flightLoadingBriefingSummary[0] = '\0';
+#endif
 		previousTextBlock = -1;
 		for (y = 90; y < 426; y += 42) {
 			int textBlock;
@@ -112,6 +142,9 @@ int FlightLoading_DrawProgressScreen(int progressStep) {
 			FrontendText_DrawFormattedWrappedText(
 				&rect,
 				(const unsigned char*)g_frontendBriefingContent.textBlocks[g_briefingTextSlotBlockIdx[1]], 0);
+#ifdef XWA_MODERN
+			FlightLoading_AddSummaryLine(g_frontendBriefingContent.textBlocks[g_briefingTextSlotBlockIdx[1]]);
+#endif
 			BriefingScript_AdvanceToNextVisibleLine();
 			textBlock = g_briefingTextSlotBlockIdx[1];
 			if (textBlock == firstTextBlock) {
@@ -184,9 +217,8 @@ int FlightLoading_DrawProgressScreen(int progressStep) {
 		FrontImage_DrawSprite("sbarspark", progressBarWidth + 70, 75);
 	}
 #ifdef XWA_MODERN
-	/* In the headset the line is under the screen's frame instead
-	 * (xwa_remaster/vr_env.c). */
-	if (g_flightLoadingPrompt && !Aeron_XrIsPresenting()) {
+	/* In the screen's lower grey band (in the headset too). */
+	if (g_flightLoadingPrompt) {
 		const int level = g_flightLoadingPromptLevel < 0 ? 0 : g_flightLoadingPromptLevel > 255 ? 255 : g_flightLoadingPromptLevel;
 		const int color = FrontendDisplay_PackRGB(level, level * 220 / 255, level * 70 / 255);
 		FrontendDraw_RectAssign(&rect, 0, 436, 639, 460);

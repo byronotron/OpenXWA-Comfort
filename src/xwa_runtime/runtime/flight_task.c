@@ -1398,7 +1398,7 @@ static int XwaFlightTask_HangarPromptDone(uint64_t nowUs) {
 		s_hangarPromptActive = 1;
 		s_hangarPromptStartUs = nowUs;
 		s_hangarPromptInput = now;
-		g_flightLoadingPrompt = "Press Any Key to Continue";
+		g_flightLoadingPrompt = "Press Any Key to Launch";
 		XwaFlightTask_Log("hangar-prompt");
 	}
 	const int pressed = XwaFlightTask_NewPress(&now, &s_hangarPromptInput);

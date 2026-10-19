@@ -15,6 +15,13 @@ int XwaModernMissionHintsScreen_Update(int menu_center_x, int* cursor_row);
 /* Starts the page at its top (call when it is opened). */
 void XwaModernMissionHintsScreen_Reset(void);
 
+/* The pause menu's Review Briefing page: the briefing summary the loading
+ * screen showed (flight_loading.c), scrollable, with Back. Available when
+ * there was one. */
+int XwaModernBriefingReviewScreen_Available(void);
+int XwaModernBriefingReviewScreen_Update(int menu_center_x, int* cursor_row);
+void XwaModernBriefingReviewScreen_Reset(void);
+
 #ifdef __cplusplus
 }
 #endif

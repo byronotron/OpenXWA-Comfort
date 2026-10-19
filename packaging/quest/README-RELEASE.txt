@@ -60,6 +60,8 @@ Controls
   X: target closest enemy           Y: target my attacker
   Left trigger: change weapon       Left stick click: link weapons
   Left grip (hold): radial menu     Left menu button: game menu (Esc)
+  Thumb rest (double-tap, then speak): voice command, e.g. "attack my
+  target" (VR Options -> Voice Commands: double-tap, hold or off)
   In menus the right controller is a laser pointer.
   Taking the headset off or opening the Meta menu pauses the game.
   Side panel on your right: tactical map, voice commands and the button

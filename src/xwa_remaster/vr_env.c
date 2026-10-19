@@ -5366,6 +5366,9 @@ static struct {
 
 static void env_prompt_text(AeronCommandBuffer* cmd) {
 	const char* text = g_flightLoadingPrompt;
+	if (env_float("XWA_XR_PROMPT_UNDER_FRAME", 0.0f) == 0.0f) {
+		return; /* drawn on the loading screen itself (flight_loading.c) */
+	}
 	if (!text || s_prompt.failed || !cmd || (s_prompt.rt && s_prompt.text == text) || !env_font(cmd)) {
 		return;
 	}
@@ -5447,7 +5450,8 @@ static void env_submit_hints(AeronScene3D* scene) {
 				 AERON_SCENE_BILLBOARD_BLEND_PMA, c, tint);
 	/* The hangar prompt, one line further down, a little larger, pulsing
 	 * (premultiplied: the tint scales the whole quad). */
-	if (g_flightLoadingPrompt && s_prompt.rt && s_prompt.text == g_flightLoadingPrompt) {
+	if (env_float("XWA_XR_PROMPT_UNDER_FRAME", 0.0f) != 0.0f && g_flightLoadingPrompt && s_prompt.rt &&
+		s_prompt.text == g_flightLoadingPrompt) {
 		const float ph = 1.25f * th;
 		const float pw = ph * (float)s_prompt.w / (float)s_prompt.h;
 		const float pcenter[3] = { center[0], center[1], center[2] - (0.5f * th + 0.02f + 0.5f * ph) * sc.k };
