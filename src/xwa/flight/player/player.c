@@ -3971,7 +3971,7 @@ int16_t Player_FindNearestObjective(int goalCondType, int playerIdx) {
 			const XwaFlightGroupGoalPayload* goal;
 
 			goal = &g_missionFlightGroups[flightGroupIdx].fg.fgGoals[goalIdx].payload;
-			if (goal->enabledForTeam[playerIff] != 0 && goal->condition == (uint8_t)goalCondType &&
+			if (goal->enabledForTeam[playerIff] != 0 && goal->argument == (uint8_t)goalCondType &&
 				goal->points >= 0 &&
 				g_missionFgStats[flightGroupIdx].goalState[8 * playerIff + goalIdx] == 4) {
 				goalMatches = 1;
@@ -4087,7 +4087,7 @@ int16_t Player_FindNearestObjective(int goalCondType, int playerIdx) {
 			const XwaFlightGroupGoalPayload* goal;
 
 			goal = &g_missionFlightGroups[flightGroupIdx].fg.fgGoals[goalIdx].payload;
-			if (goal->enabledForTeam[playerIff] != 0 && goal->condition == (uint8_t)goalCondType &&
+			if (goal->enabledForTeam[playerIff] != 0 && goal->argument == (uint8_t)goalCondType &&
 				goal->points >= 0 &&
 				g_missionFgStats[flightGroupIdx].goalState[8 * playerIff + goalIdx] == 4) {
 				int playerObjectIdx;

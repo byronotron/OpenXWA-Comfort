@@ -9852,9 +9852,11 @@ void Flight_ProcessPlayerActions(unsigned int playerIdx) {
 			if (g_provingGroundsModeActive) {
 				Yard_TargetCurrentObjective(currentPlayerIdx);
 			} else {
-				int target = Player_FindNearestObjective(0, (int)currentPlayerIdx);
-				if (target == 0xffff)
-					target = Player_FindNearestObjective(2, (int)currentPlayerIdx);
+				/* Primary objectives first, then bonus ones (the goals'
+				 * argument: 0 must, 2 bonus). */
+				uint16_t target = (uint16_t)Player_FindNearestObjective(0, (int)currentPlayerIdx);
+				if (target == 0xffffu)
+					target = (uint16_t)Player_FindNearestObjective(2, (int)currentPlayerIdx);
 				Player_SetTarget(target, (int)currentPlayerIdx);
 			}
 			return;
