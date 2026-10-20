@@ -223,9 +223,9 @@ int FlightLoading_DrawProgressScreen(int progressStep) {
 		const int level = g_flightLoadingPromptLevel < 0 ? 0 : g_flightLoadingPromptLevel > 255 ? 255 : g_flightLoadingPromptLevel;
 		const int color = FrontendDisplay_PackRGB(level, level * 220 / 255, level * 70 / 255);
 		FrontendDraw_RectAssign(&rect, 0, 394, 639, 418);
-		if (!FrontendText_DrawCentered(20, g_flightLoadingPrompt, &rect, color)) {
-			FrontendText_DrawCentered(15, g_flightLoadingPrompt, &rect, color);
-		}
+		/* The large font when the game has it, else the small one (the draw's
+		 * return value is not "drawn": testing it drew the line twice). */
+		FrontendText_DrawCentered(g_fontBySize[20] ? 20 : 15, g_flightLoadingPrompt, &rect, color);
 	}
 #endif
 
