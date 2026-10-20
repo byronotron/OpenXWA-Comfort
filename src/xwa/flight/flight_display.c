@@ -372,6 +372,14 @@ void FlightDisplay_FreeSurfaces(void) {
 	if (g_flightFrontendModalActive) {
 		FlightDisplay_DetachFrontendModalSurfaces();
 	}
+#ifdef XWA_MODERN
+	/* Quit while the mission was still loading: the loading screen still has
+	 * these surfaces attached to the frontend, which would release them a
+	 * second time after this (FrontendDisplay_FreeSurfaces). */
+	if (g_flightPrimarySurface && g_primarySurface == g_flightPrimarySurface) {
+		FrontendDisplay_DetachExternalSurfaces();
+	}
+#endif
 
 	if ((int)(intptr_t)g_flightOffscreenSurface) {
 		g_flightOffscreenSurface->lpVtbl->Release(g_flightOffscreenSurface);
