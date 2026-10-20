@@ -48,6 +48,8 @@ What you need
      left trigger = change weapon, left stick click = link weapons,
      left grip (hold) = radial menu, left menu button = Esc,
      thumb rest (double-tap, then speak) = voice command.
+     VR Options -> Swap Thumbsticks: the sticks trade what they do in
+     flight (XWA_XR_SWAP_STICKS=1); every button stays where it is.
      In menus the right controller is a laser pointer.
    Taking the headset off or opening the Meta menu pauses the game.
    Hold the Meta button to recenter.

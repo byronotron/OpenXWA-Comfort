@@ -317,6 +317,10 @@ static void XwaPort_UpdateVrFlightButtons(int enabled) {
 		g_xwaPortVrFlightButtons = enabled;
 		Aeron_XrSetFlightButtons(enabled);
 	}
+	/* Swapped thumbsticks: in flight only, with the flight buttons (the
+	 * hangar's menu keys and the menus' pointer keep the sticks as they
+	 * are). Every frame, so the VR Options change applies at once. */
+	Aeron_XrSetSwapSticks(enabled && XwaVrButtons_SticksSwapped());
 	XwaPort_UpdateVrChord(enabled);
 	if (!enabled) {
 		g_vrChord.warhead_pending = 0;
