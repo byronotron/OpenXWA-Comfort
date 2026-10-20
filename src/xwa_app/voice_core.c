@@ -229,6 +229,11 @@ static const XvCommand k_commands[] = {
 		"energy to lasers" } },
 	{ XWA_VRC_FIRE_LINK, 0, "Link weapons",
 	  { "link weapons", "fire link", "link fire", "fire mode", "link lasers", "change fire mode", "dual fire" } },
+	/* The beam weapon (tractor, jamming or decoy beam) is not in the weapon
+	 * cycle: it has its own key (B). */
+	{ XWA_VRC_BEAM_TOGGLE, 0, "Beam weapon",
+	  { "beam weapon", "toggle beam", "beam on", "beam off", "tractor beam", "jamming beam", "decoy beam",
+		"fire beam" } },
 	{ XWA_VRC_CYCLE_WARHEAD, 0, "Change weapon",
 	  { "change weapon", "next weapon", "switch weapon", "cycle warheads", "change warhead", "switch warhead" } },
 	{ XWA_VRC_CONVERGENCE, 0, "Convergence", { "convergence", "laser convergence", "converge" } },
@@ -244,7 +249,7 @@ static const XvCommand k_commands[] = {
 /* Words that settle which command it is: when one is heard, only commands
  * with that word in a phrase are considered ("gunner, attack my target" is
  * not the wingmen's "attack my target"). */
-static const char* const k_marker_words[] = { "gunner", "turret", "incoming", "critical", "who", "attacker" };
+static const char* const k_marker_words[] = { "gunner", "turret", "incoming", "critical", "who", "attacker", "beam" };
 
 /* Heard words that mean the same to us, and words that change nothing
  * ("please", "the", who is addressed). Applied to the phrases too. */
@@ -266,6 +271,8 @@ static const char* const k_same[][2] = {
 	{ "its", "it" },            { "speeds", "speed" },
 	{ "gunners", "gunner" },    { "turrets", "turret" },    { "target's", "target" },
 	{ "missiles", "missile" },  { "torpedoes", "torpedo" }, { "warheads", "warhead" },
+	{ "beams", "beam" },        { "bean", "beam" },         { "beem", "beam" },
+	{ "jammer", "jamming" },    { "jam", "jamming" },
 	/* How the recognizer tends to spell "s-foils". */
 	{ "sfoils", "foils" },      { "spoils", "foils" },      { "espoils", "foils" },
 	{ "aspoils", "foils" },     { "foyles", "foils" },      { "foyle", "foils" },

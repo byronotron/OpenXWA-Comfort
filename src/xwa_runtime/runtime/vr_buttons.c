@@ -404,7 +404,8 @@ static const char* const k_voice_target[] = { "target closest enemy",    "next t
 											  "target my attacker",      "who is attacking my target",
 											  "target incoming missile", "target objective", "newest target",
 											  "next subsystem",          "clear target",     "nav buoy" };
-static const char* const k_voice_ship[] = { "match speed",       "countermeasures",   "change weapon", "s-foils",
+static const char* const k_voice_ship[] = { "match speed",       "countermeasures",   "change weapon", "beam weapon",
+											"s-foils",
 											"lasers to shields", "shields to lasers", "link weapons",
 											"convergence",       "map",               "dock",
 											"pick up",           "release cargo",     "hyperspace",
