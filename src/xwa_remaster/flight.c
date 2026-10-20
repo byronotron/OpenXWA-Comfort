@@ -4354,7 +4354,8 @@ static int fl_xr_output_eye(AeronCommandBuffer* cmd, AeronRenderTarget* target, 
 		return 0;
 	}
 	s_xr_bloom_last = NULL;
-	if (fl_xr_bloom_mode() == 0) {
+	/* No bloom round the intro's crawl (the film has none). */
+	if (fl_xr_bloom_mode() == 0 || XwaVrIntroCrawl_Active()) {
 		bloom_tex = NULL;
 	} else if (!bloom_tex && s.bloom && AeronSceneBloom_Intensity() > 0.0f) {
 		if (!AeronSceneBloom_Apply(s.bloom, cmd, scene_tex, s.rt_w, s.rt_h, s.rt_h)) {
@@ -5699,7 +5700,9 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 	const int input_blocked = XwaVrEnv_InputBlocked();
 	Aeron_XrSetInputBlocked(input_blocked);
 	Aeron_XrSetScreenFade(XwaVrEnv_ScreenFade() * XwaVrIntroCrawl_ScreenFade());
-	if (input_blocked) {
+	/* No gloves in the crawl's space (unlit there, they would only black
+	 * out the text). */
+	if (input_blocked || XwaVrIntroCrawl_ScreenHidden()) {
 		XwaVrGloves_Idle();
 	} else {
 		XwaVrGloves_Submit(s.scene, cmd, rows, base.pos,

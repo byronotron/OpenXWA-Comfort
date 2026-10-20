@@ -4,6 +4,7 @@
 #include "aeron/asset/opt_model.h"
 #include "aeron/log.h"
 #include "aeron/scene/billboard.h"
+#include "aeron/scene/present.h"
 #include "aeron/xr.h"
 #include "xwa_runtime/runtime/movie_task.h"
 
@@ -52,31 +53,46 @@ static const double k_logo_inv_h[4] = { 0.002576953439566483, 0.0033761030216043
  * (xn, s): s its place along the scroll in seconds (the first line's top at
  * 0, line i's baseline at i * PITCH + BASE), xn across, so that at film
  * time t it is at film y = YV + K / (t + T0 - s) and x = CX + xn * (y - YV)
- * (fitted to every line's track through the film, 0.3 px rms).
+ * (fitted to every line's track through the film, 0.3 px rms, then with
+ * the rest to whole frames rendered offline).
  *
- * The lines (bold italic, Arial's metrics): an em is EM_Y seconds tall and
+ * The lines (bold italic with Arial's metrics, leaning less than its
+ * italic): an em is EM_Y seconds tall and
  * EM_X across; every line but a paragraph's last is scaled across to fill
  * XL..XR exactly (the film's justification: long lines squeezed, short
  * ones widened), the last lines start at XL at their natural width. The
  * text's colour is 255,247,132; it fades out (linearly in the picture's
- * values) from 46.67 to 48.8 s, the stars staying. */
-#define CRAWL_YV -154.765f
-#define CRAWL_K 13538.1f
-#define CRAWL_T0 14.1896f
-#define CRAWL_PITCH 1.36448f
-#define CRAWL_BASE 0.9498f
-#define CRAWL_EM_Y 1.3341f
-#define CRAWL_EM_X 0.0763f
-#define CRAWL_XL (-0.6107f)
-#define CRAWL_XR 0.6047f
+ * values) from 46.67 to 48.8 s, the stars staying. They stand still from
+ * the logo's cut until the planet rises; vr/intro_stars.rgba holds them. */
+#define CRAWL_YV -154.643f
+#define CRAWL_K 13535.74f
+#define CRAWL_T0 14.1932f
+#define CRAWL_PITCH 1.36445f
+#define CRAWL_BASE 0.9502f
+#define CRAWL_EM_Y 1.3343f
+#define CRAWL_EM_X 0.0748f
+#define CRAWL_XL (-0.6090f)
+#define CRAWL_XR 0.6000f
+/* The film's letters lean less than the font's italic: sheared back by
+ * this (x per unit of height, in ems). */
+#define CRAWL_SHEAR (-0.174f)
 #define CRAWL_FADE_FROM 46.67f
 #define CRAWL_FADE_TO 48.8f
 static const uint8_t k_text_srgb[3] = { 255, 247, 132 };
+/* The logo's (as vr/starwars_logo.rgba carries it). */
+static const uint8_t k_logo_srgb[3] = { 255, 223, 107 };
 
-/* After the crawl the film is black but for its stars until the planet
- * rises (~51.6 s): the screen fades in over HANDOVER_FROM..TO. */
+/* Forward: the colours through the tonemap (below). */
+static void crawl_tonemap(const float in[3], float out[3]);
+static void crawl_untonemap(const float srgb[3], float out[3]);
+
+/* After the crawl the film shows only its stars until the planet rises
+ * (~51.6 s), the very stars drawn here straight ahead: the screen comes
+ * back at HANDOVER_FROM at once (the compositor's screen is opaque: a fade
+ * would first black the stars out), and the scene round it eases to the
+ * menus' look by HANDOVER_TO (the eye brightness, the menus' own stars). */
 #define CRAWL_HANDOVER_FROM 49.0f
-#define CRAWL_HANDOVER_TO 50.0f
+#define CRAWL_HANDOVER_TO 50.5f
 
 /* The text texture: xn from TEX_X0 to -TEX_X0 across its width; s at a
  * scale that keeps a texel about as long as it is wide where the text is
@@ -96,9 +112,10 @@ static struct {
 	int ok;      /* ...and loaded */
 	int active;  /* the scene plays (until the handover is over) */
 	float t;     /* the film's clock, seconds */
-	CrawlTex logo, text;
+	CrawlTex logo, text, stars;
 	float logo_box[4]; /* the logo's outline in the image, uv: u0 v0 u1 v1 */
 	float text_s1;     /* s at the text texture's bottom edge */
+	float logo_tint[3], text_tint[3], star_tint[3]; /* HDR colours at load (see the LUTs) */
 	int release_in;    /* frames until the textures are freed */
 } s_crawl;
 
@@ -218,58 +235,41 @@ static void crawl_halve(const float* src, int w, int h, int ch, float* dst) {
 	}
 }
 
-/* Straight sRGB RGBA -> a premultiplied (in linear light) mip chain. */
-static int crawl_texture_rgba(AeronCommandBuffer* cmd, CrawlTex* out, const uint8_t* rgba, int w, int h,
-							  const char* label) {
-	const int levels = crawl_levels(w, h);
-	uint8_t* chain = (uint8_t*)malloc(crawl_chain_size(w, h, levels));
-	float* a = (float*)malloc((size_t)w * h * 4u * sizeof(float));
-	float* b = (float*)malloc((size_t)(w / 2 + 1) * (h / 2 + 1) * 4u * sizeof(float));
-	int ok = 0;
-	if (chain && a && b) {
-		float lut[256];
-		for (int i = 0; i < 256; ++i) {
-			lut[i] = crawl_srgb_to_linear((float)i / 255.0f);
-		}
-		for (size_t i = 0; i < (size_t)w * h; ++i) {
-			const float al = (float)rgba[i * 4 + 3] / 255.0f;
-			for (int c = 0; c < 3; ++c) {
-				a[i * 4 + c] = lut[rgba[i * 4 + c]] * al;
-			}
-			a[i * 4 + 3] = al;
-		}
-		size_t offset = 0;
-		int lw = w, lh = h;
-		for (int l = 0; l < levels; ++l) {
-			for (size_t i = 0; i < (size_t)lw * lh; ++i) {
-				for (int c = 0; c < 3; ++c) {
-					chain[offset + i * 4 + c] =
-						(uint8_t)(crawl_linear_to_srgb(crawl_clamp01(a[i * 4 + c])) * 255.0f + 0.5f);
-				}
-				chain[offset + i * 4 + 3] = (uint8_t)(crawl_clamp01(a[i * 4 + 3]) * 255.0f + 0.5f);
-			}
-			offset += (size_t)lw * lh * 4u;
-			if (l + 1 < levels) {
-				crawl_halve(a, lw, lh, 4, b);
-				float* tmp = a;
-				a = b;
-				b = tmp;
-				lw = lw > 1 ? lw / 2 : 1;
-				lh = lh > 1 ? lh / 2 : 1;
+/* The texel colour for each coverage: the HDR level whose tonemapped image
+ * of colour `srgb8` is `coverage` times that colour in display values, so
+ * anti-aliased edges (and mip levels) blend as in the film, not brightened
+ * by the tonemap's curve. lut[i] for coverage i / 1023; `tint` gets the HDR
+ * colour at full coverage. */
+static void crawl_coverage_lut(const uint8_t srgb8[3], float lut[1024], float tint[3]) {
+	const float d[3] = { (float)srgb8[0] / 255.0f, (float)srgb8[1] / 255.0f, (float)srgb8[2] / 255.0f };
+	crawl_untonemap(d, tint);
+	float full[3];
+	crawl_tonemap(tint, full);
+	const float want = full[0] + full[1] + full[2];
+	lut[0] = 0.0f;
+	for (int i = 1; i < 1024; ++i) {
+		const float target = want * (float)i / 1023.0f;
+		float lo = 0.0f, hi = 1.0f;
+		for (int it = 0; it < 22; ++it) {
+			const float mid = 0.5f * (lo + hi);
+			const float x[3] = { tint[0] * mid, tint[1] * mid, tint[2] * mid };
+			float o[3];
+			crawl_tonemap(x, o);
+			if (o[0] + o[1] + o[2] < target) {
+				lo = mid;
+			} else {
+				hi = mid;
 			}
 		}
-		ok = crawl_upload(cmd, out, chain, w, h, levels, label);
+		lut[i] = 0.5f * (lo + hi);
 	}
-	free(chain);
-	free(a);
-	free(b);
-	return ok;
 }
 
-/* Coverage (0..1) -> white premultiplied mip chain (the tint colours it).
- * Takes `cov` (malloc'd) and frees it. */
+/* Coverage (0..1) -> premultiplied mip chain: alpha the coverage, colour
+ * lut(coverage) in white (the tint colours it). Takes `cov` (malloc'd)
+ * and frees it. */
 static int crawl_texture_coverage(AeronCommandBuffer* cmd, CrawlTex* out, float* cov, int w, int h,
-								  const char* label) {
+								  const float lut[1024], const char* label) {
 	const int levels = crawl_levels(w, h);
 	uint8_t* chain = (uint8_t*)malloc(crawl_chain_size(w, h, levels));
 	float* a = cov;
@@ -278,7 +278,7 @@ static int crawl_texture_coverage(AeronCommandBuffer* cmd, CrawlTex* out, float*
 	if (chain && a && b) {
 		uint8_t enc[1024];
 		for (int i = 0; i < 1024; ++i) {
-			enc[i] = (uint8_t)(crawl_linear_to_srgb((float)i / 1023.0f) * 255.0f + 0.5f);
+			enc[i] = (uint8_t)(crawl_linear_to_srgb(crawl_clamp01(lut[i])) * 255.0f + 0.5f);
 		}
 		size_t offset = 0;
 		int lw = w, lh = h;
@@ -308,7 +308,7 @@ static int crawl_texture_coverage(AeronCommandBuffer* cmd, CrawlTex* out, float*
 }
 
 /* vr/starwars_logo.rgba: XWAL (straight RGBA, the yellow outline, the rest
- * clear). The outline's extent (coverage over 40 %, as measured in the
+ * clear; only its alpha is used). The outline's extent (coverage over 40 %, as measured in the
  * film) is what the film's size table describes. */
 static int crawl_load_logo(AeronCommandBuffer* cmd) {
 	size_t size = 0;
@@ -336,12 +336,48 @@ static int crawl_load_logo(AeronCommandBuffer* cmd) {
 				s_crawl.logo_box[1] = (float)y0 / (float)h;
 				s_crawl.logo_box[2] = (float)(x1 + 1) / (float)w;
 				s_crawl.logo_box[3] = (float)(y1 + 1) / (float)h;
-				ok = crawl_texture_rgba(cmd, &s_crawl.logo, px, (int)w, (int)h, "xwa.vr_intro_crawl.logo");
+				/* One colour: its coverage, coloured by the tint. */
+				float* cov = (float*)malloc((size_t)w * h * sizeof(float));
+				if (cov) {
+					for (size_t i = 0; i < (size_t)w * h; ++i) {
+						cov[i] = (float)px[i * 4 + 3] / 255.0f;
+					}
+					float lut[1024];
+					crawl_coverage_lut(k_logo_srgb, lut, s_crawl.logo_tint);
+					ok = crawl_texture_coverage(cmd, &s_crawl.logo, cov, (int)w, (int)h, lut,
+												"xwa.vr_intro_crawl.logo");
+				}
 			}
 		}
 	}
 	SDL_free(data);
 	return ok;
+}
+
+/* vr/intro_stars.rgba: XWAL, the film's star field (640x400, white, alpha
+ * the brightness). Optional: without it the menus' own stars show. */
+static void crawl_load_stars(AeronCommandBuffer* cmd) {
+	size_t size = 0;
+	uint8_t* data = (uint8_t*)crawl_load("intro_stars.rgba", &size);
+	if (data && size >= 12 && memcmp(data, "XWAL", 4) == 0) {
+		uint32_t w, h;
+		memcpy(&w, data + 4, 4);
+		memcpy(&h, data + 8, 4);
+		if (w && h && w <= 4096 && h <= 4096 && size >= 12 + (size_t)w * h * 4u) {
+			float* cov = (float*)malloc((size_t)w * h * sizeof(float));
+			if (cov) {
+				for (size_t i = 0; i < (size_t)w * h; ++i) {
+					cov[i] = (float)data[12 + i * 4 + 3] / 255.0f;
+				}
+				static const uint8_t white[3] = { 255, 255, 255 };
+				float lut[1024];
+				crawl_coverage_lut(white, lut, s_crawl.star_tint);
+				(void)crawl_texture_coverage(cmd, &s_crawl.stars, cov, (int)w, (int)h, lut,
+											 "xwa.vr_intro_crawl.stars");
+			}
+		}
+	}
+	SDL_free(data);
 }
 
 /* ---- the crawl's text ---------------------------------------------------- */
@@ -415,8 +451,9 @@ static int crawl_layout(const stbtt_fontinfo* font, char* text, CrawlLine* lines
 			int adv, lsb, x0, y0, x1, y1;
 			stbtt_GetCodepointHMetrics(font, c, &adv, &lsb);
 			if (stbtt_GetCodepointBox(font, c, &x0, &y0, &x1, &y1)) {
-				ln->ink0 = fminf(ln->ink0, pen + (float)x0);
-				ln->ink1 = fmaxf(ln->ink1, pen + (float)x1);
+				/* The box sheared like the glyph (y up). */
+				ln->ink0 = fminf(ln->ink0, pen + (float)x0 + CRAWL_SHEAR * (float)(CRAWL_SHEAR < 0.0f ? y1 : y0));
+				ln->ink1 = fmaxf(ln->ink1, pen + (float)x1 + CRAWL_SHEAR * (float)(CRAWL_SHEAR < 0.0f ? y0 : y1));
 			}
 			ln->cp[ln->count] = c;
 			ln->pen[ln->count] = pen;
@@ -507,20 +544,31 @@ static int crawl_load_text(AeronCommandBuffer* cmd) {
 				if (ty < 0 || ty >= th) {
 					continue;
 				}
-				for (int x = 0; x < gw; ++x) {
-					const int tx = gx + x0 + x;
+				/* The shear: this row's height above the baseline (font
+				 * units) moves it across. */
+				const float above = (base - ((float)ty + 0.5f)) / sy;
+				const float shift = CRAWL_SHEAR * above * sx;
+				const int si = (int)floorf(shift);
+				const float sf = shift - (float)si;
+				for (int x = -1; x < gw; ++x) {
+					const int tx = gx + x0 + x + si + 1;
 					if (tx < 0 || tx >= tw) {
 						continue;
 					}
+					/* texel tx takes glyph x (weight 1 - sf) and x + 1 (sf)... */
+					const float g0 = x >= 0 ? (float)glyph[y * gw + x] : 0.0f;
+					const float g1 = x + 1 < gw ? (float)glyph[y * gw + x + 1] : 0.0f;
+					const float v = (g0 * sf + g1 * (1.0f - sf)) / 255.0f;
 					float* d = &cov[(size_t)ty * tw + tx];
-					const float v = (float)glyph[y * gw + x] / 255.0f;
 					*d = *d > v ? *d : v;
 				}
 			}
 		}
 	}
 	s_crawl.text_s1 = CRAWL_TEX_S0 + (float)th / tb;
-	ok = crawl_texture_coverage(cmd, &s_crawl.text, cov, tw, th, "xwa.vr_intro_crawl.text");
+	float lut[1024];
+	crawl_coverage_lut(k_text_srgb, lut, s_crawl.text_tint);
+	ok = crawl_texture_coverage(cmd, &s_crawl.text, cov, tw, th, lut, "xwa.vr_intro_crawl.text");
 	cov = NULL; /* freed with the mip chain */
 	if (ok) {
 		Aeron_LogInfo("xwa.remaster", "VR intro crawl: %d lines, text %dx%d", n, tw, th);
@@ -541,8 +589,12 @@ static void crawl_release(void) {
 	if (s_crawl.text.tex) {
 		Aeron_DestroyTexture(s_crawl.text.tex);
 	}
+	if (s_crawl.stars.tex) {
+		Aeron_DestroyTexture(s_crawl.stars.tex);
+	}
 	memset(&s_crawl.logo, 0, sizeof s_crawl.logo);
 	memset(&s_crawl.text, 0, sizeof s_crawl.text);
+	memset(&s_crawl.stars, 0, sizeof s_crawl.stars);
 }
 
 /* ---- per frame ------------------------------------------------------------ */
@@ -566,6 +618,9 @@ void XwaVrIntroCrawl_Update(AeronCommandBuffer* cmd) {
 		crawl_release();
 		const uint64_t t0 = SDL_GetTicksNS();
 		s_crawl.ok = cmd && crawl_load_logo(cmd) && crawl_load_text(cmd);
+		if (s_crawl.ok) {
+			crawl_load_stars(cmd);
+		}
 		if (!s_crawl.ok) {
 			crawl_release();
 			Aeron_LogInfo("xwa.remaster", "VR intro crawl: assets missing, the film plays on the screen");
@@ -594,16 +649,188 @@ int XwaVrIntroCrawl_Active(void) { return s_crawl.active; }
 
 int XwaVrIntroCrawl_ScreenHidden(void) { return s_crawl.active && s_crawl.t < CRAWL_HANDOVER_FROM; }
 
-float XwaVrIntroCrawl_ScreenFade(void) {
+float XwaVrIntroCrawl_ScreenFade(void) { return XwaVrIntroCrawl_ScreenHidden() ? 0.0f : 1.0f; }
+
+float XwaVrIntroCrawl_Level(void) {
+	if (!s_crawl.active) {
+		return 0.0f;
+	}
+	return 1.0f - crawl_smooth((s_crawl.t - CRAWL_HANDOVER_FROM) / (CRAWL_HANDOVER_TO - CRAWL_HANDOVER_FROM));
+}
+
+/* The film's own stars (vr/intro_stars.rgba) stand in for the menus' until
+ * the screen is back; without them the menus' stars come with the logo. */
+static float crawl_film_stars(void) {
+	if (!s_crawl.active || !s_crawl.stars.tex || s_crawl.t < CRAWL_START) {
+		return 0.0f;
+	}
+	return XwaVrIntroCrawl_Level();
+}
+
+float XwaVrIntroCrawl_StarLevel(void) {
 	if (!s_crawl.active) {
 		return 1.0f;
 	}
-	return crawl_smooth((s_crawl.t - CRAWL_HANDOVER_FROM) / (CRAWL_HANDOVER_TO - CRAWL_HANDOVER_FROM));
+	if (s_crawl.t < CRAWL_START) {
+		return 0.0f;
+	}
+	return s_crawl.stars.tex ? 1.0f - XwaVrIntroCrawl_Level() : 1.0f;
 }
 
-float XwaVrIntroCrawl_Level(void) { return s_crawl.active ? 1.0f - XwaVrIntroCrawl_ScreenFade() : 0.0f; }
+/* ---- the colours through the tonemap -------------------------------------
+ *
+ * The VR scene is tonemapped (AeronScenePresent's operator, also in direct
+ * output) before the eye gain: to show the film's colours the billboards
+ * are tinted with the HDR colour the operator maps onto them, found by
+ * inverting it numerically (a few Gauss-Newton steps on log colour). */
 
-float XwaVrIntroCrawl_StarLevel(void) { return s_crawl.active && s_crawl.t < CRAWL_START ? 0.0f : 1.0f; }
+static const float k_agx_inset[3][3] = { { 0.842479062253094f, 0.0784335999999992f, 0.0792237451477643f },
+										 { 0.0423282422610123f, 0.878468636469772f, 0.0784336f },
+										 { 0.0423756549057051f, 0.0784336f, 0.879142973793104f } };
+static const float k_agx_outset[3][3] = { { 1.19687900512017f, -0.0980208811401368f, -0.0990297440797205f },
+										  { -0.0528968517574562f, 1.15190312990417f, -0.0989611768448433f },
+										  { -0.0529716355144438f, -0.0980434501171241f, 1.15107367264116f } };
+static const float k_aces_in[3][3] = { { 0.59719f, 0.35458f, 0.04823f },
+									   { 0.07600f, 0.90834f, 0.01566f },
+									   { 0.02840f, 0.13383f, 0.83777f } };
+static const float k_aces_out[3][3] = { { 1.60475f, -0.53108f, -0.07367f },
+										{ -0.10208f, 1.10813f, -0.00605f },
+										{ -0.00327f, -0.07276f, 1.07602f } };
+
+static void crawl_mul(const float m[3][3], const float v[3], float out[3]) {
+	float r[3];
+	for (int i = 0; i < 3; ++i) {
+		r[i] = m[i][0] * v[0] + m[i][1] * v[1] + m[i][2] * v[2];
+	}
+	memcpy(out, r, sizeof r);
+}
+
+/* scene_tonemap.frag.hlsl / scene_direct_output.hlsli: linear HDR -> the
+ * displayed sRGB value (0..1), exposure 1, no bloom. */
+static void crawl_tonemap(const float in[3], float out[3]) {
+	float c[3] = { fmaxf(in[0], 0.0f), fmaxf(in[1], 0.0f), fmaxf(in[2], 0.0f) };
+	if (AeronScenePresent_TonemapOp() == AERON_SCENE_TONEMAP_ACES) {
+		const float e = AeronScenePresent_AcesExposure();
+		for (int k = 0; k < 3; ++k) {
+			c[k] *= e;
+		}
+		crawl_mul(k_aces_in, c, c);
+		for (int k = 0; k < 3; ++k) {
+			const float a = c[k] * (c[k] + 0.0245786f) - 0.000090537f;
+			const float b = c[k] * (0.983729f * c[k] + 0.4329510f) + 0.238081f;
+			c[k] = a / b;
+		}
+		crawl_mul(k_aces_out, c, c);
+	} else {
+		static const float min_ev = -12.47393f, max_ev = 4.026069f;
+		crawl_mul(k_agx_inset, c, c);
+		for (int k = 0; k < 3; ++k) {
+			const float x = crawl_clamp01((log2f(fmaxf(c[k], 1e-10f)) - min_ev) / (max_ev - min_ev));
+			const float x2 = x * x, x4 = x2 * x2;
+			c[k] = crawl_clamp01(15.5f * x4 * x2 - 40.14f * x4 * x + 31.96f * x4 - 6.868f * x2 * x + 0.4298f * x2 +
+								 0.1191f * x - 0.00232f);
+		}
+		if (AeronScenePresent_AgxLook() == AERON_SCENE_AGX_LOOK_PUNCHY) {
+			const float pw = AeronScenePresent_AgxPunchyPower(), sat = AeronScenePresent_AgxPunchySaturation();
+			for (int k = 0; k < 3; ++k) {
+				c[k] = powf(fmaxf(c[k], 0.0f), pw);
+			}
+			const float l = 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
+			for (int k = 0; k < 3; ++k) {
+				c[k] = l + sat * (c[k] - l);
+			}
+		}
+		crawl_mul(k_agx_outset, c, c);
+		const float eotf = AeronScenePresent_EotfExponent();
+		for (int k = 0; k < 3; ++k) {
+			c[k] = powf(fmaxf(c[k], 0.0f), eotf);
+		}
+	}
+	for (int k = 0; k < 3; ++k) {
+		out[k] = crawl_linear_to_srgb(crawl_clamp01(c[k]));
+	}
+}
+
+/* The linear HDR colour the tonemap shows as `srgb` (0..1, display). */
+static void crawl_untonemap(const float srgb[3], float out[3]) {
+	float y[3], target[3];
+	for (int k = 0; k < 3; ++k) {
+		target[k] = srgb[k];
+		y[k] = logf(crawl_srgb_to_linear(srgb[k]) + 1e-3f);
+	}
+	for (int it = 0; it < 40; ++it) {
+		float x[3], f0[3], r[3], jac[3][3];
+		for (int k = 0; k < 3; ++k) {
+			x[k] = expf(y[k]);
+		}
+		crawl_tonemap(x, f0);
+		float err = 0.0f;
+		for (int k = 0; k < 3; ++k) {
+			r[k] = f0[k] - target[k];
+			err += r[k] * r[k];
+		}
+		if (err < 1e-9f) {
+			break;
+		}
+		for (int j = 0; j < 3; ++j) {
+			float yj[3] = { y[0], y[1], y[2] }, xj[3], fj[3];
+			yj[j] += 1e-3f;
+			for (int k = 0; k < 3; ++k) {
+				xj[k] = expf(yj[k]);
+			}
+			crawl_tonemap(xj, fj);
+			for (int k = 0; k < 3; ++k) {
+				jac[k][j] = (fj[k] - f0[k]) / 1e-3f;
+			}
+		}
+		/* (J^T J + lambda) dy = -J^T r */
+		float a[3][3], g[3];
+		for (int i = 0; i < 3; ++i) {
+			g[i] = 0.0f;
+			for (int j = 0; j < 3; ++j) {
+				a[i][j] = 0.0f;
+				for (int k = 0; k < 3; ++k) {
+					a[i][j] += jac[k][i] * jac[k][j];
+				}
+			}
+			for (int k = 0; k < 3; ++k) {
+				g[i] -= jac[k][i] * r[k];
+			}
+			a[i][i] += 1e-4f + 1e-2f * a[i][i];
+		}
+		const float det = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) -
+						  a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0]) +
+						  a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
+		if (fabsf(det) < 1e-20f) {
+			break;
+		}
+		float dy[3];
+		for (int i = 0; i < 3; ++i) {
+			float m[3][3];
+			memcpy(m, a, sizeof m);
+			for (int k = 0; k < 3; ++k) {
+				m[k][i] = g[k];
+			}
+			dy[i] = (m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+					 m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])) /
+					det;
+		}
+		for (int k = 0; k < 3; ++k) {
+			y[k] = fminf(fmaxf(y[k] + fminf(fmaxf(dy[k], -2.0f), 2.0f), -12.0f), 4.0f);
+		}
+	}
+	for (int k = 0; k < 3; ++k) {
+		out[k] = expf(y[k]) < 1e-5f ? 0.0f : expf(y[k]);
+	}
+}
+
+/* The tint that shows `srgb8` faded to `fade` (display values scale with
+ * it, as the film fades). */
+static void crawl_tint(const uint8_t srgb8[3], float fade, float out[3]) {
+	const float d[3] = { (float)srgb8[0] / 255.0f * fade, (float)srgb8[1] / 255.0f * fade,
+						 (float)srgb8[2] / 255.0f * fade };
+	crawl_untonemap(d, out);
+}
 
 /* ---- drawing ------------------------------------------------------------------ */
 
@@ -651,8 +878,18 @@ static void crawl_world(const CrawlView* v, float x, float y, float z, float out
 	}
 }
 
+/* A quad of a coverage texture made for colour `srgb8` (tint `full` at
+ * full strength), faded to `fade` (the picture's values scale with it). */
 static void crawl_quad(AeronScene3D* scene, AeronTexture* tex, const float c[4][3], const float uv[4][2],
-					   const float rgb_linear[3], float alpha) {
+					   const uint8_t srgb8[3], const float full[3], float fade) {
+	float rgb[3];
+	if (fade >= 0.999f) {
+		memcpy(rgb, full, sizeof rgb);
+	} else {
+		/* The texture's levels are for full strength: scale the tint so
+		 * the full-coverage colour shows faded (edges follow closely). */
+		crawl_tint(srgb8, fade, rgb);
+	}
 	AeronSceneBillboardDesc d;
 	memset(&d, 0, sizeof d);
 	d.texture = tex;
@@ -661,10 +898,11 @@ static void crawl_quad(AeronScene3D* scene, AeronTexture* tex, const float c[4][
 	for (int i = 0; i < 4; ++i) {
 		memcpy(d.corners[i], c[i], sizeof d.corners[i]);
 		memcpy(d.uv[i], uv[i], sizeof d.uv[i]);
+		/* Premultiplied: `rgb` is the colour as shown (its fade in it). */
 		for (int k = 0; k < 3; ++k) {
-			d.colors[i][k] = rgb_linear[k] * alpha;
+			d.colors[i][k] = rgb[k];
 		}
-		d.colors[i][3] = alpha;
+		d.colors[i][3] = fade;
 	}
 	AeronScene_AddBillboard(scene, &d);
 }
@@ -696,9 +934,8 @@ static void crawl_submit_logo(AeronScene3D* scene, const CrawlView* v) {
 	crawl_world(v, x1, y1, -dist, c[2]);
 	crawl_world(v, x0, y1, -dist, c[3]);
 	static const float uv[4][2] = { { 0, 1 }, { 1, 1 }, { 1, 0 }, { 0, 0 } };
-	static const float white[3] = { 1.0f, 1.0f, 1.0f };
 	const float fade = 1.0f - crawl_clamp01((t - CRAWL_LOGO_FADE_FROM) / (CRAWL_LOGO_FADE_TO - CRAWL_LOGO_FADE_FROM));
-	crawl_quad(scene, s_crawl.logo.tex, c, uv, white, crawl_srgb_to_linear(fade));
+	crawl_quad(scene, s_crawl.logo.tex, c, uv, k_logo_srgb, s_crawl.logo_tint, fade);
 }
 
 /* The crawl's plane. The film's camera looks down at it: its vanishing
@@ -733,12 +970,91 @@ static void crawl_submit_text(AeronScene3D* scene, const CrawlView* v) {
 	crawl_plane_point(v, xb, sa, c[2]);
 	crawl_plane_point(v, xa, sa, c[3]);
 	static const float uv[4][2] = { { 0, 1 }, { 1, 1 }, { 1, 0 }, { 0, 0 } };
-	float rgb[3];
-	for (int k = 0; k < 3; ++k) {
-		rgb[k] = crawl_srgb_to_linear((float)k_text_srgb[k] / 255.0f);
-	}
 	const float fade = 1.0f - crawl_clamp01((t - CRAWL_FADE_FROM) / (CRAWL_FADE_TO - CRAWL_FADE_FROM));
-	crawl_quad(scene, s_crawl.text.tex, c, uv, rgb, crawl_srgb_to_linear(fade));
+	crawl_quad(scene, s_crawl.text.tex, c, uv, k_text_srgb, s_crawl.text_tint, fade);
+}
+
+/* The film's star field all round: straight ahead exactly where the film
+ * has it (so the screen's stars land on them at the handover), and the
+ * same patch, flipped about, tiled over the sky in bands of its height
+ * (gnomonic tiles; they overlap a little). Sky stage: under everything. */
+static void crawl_star_tile(AeronScene3D* scene, const CrawlView* v, const float dir[3], const float right[3],
+							const float up[3], float hw, float hh, int flip, float fade) {
+	const float r = 1000.0f; /* metres: any far distance gives the direction */
+	float c[4][3];
+	const float sx[4] = { -1.0f, 1.0f, 1.0f, -1.0f }, sy[4] = { -1.0f, -1.0f, 1.0f, 1.0f };
+	for (int i = 0; i < 4; ++i) {
+		float l[3];
+		for (int k = 0; k < 3; ++k) {
+			l[k] = r * (dir[k] + sx[i] * hw * right[k] + sy[i] * hh * up[k]);
+		}
+		crawl_world(v, l[0], l[1], l[2], c[i]);
+	}
+	float uv[4][2] = { { 0, 1 }, { 1, 1 }, { 1, 0 }, { 0, 0 } };
+	for (int i = 0; i < 4; ++i) {
+		if (flip & 1) {
+			uv[i][0] = 1.0f - uv[i][0];
+		}
+		if (flip & 2) {
+			uv[i][1] = 1.0f - uv[i][1];
+		}
+	}
+	AeronSceneBillboardDesc d;
+	memset(&d, 0, sizeof d);
+	d.texture = s_crawl.stars.tex;
+	d.blend = AERON_SCENE_BILLBOARD_BLEND_PMA;
+	d.stage = AERON_SCENE_BILLBOARD_STAGE_SKY;
+	for (int i = 0; i < 4; ++i) {
+		memcpy(d.corners[i], c[i], sizeof d.corners[i]);
+		memcpy(d.uv[i], uv[i], sizeof d.uv[i]);
+		for (int k = 0; k < 3; ++k) {
+			d.colors[i][k] = s_crawl.star_tint[k] * fade;
+		}
+		d.colors[i][3] = fade;
+	}
+	AeronScene_AddBillboard(scene, &d);
+}
+
+static void crawl_submit_stars(AeronScene3D* scene, const CrawlView* v) {
+	const float fade = crawl_film_stars();
+	if (fade <= 0.0f) {
+		return;
+	}
+	/* The film's picture: half extents as tangents from the eye. */
+	const float hw = 0.5f * CRAWL_FILM_W * v->m / v->dist, hh = 200.0f * v->m / v->dist;
+	{
+		/* Straight ahead, exactly over the picture (its centre lifted). */
+		const float dir[3] = { 0.0f, v->lift / v->dist, -1.0f };
+		static const float right[3] = { 1.0f, 0.0f, 0.0f }, up[3] = { 0.0f, 1.0f, 0.0f };
+		crawl_star_tile(scene, v, dir, right, up, hw, hh, 0, fade);
+	}
+	const float tile_w = 2.0f * atanf(hw), tile_h = 2.0f * atanf(hh); /* radians */
+	const float pi = 3.14159265358979f;
+	int index = 1;
+	for (int band = -2; band <= 2; ++band) {
+		const float pitch = (float)band * tile_h;
+		/* Enough tiles round the band's widest edge. */
+		const float widest = fmaxf(fabsf(pitch) - 0.5f * tile_h, 0.0f);
+		const int n = (int)ceilf(2.0f * pi * cosf(widest) / tile_w);
+		for (int k = 0; k < n; ++k) {
+			if (band == 0 && k == 0) {
+				continue; /* the film's own, above */
+			}
+			const float yaw = 2.0f * pi * (float)k / (float)n + (band & 1 ? 0.5f * tile_w : 0.0f);
+			const float cp = cosf(pitch), sp = sinf(pitch), cy = cosf(yaw), sy = sinf(yaw);
+			const float dir[3] = { sy * cp, sp, -cy * cp };
+			const float right[3] = { cy, 0.0f, sy };
+			const float up[3] = { -sy * sp, cp, cy * sp };
+			crawl_star_tile(scene, v, dir, right, up, hw, hh, index++ & 3, fade);
+		}
+	}
+	/* The poles. */
+	for (int pole = -1; pole <= 1; pole += 2) {
+		const float dir[3] = { 0.0f, (float)pole, 0.0f };
+		static const float right[3] = { 1.0f, 0.0f, 0.0f };
+		const float up[3] = { 0.0f, 0.0f, (float)pole };
+		crawl_star_tile(scene, v, dir, right, up, hw, hh, index++ & 3, fade);
+	}
 }
 
 void XwaVrIntroCrawl_Submit(AeronScene3D* scene, const float view_pos[3], const float rows[9]) {
@@ -746,6 +1062,7 @@ void XwaVrIntroCrawl_Submit(AeronScene3D* scene, const float view_pos[3], const 
 	if (!scene || !s_crawl.active || !crawl_view(&v, view_pos, rows)) {
 		return;
 	}
+	crawl_submit_stars(scene, &v);
 	crawl_submit_text(scene, &v);
 	crawl_submit_logo(scene, &v);
 }

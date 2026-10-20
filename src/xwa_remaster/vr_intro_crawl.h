@@ -9,13 +9,15 @@
  * crawls away on a huge tilted plane, in 3D, matching the film frame for
  * frame straight ahead (measured from the film: the logo's size each
  * frame, the plane's vanishing line and scroll, the lines' size, spacing
- * and justification, the colours and fades). In the black after the crawl
- * the screen fades back in for the rest of the film.
+ * and justification, the colours and fades, its star field). In the black
+ * after the crawl (49 s) the screen comes back for the rest of the film,
+ * showing just the stars the scene had there.
  *
  * Needs, as APK assets (never in the repo): vr/starwars_logo.rgba (XWAL),
  * vr/intro_crawl.txt (the crawl's text, its lines as in the film; blank
  * lines part the paragraphs) and vr/LiberationSans-BoldItalic.ttf (SIL OFL
- * 1.1, rasterized here with stb_truetype). Without them, or with
+ * 1.1, rasterized here with stb_truetype); vr/intro_stars.rgba (the film's
+ * star field, else the menus' stars show). Without the first three, or with
  * XWA_XR_INTRO_CRAWL=0 (VR Options: "Intro: 3D Crawl"), the film plays on
  * the screen as before. Skipping the film ends the scene with it.
  *
@@ -46,12 +48,13 @@ void XwaVrIntroCrawl_Submit(AeronScene3D* scene, const float view_pos[3], const 
 
 /* The virtual screen is kept out of view (until the handover). */
 int XwaVrIntroCrawl_ScreenHidden(void);
-/* The screen's brightness during the handover (1 otherwise). */
+/* The screen's brightness: 0 while hidden, else 1. */
 float XwaVrIntroCrawl_ScreenFade(void);
 /* How much the scene's own look applies (1 while it plays, easing to 0
  * over the handover): full eye brightness instead of the films' dimming. */
 float XwaVrIntroCrawl_Level(void);
-/* The stars' brightness: 0 in the film's black opening, then 1. */
+/* The menus' stars' brightness: 0 while the film's own are drawn (or in
+ * its black opening), easing back over the handover. */
 float XwaVrIntroCrawl_StarLevel(void);
 
 #ifdef __cplusplus
