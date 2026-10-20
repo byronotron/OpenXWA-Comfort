@@ -82,6 +82,9 @@ it running; the launcher connects to it over USB (or Wi-Fi).
 
 ## Controls
 
+Intuitive radial command wheel & touch interactive holo-console give access to +25 inputs (Shields, energy, targeting)
+Additional 20 voice commands are implemented, all commands can be looked up on the in-cockpit console.
+
 | Control | Action |
 |---|---|
 | Right stick | Pitch / yaw |
@@ -107,6 +110,10 @@ are in the game menu under **VR Options**.
 Run the launcher and choose **Collect logs** at the end (or start it with
 `--logs`); it saves the game's log files next to the launcher. Please include
 them with a report.
+
+## What's next?
+
+Multiplayer, new VR environments, Tie-Fighter support.
 
 ## Building
 
