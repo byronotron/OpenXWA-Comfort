@@ -50,6 +50,16 @@ const XwaVrButtonBinding* XwaVrButtons_Binding(AeronXrButton button);
 #define XWA_VR_CHORD_LABEL "both triggers"
 /* The left menu button: pause. */
 #define XWA_VR_PAUSE_LABEL "menu button"
+/* What the thumbsticks do in flight (controls card, help page). */
+#define XWA_VR_STICK_STEER "Yaw / pitch"
+#define XWA_VR_STICK_LEVER "Throttle (fwd/back) - roll"
+/* Swapped thumbsticks (XWA_XR_SWAP_STICKS=1, VR Options "Swap Thumbsticks";
+ * read every call): in flight the two thumbsticks trade what they do - the
+ * left one steers, the right one rolls and moves the throttle lever - on
+ * top of left-handed controls. Only the stick axes: the stick clicks and
+ * every other button stay where they are. Aeron does the swap
+ * (Aeron_XrSetSwapSticks, set by port.c while the flight buttons are on). */
+int XwaVrButtons_SticksSwapped(void);
 /* The right grip on its own: countermeasures (its binding above, C). */
 #define XWA_VR_RIGHT_GRIP_ACTION "Countermeasures"
 

@@ -64,6 +64,8 @@ Controls
   target" (VR Options -> Voice Commands: double-tap, hold or off)
   In menus the right controller is a laser pointer.
   Taking the headset off or opening the Meta menu pauses the game.
+  VR Options -> Swap Thumbsticks: the two sticks trade what they do in
+  flight (left: pitch / yaw, right: roll, throttle); buttons stay put.
   Side panel on your right: tactical map, voice commands and the button
   mapping; touch a tab (or point and pull the trigger). Touch the map to
   zoom.

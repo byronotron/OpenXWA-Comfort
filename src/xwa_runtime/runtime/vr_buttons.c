@@ -4,6 +4,7 @@
 
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* VR controller buttons in flight, one action each (the left grip opens the
@@ -84,6 +85,11 @@ const XwaVrButtonBinding* XwaVrButtons_Binding(AeronXrButton button) {
 
 uint16_t XwaVrButtons_ConsoleKey(XwaVrConsoleAction action) {
 	return (int)action > XWA_VRC_NONE && (int)action < XWA_VRC_COUNT ? k_console_keys[action] : KEY_NONE;
+}
+
+int XwaVrButtons_SticksSwapped(void) {
+	const char* value = getenv("XWA_XR_SWAP_STICKS");
+	return value && value[0] == '1';
 }
 
 const char* XwaVrButtons_ButtonName(AeronXrButton button, int compact) {

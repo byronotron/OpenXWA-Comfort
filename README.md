@@ -105,7 +105,10 @@ Additional 20 voice commands are implemented. All commands can be looked up on t
 
 In menus the right controller is a laser pointer. Taking the headset off or
 opening the Meta menu pauses the game. VR settings and a controller help page
-are in the game menu under **VR Options**.
+are in the game menu under **VR Options**. There, **Swap Thumbsticks**
+(`XWA_XR_SWAP_STICKS=1`) trades what the two sticks do in flight (left stick:
+pitch / yaw; right stick: roll, throttle) while every button stays where it
+is; **Controls: Left-handed** mirrors both controllers, buttons included.
 
 ## Problems
 

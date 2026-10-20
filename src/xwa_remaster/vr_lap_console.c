@@ -2809,7 +2809,7 @@ typedef struct VcCardLabel {
 } VcCardLabel;
 
 static const VcCardLabel k_card_left[] = {
-	{ CTL_STICK, AERON_XR_BUTTON_LEFT_STICK, "Throttle (fwd/back) - roll", NULL, 96.0f },
+	{ CTL_STICK, AERON_XR_BUTTON_LEFT_STICK, XWA_VR_STICK_LEVER, NULL, 96.0f },
 	{ CTL_UPPER, AERON_XR_BUTTON_Y, NULL, NULL, 168.0f },
 	{ CTL_LOWER, AERON_XR_BUTTON_X, NULL, NULL, 232.0f },
 	{ CTL_MENU, -1, "Pause / menu", NULL, 296.0f },
@@ -2818,7 +2818,7 @@ static const VcCardLabel k_card_left[] = {
 };
 
 static const VcCardLabel k_card_right[] = {
-	{ CTL_STICK, AERON_XR_BUTTON_RIGHT_STICK, "Yaw / pitch", NULL, 96.0f },
+	{ CTL_STICK, AERON_XR_BUTTON_RIGHT_STICK, XWA_VR_STICK_STEER, NULL, 96.0f },
 	{ CTL_UPPER, AERON_XR_BUTTON_B, NULL, NULL, 168.0f },
 	{ CTL_LOWER, AERON_XR_BUTTON_A, NULL, NULL, 232.0f },
 	{ CTL_MENU, -1, "Meta: system menu", NULL, 296.0f },
@@ -2831,7 +2831,7 @@ static const VcCardLabel k_card_right[] = {
  * flight stick stay with the hand. The face buttons name themselves
  * (B on the left controller shows as "Y"). */
 static const VcCardLabel k_card_left_lh[] = {
-	{ CTL_STICK, AERON_XR_BUTTON_RIGHT_STICK, "Yaw / pitch", NULL, 96.0f },
+	{ CTL_STICK, AERON_XR_BUTTON_RIGHT_STICK, XWA_VR_STICK_STEER, NULL, 96.0f },
 	{ CTL_UPPER, AERON_XR_BUTTON_B, NULL, NULL, 168.0f },
 	{ CTL_LOWER, AERON_XR_BUTTON_A, NULL, NULL, 232.0f },
 	{ CTL_MENU, -1, "Pause / menu", NULL, 296.0f },
@@ -2840,7 +2840,7 @@ static const VcCardLabel k_card_left_lh[] = {
 };
 
 static const VcCardLabel k_card_right_lh[] = {
-	{ CTL_STICK, AERON_XR_BUTTON_LEFT_STICK, "Throttle (fwd/back) - roll", NULL, 96.0f },
+	{ CTL_STICK, AERON_XR_BUTTON_LEFT_STICK, XWA_VR_STICK_LEVER, NULL, 96.0f },
 	{ CTL_UPPER, AERON_XR_BUTTON_Y, NULL, NULL, 168.0f },
 	{ CTL_LOWER, AERON_XR_BUTTON_X, NULL, NULL, 232.0f },
 	{ CTL_MENU, -1, "Meta: system menu", NULL, 296.0f },
@@ -2858,7 +2858,12 @@ static void vc_card_key_text(char* out, size_t size, uint16_t key, int with_key)
 
 /* The two label lines of a control, from its bindings. */
 static void vc_card_label_text(const VcCardLabel* l, char* action, char* more, size_t size) {
-	snprintf(action, size, "%s", l->fixed ? l->fixed : "");
+	const char* fixed = l->fixed;
+	if (l->part == CTL_STICK && XwaVrButtons_SticksSwapped()) {
+		/* Swapped thumbsticks trade the stick's job, not its click. */
+		fixed = fixed && strcmp(fixed, XWA_VR_STICK_STEER) == 0 ? XWA_VR_STICK_LEVER : XWA_VR_STICK_STEER;
+	}
+	snprintf(action, size, "%s", fixed ? fixed : "");
 	snprintf(more, size, "%s", l->more ? l->more : "");
 	if (l->button < 0) {
 		return;

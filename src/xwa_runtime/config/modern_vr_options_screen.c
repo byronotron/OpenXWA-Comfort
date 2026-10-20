@@ -122,6 +122,9 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "AERON_XR_INVERT_PITCH", "Invert Thumbstick Pitch", k_toggle_texts, k_toggle_values, 2, 0, 97, 0 },
 	/* Mirrors the controllers' game roles (the flight stick stays right). */
 	{ "AERON_XR_LEFT_HANDED", "Controls", k_hand_texts, k_toggle_values, 2, 0, 75, 0 },
+	/* Swaps what the two thumbsticks do in flight; buttons stay where they
+	 * are (on top of the hand setting above). */
+	{ "XWA_XR_SWAP_STICKS", "Swap Thumbsticks", k_toggle_texts, k_toggle_values, 2, 0, 95, 0 },
 	{ "XWA_XR_VOICE", "Voice Commands", k_voice_texts, k_voice_values, 3, 1, 98, 0 },
 	/* The panel on the right: tactical map, voice commands, button mapping. */
 	{ "XWA_XR_SIDE_PANEL", "Side Panel", k_toggle_texts, k_toggle_values, 2, 1, 92, 0 },
@@ -518,9 +521,11 @@ static int vr_help_row(int y, const char* control, const char* action) {
 
 static void vr_draw_help(XwaModernOptionsMenu* menu) {
 	const int lh = Aeron_XrLeftHanded();
+	/* Swap Thumbsticks trades the sticks' jobs on top of the hand setting. */
+	const int steer_left = lh != XwaVrButtons_SticksSwapped();
 	int y = menu->y + 4;
-	y = vr_help_row(y, lh ? "Left stick" : "Right stick", "Pitch and yaw");
-	y = vr_help_row(y, lh ? "Right stick" : "Left stick", "Roll (left/right), throttle (fwd/back)");
+	y = vr_help_row(y, steer_left ? "Left stick" : "Right stick", "Pitch and yaw");
+	y = vr_help_row(y, steer_left ? "Right stick" : "Left stick", "Roll (left/right), throttle (fwd/back)");
 	y = vr_help_row(y, lh ? "Left trigger" : "Right trigger", "Fire");
 	y = vr_help_row(y, "Both triggers", "Land / hyperspace (when offered)");
 	static const AeronXrButton k_order[] = {
