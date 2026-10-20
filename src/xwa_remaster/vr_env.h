@@ -5,8 +5,8 @@
  * VR environment for the 2D screens (concourse, briefings, menus, films),
  * built from the installed game data and drawn in stereo around the flat
  * virtual screen. XWA_XR_ENVIRONMENT selects it:
- *   random          — endor, xwing, tiefighter, xvt or battle, picked at
- *                     each start;
+ *   random          — endor, xwing, tiefighter, xvt, defender, balance or
+ *                     battle, picked at each start;
  *   battle          — a live battle cast from the last mission flown (its
  *                     player craft and wingman, fighters, capital ships,
  *                     station, planets and sun), or rebels against the
@@ -35,6 +35,22 @@
  *                     its pillar of light, at their cover attitudes, before
  *                     the TIE pilot and the rebel pilot (vr/xvt_tie_pilot.rgba,
  *                     vr/xvt_rebel_pilot.rgba, APK assets only);
+ *   defender        — the Defender of the Empire box art: a TIE Bomber
+ *                     lower right, a TIE Advanced upper right, a formation
+ *                     of four TIE Advanced on the left and an A-wing
+ *                     breaking up in the great explosion, before a TIE
+ *                     pilot's helmet (vr/xvt_tie_pilot.rgba, APK assets
+ *                     only; XWA_XR_PILOT_BRIGHTNESS, XWA_XR_PILOT_PITCH).
+ *                     Played like tiefighter: the bomber's bolts finish the
+ *                     A-wing, the formation and the TIE Advanced fly into
+ *                     their cover places, then the helmet fades in;
+ *   balance         — the X-Wing vs. TIE Fighter: Balance of Power box art:
+ *                     the Super Star Destroyer across the middle before a
+ *                     brown world (generated), B-wings with their engines
+ *                     glowing, an A-wing from behind, three TIE Advanced,
+ *                     Star Destroyers and red flak; played: the rebels run
+ *                     in on the dreadnought and the big B-wing shoots a
+ *                     fourth TIE Advanced out of the flak;
  *   hangar          — the carrier hangar (Hangar.opt and its props, laid
  *                     out like the in-mission hangar);
  *   0               — off.
