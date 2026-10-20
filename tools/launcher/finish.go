@@ -70,8 +70,10 @@ func (a *app) collectLogs() {
 	}
 	got := 0
 	if a.adb != nil && a.adb.Serial != "" {
-		for _, name := range []string{"openxwa.log", "openxwa-prev.log", "openxwa-quest.cfg"} {
-			if _, err := a.adb.run(2*time.Minute, "pull", a.remoteBase()+"/"+name, filepath.Join(dir, name)); err == nil && name != "openxwa-quest.cfg" {
+		// openxwa-crash.txt is only there after a crash (kept until the next one).
+		for _, name := range []string{"openxwa.log", "openxwa-prev.log", "openxwa-crash.txt", "openxwa-quest.cfg"} {
+			if _, err := a.adb.run(2*time.Minute, "pull", a.remoteBase()+"/"+name, filepath.Join(dir, name)); err == nil &&
+				(name == "openxwa.log" || name == "openxwa-prev.log") {
 				got++
 			}
 		}
