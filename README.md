@@ -52,6 +52,7 @@ Gameplay video: https://www.reddit.com/r/OculusQuest/s/OZG4dItx3W
 | Side panel with the tactical map | Every button labelled on the controller |
 
 ![The VR menu environment around the game screen](assets/vr/menu_environment.jpg)
+Immersive 3D Menu Environments.
 
 ## Install
 
