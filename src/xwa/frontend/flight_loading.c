@@ -217,11 +217,12 @@ int FlightLoading_DrawProgressScreen(int progressStep) {
 		FrontImage_DrawSprite("sbarspark", progressBarWidth + 70, 75);
 	}
 #ifdef XWA_MODERN
-	/* In the screen's lower grey band (in the headset too). */
+	/* In the grey band above the screen's bottom light bar (in the headset
+	 * too, clear of the frame's bezel). */
 	if (g_flightLoadingPrompt) {
 		const int level = g_flightLoadingPromptLevel < 0 ? 0 : g_flightLoadingPromptLevel > 255 ? 255 : g_flightLoadingPromptLevel;
 		const int color = FrontendDisplay_PackRGB(level, level * 220 / 255, level * 70 / 255);
-		FrontendDraw_RectAssign(&rect, 0, 436, 639, 460);
+		FrontendDraw_RectAssign(&rect, 0, 394, 639, 418);
 		if (!FrontendText_DrawCentered(20, g_flightLoadingPrompt, &rect, color)) {
 			FrontendText_DrawCentered(15, g_flightLoadingPrompt, &rect, color);
 		}
