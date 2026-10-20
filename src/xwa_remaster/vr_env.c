@@ -698,6 +698,11 @@ static EnvMode env_mode(void) {
 	if (MissionDebrief_ShowingFailure()) {
 		return ENV_TIEART;
 	}
+	/* A completed mission is debriefed in the live battle (its own craft);
+	 * the chosen scene comes back when the debriefing closes. */
+	if (MissionDebrief_ShowingSuccess()) {
+		return ENV_BATTLE;
+	}
 	if (v && SDL_strcasecmp(v, "hangar") == 0) {
 		return ENV_HANGAR;
 	}
@@ -6044,8 +6049,8 @@ static void env_title_update(void) {
 		if (Aeron_XrTakeMenuXPressed()) {
 			s_dismiss.away = !s_dismiss.away;
 		}
-		if (Aeron_XrTakeMenuYPressed() && !MissionDebrief_ShowingFailure()) {
-			env_next_scene(); /* (the failed mission's debriefing keeps its scene) */
+		if (Aeron_XrTakeMenuYPressed() && !MissionDebrief_ShowingFailure() && !MissionDebrief_ShowingSuccess()) {
+			env_next_scene(); /* (a debriefing keeps its scene) */
 		}
 		if (s_dismiss.away) {
 			const AeronInputSnapshot* in = Aeron_InputSnapshot();

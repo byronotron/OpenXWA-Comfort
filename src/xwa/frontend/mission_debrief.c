@@ -3479,6 +3479,19 @@ int MissionDebrief_ReadFlightHints(char* outHints, int size) {
 	return outHints[0] != 0;
 }
 
+int MissionDebrief_ShowingSuccess(void) {
+	/* As MissionDebrief_ShowingFailure, after a completed mission. */
+	if (g_missionOutcome == 0) {
+		return 0;
+	}
+	for (int i = 0; i <= g_screenStackTop && i < FRONTEND_SCREEN_MAX_STACK; ++i) {
+		if (g_screenStates[i].updateFn == MissionDebrief_Update) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 int MissionDebrief_ShowingFailure(void) {
 	/* The debriefing's screen anywhere on the stack (a dialog may be over
 	 * it), after a mission that was not completed. */
