@@ -48,9 +48,11 @@ enum {
 	VR_STICK_TWIST,
 	VR_INVERT_PITCH,
 	VR_HANDED,
+	VR_SWAP_STICKS,
 	VR_VOICE,
 	VR_SIDE_PANEL,
 	VR_ENVIRONMENT,
+	VR_INTRO_CRAWL,
 	VR_SHIP_3D,
 	VR_RESOLUTION,
 	VR_REFRESH,
@@ -129,6 +131,9 @@ static const VrSetting k_settings[VR_COUNT] = {
 	/* The panel on the right: tactical map, voice commands, button mapping. */
 	{ "XWA_XR_SIDE_PANEL", "Side Panel", k_toggle_texts, k_toggle_values, 2, 1, 92, 0 },
 	{ "XWA_XR_ENVIRONMENT", "Menu Scene", k_env_texts, k_env_values, 7, 4, 90, 0 }, /* TIE Fighter box art */
+	/* The intro film's STAR WARS logo and text crawl as a 3D scene round
+	 * the player (vr_intro_crawl.h); Off: the film on the screen. */
+	{ "XWA_XR_INTRO_CRAWL", "Intro: 3D Crawl", k_toggle_texts, k_toggle_values, 2, 1, 69, 0 },
 	/* Ship previews (mission setup, tech room) in stereo on the menu screen:
 	 * always subtle, not in the menu. */
 	{ "XWA_XR_SHIP_3D", "3D Ship Previews", k_depth_texts, k_depth_values, 4, 1, 68, -1 },

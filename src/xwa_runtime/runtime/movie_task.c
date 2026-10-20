@@ -29,6 +29,7 @@ enum {
 
 typedef struct XwaMovieTaskState {
 	AeronVideoPlayer* player;
+	char name[64];
 	char path[512];
 	char original_path[512];
 	char subtitle_path[512];
@@ -223,6 +224,7 @@ int XwaMovieTask_Begin(const char* name, int noFade) {
 		return 0;
 	}
 	g_xwaMovieTask.active = 1;
+	(void)snprintf(g_xwaMovieTask.name, sizeof(g_xwaMovieTask.name), "%s", name);
 	Aeron_LogInfo("xwa.movie", "Playing '%s' from %s", name, g_xwaMovieTask.path);
 	return 1;
 }
@@ -388,6 +390,13 @@ int XwaMovieTask_IsActive(void) { return g_xwaMovieTask.active; }
 int XwaMovieTask_IsComplete(void) { return g_xwaMovieTask.complete; }
 
 int XwaMovieTask_GetResult(void) { return g_xwaMovieTask.result; }
+
+const char* XwaMovieTask_Name(void) { return g_xwaMovieTask.active ? g_xwaMovieTask.name : ""; }
+
+int64_t XwaMovieTask_PositionUs(void) {
+	return g_xwaMovieTask.active && g_xwaMovieTask.player != NULL ? Aeron_VideoGetPositionUs(g_xwaMovieTask.player)
+																	: 0;
+}
 
 uint64_t XwaMovieTask_NextWakeDelayUs(void) {
 	uint64_t delayUs;

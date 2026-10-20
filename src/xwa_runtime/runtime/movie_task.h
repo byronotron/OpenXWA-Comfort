@@ -16,6 +16,11 @@ void XwaMovieTask_Stop(int skipped);
 int XwaMovieTask_IsActive(void);
 int XwaMovieTask_IsComplete(void);
 int XwaMovieTask_GetResult(void);
+/* The film playing (its name as Movie_Play got it, e.g. "intro_final") and
+ * its playback clock in microseconds (the player's media position: audio
+ * synced, advancing between its frames); "" / 0 when none plays. */
+const char* XwaMovieTask_Name(void);
+int64_t XwaMovieTask_PositionUs(void);
 uint64_t XwaMovieTask_NextWakeDelayUs(void);
 void XwaMovieTask_Shutdown(void);
 
