@@ -83,8 +83,9 @@ it running; the launcher connects to it over USB (or Wi-Fi).
 
 ## Controls
 
-Intuitive radial command wheel & touch interactive holo-console give access to +25 inputs (Shields, energy, targeting)
-Additional 20 voice commands are implemented, all commands can be looked up on the in-cockpit console.
+Intuitive command wheel & touch interactive holo-console give access to +25 inputs (Shields, energy, targeting).
+
+Additional 20 voice commands are implemented. All commands can be looked up on the in-cockpit console.
 
 | Control | Action |
 |---|---|
