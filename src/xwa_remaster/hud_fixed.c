@@ -16,6 +16,9 @@
 static AeronDrawList2D* fixed_list;
 /* VR world split: elements tied to the 3D view go here instead. */
 static AeronDrawList2D* fixed_world_list;
+/* The world HUD's off-screen target arrows, drawn after the VR cockpit has
+ * been cut out of the world HUD so they stay visible behind struts. */
+static AeronDrawList2D* fixed_world_top_list;
 /* Targeting-computer widgets, when the CMD split is on (VR cockpit HUD). */
 static AeronDrawList2D* fixed_cmd_list;
 static int fixed_cmd_split;
@@ -1016,9 +1019,11 @@ int XwaRemasterHudFixed_Init(void) {
 		fixed_list = AeronDrawList_Create(XWA_HUD_MAX_FIXED_DRAWS);
 	if (!fixed_world_list)
 		fixed_world_list = AeronDrawList_Create(XWA_HUD_MAX_FIXED_DRAWS);
+	if (!fixed_world_top_list)
+		fixed_world_top_list = AeronDrawList_Create(8);
 	if (!fixed_cmd_list)
 		fixed_cmd_list = AeronDrawList_Create(XWA_HUD_MAX_FIXED_DRAWS);
-	return fixed_list != NULL && fixed_world_list != NULL && fixed_cmd_list != NULL;
+	return fixed_list != NULL && fixed_world_list != NULL && fixed_world_top_list != NULL && fixed_cmd_list != NULL;
 }
 
 void XwaRemasterHudFixed_Shutdown(void) {
@@ -1026,6 +1031,8 @@ void XwaRemasterHudFixed_Shutdown(void) {
 	fixed_list = NULL;
 	AeronDrawList_Destroy(fixed_world_list);
 	fixed_world_list = NULL;
+	AeronDrawList_Destroy(fixed_world_top_list);
+	fixed_world_top_list = NULL;
 	AeronDrawList_Destroy(fixed_cmd_list);
 	fixed_cmd_list = NULL;
 	fixed_world_prepared = 0;
@@ -1098,7 +1105,7 @@ void XwaRemasterHudFixed_Build(const XwaSnapshot* snapshot, XwaHudProfileIndex p
 void XwaRemasterHudFixed_PrepareDrawList(AeronCommandBuffer* cmd, int target_w, int target_h) {
 	if (!cmd || !fixed_list || target_w <= 0 || target_h <= 0)
 		return;
-	const int split = fixed_world_split && fixed_world_list;
+	const int split = fixed_world_split && fixed_world_list && fixed_world_top_list;
 	const int cmd_split = fixed_cmd_split && fixed_cmd_list;
 	fixed_world_prepared = 0;
 	fixed_cmd_prepared = 0;
@@ -1106,8 +1113,10 @@ void XwaRemasterHudFixed_PrepareDrawList(AeronCommandBuffer* cmd, int target_w, 
 		AeronDrawList_Begin(fixed_cmd_list, NULL, target_w, target_h, AERON_DRAWLIST2D_LOAD, NULL);
 	memset(fixed_widget_bounds_valid, 0, sizeof fixed_widget_bounds_valid);
 	AeronDrawList_Begin(fixed_list, NULL, target_w, target_h, AERON_DRAWLIST2D_LOAD, NULL);
-	if (split)
+	if (split) {
 		AeronDrawList_Begin(fixed_world_list, NULL, target_w, target_h, AERON_DRAWLIST2D_LOAD, NULL);
+		AeronDrawList_Begin(fixed_world_top_list, NULL, target_w, target_h, AERON_DRAWLIST2D_LOAD, NULL);
+	}
 	const XwaHudLayoutProfile* profile = fixed_draws.valid ? fixed_profile((XwaHudProfileIndex)fixed_draws.profile)
 														   : NULL;
 	int out_x = 0, out_y = 0;
@@ -1118,6 +1127,7 @@ void XwaRemasterHudFixed_PrepareDrawList(AeronCommandBuffer* cmd, int target_w, 
 		(void)AeronDrawList_Prepare(fixed_list, cmd);
 		if (split) {
 			(void)AeronDrawList_Prepare(fixed_world_list, cmd);
+			(void)AeronDrawList_Prepare(fixed_world_top_list, cmd);
 			fixed_world_prepared = 1;
 		}
 		if (cmd_split) {
@@ -1184,7 +1194,8 @@ void XwaRemasterHudFixed_PrepareDrawList(AeronCommandBuffer* cmd, int target_w, 
 			quad.texture = sprite.texture;
 			quad.blend = sprite.blend;
 			quad.filter = sprite.filter;
-			AeronDrawList_AddQuad4(list, &quad);
+			/* World split (VR): the arrow over the cockpit's cut-out. */
+			AeronDrawList_AddQuad4(list == fixed_world_list ? fixed_world_top_list : list, &quad);
 		} else {
 			AeronDrawList_AddSprite(list, &sprite);
 		}
@@ -1193,6 +1204,7 @@ void XwaRemasterHudFixed_PrepareDrawList(AeronCommandBuffer* cmd, int target_w, 
 	(void)AeronDrawList_Prepare(fixed_list, cmd);
 	if (split) {
 		(void)AeronDrawList_Prepare(fixed_world_list, cmd);
+		(void)AeronDrawList_Prepare(fixed_world_top_list, cmd);
 		fixed_world_prepared = 1;
 	}
 	if (cmd_split) {
@@ -1223,6 +1235,14 @@ void XwaRemasterHudFixed_RenderWorld(AeronCommandBuffer* cmd, AeronRenderPass* p
 		target_w <= 0 || target_h <= 0)
 		return;
 	AeronDrawList_RenderIntoPass(fixed_world_list, cmd, pass, target);
+}
+
+void XwaRemasterHudFixed_RenderWorldTop(AeronCommandBuffer* cmd, AeronRenderPass* pass, AeronRenderTarget* target,
+										int target_w, int target_h) {
+	if (!cmd || !pass || !target || !fixed_world_top_list || !fixed_world_prepared || !fixed_draws.valid ||
+		target_w <= 0 || target_h <= 0)
+		return;
+	AeronDrawList_RenderIntoPass(fixed_world_top_list, cmd, pass, target);
 }
 
 const XwaHudPreparedDrawState* XwaRemasterHud_PreparedDrawState(void) { return &fixed_draws; }

@@ -3277,6 +3277,25 @@ static void fl_xr_cockpit_scale(const XwaSnapshot* snap, const float center[3], 
 			k = k_xr_cockpit_scale[i].scale;
 		}
 	}
+	/* XWA_XR_COCKPIT_SCALE_<NAME> (the model's name in capitals, letters and
+	 * digits only, e.g. XWA_XR_COCKPIT_SCALE_XWINGCOCKPIT=0.95) overrides it
+	 * per cockpit; XWA_XR_COCKPIT_SCALE scales every cockpit. */
+	{
+		char key[96] = "XWA_XR_COCKPIT_SCALE_";
+		size_t n = strlen(key);
+		for (const char* c = snap->cockpit.model_name; *c && n + 1 < sizeof key; ++c) {
+			if (isalnum((unsigned char)*c)) {
+				key[n++] = (char)toupper((unsigned char)*c);
+			}
+		}
+		key[n] = '\0';
+		const float all = fl_xr_env("XWA_XR_COCKPIT_SCALE", 1.0f);
+		const float own = fl_xr_env(key, k);
+		k = own * all;
+		if (!(k > 0.2f && k < 5.0f)) {
+			k = 1.0f;
+		}
+	}
 	if (k == 1.0f) {
 		return;
 	}
@@ -3486,6 +3505,9 @@ static void fl_draw_hud_parts(AeronCommandBuffer* cmd, AeronRenderPass* pass, Ae
 static void fl_draw_hud(AeronCommandBuffer* cmd, AeronRenderPass* pass, AeronRenderTarget* target, int target_w,
 						int target_h) {
 	fl_draw_hud_parts(cmd, pass, target, target_w, target_h, FL_HUD_ALL);
+	if (!s.suppress_hud) {
+		XwaRemasterHudFixed_RenderWorldTop(cmd, pass, target, target_w, target_h); /* empty unless split */
+	}
 }
 
 AeronTexture* XwaRemasterFlight_ResolvePresentation(AeronCommandBuffer* cmd, int direct_present) {
@@ -4383,8 +4405,12 @@ static int fl_xr_output_hud(AeronCommandBuffer* cmd, AeronRenderTarget* target, 
 	Aeron_SetScissor(pass, &full);
 	fl_draw_hud_parts(cmd, pass, target, w, h, parts);
 	if (parts == FL_HUD_WORLD) {
-		/* The cockpit hides the reticle and brackets behind it. */
+		/* The cockpit hides the reticle and brackets behind it; the arrow
+		 * toward a target out of sight stays visible over it. */
 		XwaVrHudOcclusion_Render(cmd, pass, target);
+	}
+	if ((parts & FL_HUD_WORLD) && !s.suppress_hud) {
+		XwaRemasterHudFixed_RenderWorldTop(cmd, pass, target, w, h);
 	}
 	if (overlay && !s.suppress_hud) {
 		XwaVrCockpitHud_RenderOverlay(cmd, pass, target, overlay == 2);

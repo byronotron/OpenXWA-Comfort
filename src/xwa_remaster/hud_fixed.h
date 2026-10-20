@@ -37,5 +37,9 @@ void XwaRemasterHudFixed_RenderCmdGroup(AeronCommandBuffer* cmd, AeronRenderPass
 										int target_w, int target_h);
 void XwaRemasterHudFixed_RenderWorld(AeronCommandBuffer* cmd, AeronRenderPass* pass,
 									 AeronRenderTarget* target, int target_w, int target_h);
+/* The world list's off-screen target / padlock arrows, drawn after the VR
+ * cockpit occlusion so the cockpit never hides them. */
+void XwaRemasterHudFixed_RenderWorldTop(AeronCommandBuffer* cmd, AeronRenderPass* pass, AeronRenderTarget* target,
+										int target_w, int target_h);
 
 #endif
