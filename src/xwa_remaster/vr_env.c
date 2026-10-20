@@ -138,10 +138,11 @@ static const EnvShip k_endor[] = {
  * list) from the shooter's guns, as spans of the shooter-target distance
  * along its nose. */
 typedef enum EnvGuns {
-	ENV_GUNS_XWING, /* four wingtip cannons, red */
-	ENV_GUNS_TIE,   /* two chin guns, green */
-	ENV_GUNS_AWING, /* two wingtip cannons, red */
+	ENV_GUNS_XWING,       /* four wingtip cannons, red */
+	ENV_GUNS_TIE,         /* two chin guns, green */
+	ENV_GUNS_AWING,       /* two wingtip cannons, red */
 	ENV_GUNS_INTERCEPTOR, /* TIE Interceptor: two wingtip guns, green */
+	ENV_GUNS_BWING,       /* B-wing: the wing's cannons, red */
 } EnvGuns;
 
 typedef struct EnvSalvo {
@@ -205,6 +206,36 @@ static const EnvSalvo k_box_salvos[] = {
 	{ 4, 1, ENV_GUNS_TIE, { { 0.10f, 0.32f }, { 0.48f, 0.66f } }, 2 },
 };
 
+/* ---- the played scenes ----------------------------------------------------
+ * The TIE Fighter, Defender of the Empire and Balance of Power box arts play a
+ * short fight that ends on the cover's moment (see "the TIE Fighter box art,
+ * played"): the same flight, fire, explosion and sound machinery, told per
+ * scene which craft dies where, who shoots it, who runs, passes or flies in
+ * formation. Ships 0..animated-1 fly in (at most 8); passers fly straight
+ * past early on; the rest (capital ships) hold their places. */
+typedef struct EnvRunner {
+	int ship, chaser;
+	float lead_m, break_m, end_s, roll_s, pull_w;
+	float away[3];
+	int weave; /* jinks instead (see env_tie_weave_pose) */
+} EnvRunner;
+
+typedef struct EnvAnim {
+	int victim;          /* shot down at the cover's moment */
+	const float* blast;  /* its explosion: yaw, pitch, metres, diameter */
+	float blast_tint[3]; /* the explosion's colour (sprites as they are: 1.5, 1.4, 1.3) */
+	int hunter;          /* who shoots it down (-1: a TIE fighter on the right) */
+	int chase_ship;      /* kept in the middle of the view while it chases (-1: none) */
+	const EnvRunner* runners;
+	int runner_count;
+	int first_passer, passers;
+	const float (*pass)[2];
+	const int* shooters; /* firing bursts along their noses until the salvos */
+	int shooter_count;
+	const signed char* leader; /* per ship: flies in formation on this one (-1) */
+	int animated;
+} EnvAnim;
+
 /* ---- "TIE Fighter": the TIE Fighter box art ---------------------------
  * The cover of TIE Fighter (its logo left out): a TIE Interceptor coming at
  * the viewer in front of a huge explosion in which an X-wing breaks up, a
@@ -260,12 +291,7 @@ static const float k_tie_pass[ENV_TIE_PASSERS][2] = { { -7.0f, 3.0f }, { 7.5f, -
  * cover's moment, whichever is first; a barrel roll of roll_s (0: none),
  * then a pull at pull_w rad/s toward `away` (viewer's x right, y ahead,
  * z up). */
-static const struct {
-	int ship, chaser;
-	float lead_m, break_m, end_s, roll_s, pull_w;
-	float away[3];
-	int weave; /* jinks instead (see env_tie_weave_pose) */
-} k_tie_runners[ENV_TIE_RUNNERS] = {
+static const EnvRunner k_tie_runners[ENV_TIE_RUNNERS] = {
 	/* The X-wing from the big Interceptor: jinking left and right three
 	 * times ahead of it, the Interceptor correcting after it, until it is
 	 * hit and disappears in the great explosion. */
@@ -287,6 +313,121 @@ static const EnvSalvo k_tie_salvos[] = {
 	{ 2, 0, ENV_GUNS_TIE, { { 0.05f, 0.75f } }, 1 },
 	/* The bomber's streak to the upper right. */
 	{ 3, 0, ENV_GUNS_TIE, { { 0.10f, 1.60f } }, 1 },
+};
+
+/* ---- "Defender of the Empire": its box art ------------------------------
+ * The cover of TIE Fighter: Defender of the Empire (its title left out): a
+ * TIE Bomber coming at the viewer lower right firing green, a TIE Advanced
+ * upper right seen from the front, a tight formation of four TIE Advanced on
+ * the left firing to the lower left, an A-wing breaking up in a great orange
+ * explosion lower left, a TIE pilot's helmet looming behind it all over
+ * purple clouds. Cover attitudes (view-relative, fitted to the cover against
+ * renders of the models), places pushed out just far enough to clear the
+ * screen and logo. */
+static const EnvShip k_doeart[] = {
+	/* 0: the big TIE Bomber lower right: coming at us, the cockpit pod's
+	 * window and the ordnance pod's nose toward us, rolled with the pods'
+	 * axis falling to the right; its two green streaks down past us. */
+	{ "TieBomber", 30.0f, -30.0f, 18.0f, { -0.20f, -0.95f, -0.25f }, { 0.52f, -0.32f, 0.79f }, 0, 1 },
+	/* 1: the TIE Advanced upper right, from the front, its wings like '<'
+	 * and '>' rising to the right, turned a little to our right. */
+	{ "TieAdvanced", 37.0f, 19.0f, 32.0f, { 0.51f, -0.82f, 0.26f }, { -0.35f, 0.07f, 0.93f }, 0, 1 },
+	/* 2..5: the formation on the left (2 leads, upper right of it; 3 upper
+	 * left, 4 lower left, 5 lower right): three-quarters from the front
+	 * below, rolled so the wings run diagonally, heading down to the left. */
+	{ "TieAdvanced", -27.0f, -3.0f, 42.0f, { -0.50f, -0.70f, -0.50f }, { 0.37f, -0.70f, 0.61f }, 0, 1 },
+	{ "TieAdvanced", -39.0f, -5.0f, 42.0f, { -0.50f, -0.70f, -0.50f }, { 0.37f, -0.70f, 0.61f }, 0, 1 },
+	{ "TieAdvanced", -39.0f, -18.0f, 42.0f, { -0.50f, -0.70f, -0.50f }, { 0.37f, -0.70f, 0.61f }, 0, 1 },
+	{ "TieAdvanced", -27.0f, -16.0f, 42.0f, { -0.50f, -0.70f, -0.50f }, { 0.37f, -0.70f, 0.61f }, 0, 1 },
+	/* 6: the A-wing breaking up in the explosion, nose down to the left. */
+	{ "AWing", -11.0f, -33.0f, 58.0f, { -0.50f, -0.50f, -0.70f }, { -0.71f, 0.71f, 0.00f }, 0, 1 },
+	/* 7, 8: not on the cover: two A-wings screaming past early in the fight
+	 * (the passers); hidden in the still. */
+	{ "AWing", 80.0f, -30.0f, 300.0f, { 1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, 0, 0 },
+	{ "AWing", -80.0f, -30.0f, 300.0f, { -1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, 0, 0 },
+};
+
+/* The explosion round the A-wing: yaw, pitch, metres, diameter in metres. */
+static const float k_doe_blast[4] = { -12.0f, -32.0f, 64.0f, 48.0f };
+
+static const EnvSalvo k_doe_salvos[] = {
+	/* The bomber's two streaks down past the viewer. */
+	{ 0, 6, ENV_GUNS_TIE, { { 0.04f, 0.26f } }, 1 },
+	/* The formation's long streaks to the lower left (the lower right one). */
+	{ 5, 6, ENV_GUNS_TIE, { { 0.08f, 2.4f } }, 1 },
+};
+
+/* ---- "Balance of Power": the X-Wing vs. TIE Fighter add-on's box art ----
+ * Its artwork inside the border (no logo, stickers or labels): a Super Star
+ * Destroyer diagonally across the middle, its bow lower left, a brown world
+ * behind it, a big B-wing upper left and another lower right seen from
+ * behind, their engines glowing red, an A-wing from behind at the bottom,
+ * three TIE Advanced upper right, small B-wings by the dreadnought's stern,
+ * Star Destroyers in the distance and red-pink flak. Cover attitudes, the
+ * fighters pushed out to clear the screen; the dreadnought and the world are
+ * the backdrop the screen stands in front of. */
+static const EnvShip k_bopart[] = {
+	/* 0: the big B-wing upper left, from behind and below, the cockpit end
+	 * of its wing up to the left. */
+	{ "BWing", -36.0f, 8.0f, 21.0f, { 0.15f, 0.95f, 0.26f }, { -0.44f, -0.18f, 0.88f }, 0, 1 },
+	/* 1: the B-wing lower right, the same way. */
+	{ "BWing", 35.0f, -33.0f, 30.0f, { 0.10f, 0.95f, 0.30f }, { -0.42f, -0.24f, 0.87f }, 0, 1 },
+	/* 2: the A-wing at the bottom, from behind and above. */
+	{ "AWing", 1.0f, -42.0f, 44.0f, { 0.00f, 0.94f, 0.35f }, { 0.00f, -0.35f, 0.94f }, 0, 1 },
+	/* 3..5: the three TIE Advanced upper right (3 leads), from the front. */
+	{ "TieAdvanced", 33.0f, 30.0f, 75.0f, { 0.10f, -0.95f, -0.30f }, { 0.10f, -0.29f, 0.95f }, 0, 1 },
+	{ "TieAdvanced", 21.0f, 26.0f, 75.0f, { 0.10f, -0.95f, -0.30f }, { 0.10f, -0.29f, 0.95f }, 0, 1 },
+	{ "TieAdvanced", 33.0f, 21.0f, 75.0f, { 0.10f, -0.95f, -0.30f }, { 0.10f, -0.29f, 0.95f }, 0, 1 },
+	/* 6: a fourth TIE Advanced, shot down in the flak by the trio. */
+	{ "TieAdvanced", 26.0f, 16.0f, 72.0f, { -0.30f, -0.90f, -0.30f }, { 0.00f, -0.30f, 0.95f }, 0, 1 },
+	/* 7: a small B-wing by the dreadnought's stern. */
+	{ "BWing", 38.0f, -12.0f, 130.0f, { 0.20f, 0.90f, 0.35f }, { -0.30f, -0.30f, 0.90f }, 0, 1 },
+	/* 8: the Super Star Destroyer, its bow lower left (world attitude). */
+	{ "SuperStarDestroyer",
+	  1.0f,
+	  -29.0f,
+	  3600.0f,
+	  { -0.89f, -0.09f, -0.44f },
+	  { -0.33f, -0.55f, 0.77f },
+	  0,
+	  0 },
+	/* 9..11: Star Destroyers in the distance: two right of its stern, one
+	 * far left below. */
+	{ "ImperialStarDestroyer2", 41.0f, 1.0f, 9000.0f, { -0.70f, -0.70f, 0.00f }, { 0.0f, 0.0f, 1.0f }, 0, 0 },
+	{ "ImperialStarDestroyer2",
+	  37.0f,
+	  11.0f,
+	  20000.0f,
+	  { -0.80f, -0.55f, 0.15f },
+	  { 0.0f, 0.0f, 1.0f },
+	  0,
+	  0 },
+	{ "ImperialStarDestroyer2",
+	  -32.0f,
+	  -24.0f,
+	  16000.0f,
+	  { 0.90f, 0.30f, 0.10f },
+	  { 0.0f, 0.0f, 1.0f },
+	  0,
+	  0 },
+};
+
+/* The flak burst the fourth TIE Advanced dies in. */
+static const float k_bop_blast[4] = { 26.0f, 16.0f, 72.0f, 12.0f };
+
+/* The other red-pink flak bursts: yaw, pitch, metres, diameter. */
+static const float k_bop_flak[][4] = {
+	{ 19.0f, -18.0f, 160.0f, 14.0f },
+	{ 6.0f, -30.0f, 140.0f, 10.0f },
+	{ 40.0f, -11.0f, 150.0f, 9.0f },
+	{ -5.0f, -24.0f, 260.0f, 7.0f },
+};
+
+static const EnvSalvo k_bop_salvos[] = {
+	/* The big B-wing's fire, away into the scene. */
+	{ 0, 8, ENV_GUNS_BWING, { { 0.002f, 0.012f }, { 0.018f, 0.028f } }, 2 },
+	/* The lower B-wing's. */
+	{ 1, 8, ENV_GUNS_BWING, { { 0.002f, 0.010f } }, 1 },
 };
 
 /* A laser streak frozen between two points given as yaw, pitch, metres. */
@@ -360,6 +501,52 @@ static const EnvSpaceScene k_scene_tieart = { k_tieart, (int)(sizeof k_tieart / 
 static const EnvSpaceScene k_scene_xvtart = { k_xvtart, (int)(sizeof k_xvtart / sizeof k_xvtart[0]), NULL, 0 };
 static const EnvSpaceScene k_scene_boxart = { k_boxart, (int)(sizeof k_boxart / sizeof k_boxart[0]), k_box_salvos,
 											  (int)(sizeof k_box_salvos / sizeof k_box_salvos[0]) };
+static const EnvSpaceScene k_scene_doeart = { k_doeart, (int)(sizeof k_doeart / sizeof k_doeart[0]),
+											  k_doe_salvos,
+											  (int)(sizeof k_doe_salvos / sizeof k_doe_salvos[0]) };
+static const EnvSpaceScene k_scene_bopart = { k_bopart, (int)(sizeof k_bopart / sizeof k_bopart[0]),
+											  k_bop_salvos,
+											  (int)(sizeof k_bop_salvos / sizeof k_bop_salvos[0]) };
+
+/* The TIE Fighter scene: the X-wing (5) hunted down by a TIE fighter on the
+ * right, the Interceptor (0) after the jinking X-wing, two runners, two
+ * passers. */
+static const int k_tie_shooters[] = { 1, 2, 3, 0, 5 };
+static const EnvAnim k_anim_tie = {
+	5,
+	k_tie_blast,
+	{ 1.5f, 1.4f, 1.3f },
+	-1,
+	ENV_TIE_CHASE_SHIP,
+	k_tie_runners,
+	ENV_TIE_RUNNERS,
+	ENV_TIE_FIRST_PASSER,
+	ENV_TIE_PASSERS,
+	k_tie_pass,
+	k_tie_shooters,
+	5,
+	NULL,
+	8,
+};
+
+/* Defender of the Empire: the bomber (0) finishes the A-wing (6); the
+ * formation (3..5 on 2) comes in together; two A-wings pass early. */
+static const int k_doe_shooters[] = { 1, 2, 3, 4, 5, 6 };
+static const signed char k_doe_leader[] = { -1, -1, -1, 2, 2, 2, -1, -1, -1 };
+static const float k_doe_pass[2][2] = { { -7.0f, 3.0f }, { 7.5f, -2.0f } };
+static const EnvAnim k_anim_doe = {
+	6, k_doe_blast, { 1.5f, 1.4f, 1.3f }, 0, -1,           NULL, 0, 7,
+	2, k_doe_pass,  k_doe_shooters,       6, k_doe_leader, 7,
+};
+
+/* Balance of Power: the B-wings, the A-wing and the small B-wing run in on
+ * the dreadnought, the TIE Advanced trio (4, 5 on 3) comes down on them, and
+ * the big B-wing (0) shoots a fourth TIE Advanced (6) out of the flak. */
+static const int k_bop_shooters[] = { 1, 2, 3, 4, 5, 7 };
+static const signed char k_bop_leader[] = { -1, -1, -1, -1, 3, 3, -1, -1, -1, -1, -1, -1 };
+static const EnvAnim k_anim_bop = {
+	6, k_bop_blast, { 1.7f, 0.75f, 0.95f }, 0, -1, NULL, 0, 0, 0, NULL, k_bop_shooters, 6, k_bop_leader, 8,
+};
 
 /* Sprites from the game's resource DATs (group, sprite id) plus the logo
  * and a generated beam profile. */
@@ -371,14 +558,15 @@ enum {
 	ENV_TEX_FIRE,
 	ENV_TEX_LOGO,
 	ENV_TEX_BEAM,
-	ENV_TEX_NEBULA, /* generated: the box art's purple nebula */
-	ENV_TEX_VADER,  /* vr/vader.rgba: the helmet behind the TIE Fighter scene */
+	ENV_TEX_NEBULA,      /* generated: the box art's purple nebula */
+	ENV_TEX_VADER,       /* vr/vader.rgba: the helmet behind the TIE Fighter scene */
 	ENV_TEX_TIE_PILOT,   /* vr/xvt_tie_pilot.rgba: X-Wing vs. TIE backdrop, left */
 	ENV_TEX_REBEL_PILOT, /* vr/xvt_rebel_pilot.rgba: X-Wing vs. TIE backdrop, right */
 	ENV_TEX_GLOW,        /* generated: a soft round glow (engines, flashes) */
+	ENV_TEX_PLANET,      /* generated: Balance of Power's brown world */
 	ENV_TEX_BOOM,        /* the explosion's animation frames (ENV_BOOM_FRAMES slots) */
 	ENV_TEX_BOOM_LAST = ENV_TEX_BOOM + 11,
-	ENV_TEX_BACKDROP,    /* the last mission's planets, nebulae and suns */
+	ENV_TEX_BACKDROP, /* the last mission's planets, nebulae and suns */
 	ENV_TEX_BACKDROP_LAST = ENV_TEX_BACKDROP + 5,
 	ENV_TEX_COUNT
 };
@@ -407,7 +595,20 @@ static const EnvTexSource k_tex_sources[ENV_TEX_COUNT] = {
 	/* the backdrops: chosen per mission (s_bt.backdrops) */
 };
 
-typedef enum EnvMode { ENV_OFF = 0, ENV_ENDOR, ENV_HANGAR, ENV_BOXART, ENV_TIEART, ENV_XVTART, ENV_BATTLE } EnvMode;
+typedef enum EnvMode {
+	ENV_OFF = 0,
+	ENV_ENDOR,
+	ENV_HANGAR,
+	ENV_BOXART,
+	ENV_TIEART,
+	ENV_XVTART,
+	ENV_BATTLE,
+	ENV_DOEART,
+	ENV_BOPART
+} EnvMode;
+
+/* The box arts that play a fight into their cover's moment. */
+static int env_played(EnvMode m) { return m == ENV_TIEART || m == ENV_DOEART || m == ENV_BOPART; }
 
 #define ENV_MAX_MESHES 24
 #define ENV_MAX_INSTANCES 40
@@ -424,6 +625,9 @@ typedef struct EnvMesh {
 	float size_z; /* world units */
 	float len_m, wid_m, hgt_m; /* the model's extents in metres (y, x, z) */
 	int tried;
+	/* Its engine glows (model metres, diameter in metres, core colour). */
+	int glow_count;
+	float glow[8][7];
 } EnvMesh;
 
 static struct {
@@ -506,6 +710,12 @@ static EnvMode env_mode(void) {
 	if (v && SDL_strcasecmp(v, "xvt") == 0) {
 		return ENV_XVTART;
 	}
+	if (v && SDL_strcasecmp(v, "defender") == 0) {
+		return ENV_DOEART;
+	}
+	if (v && SDL_strcasecmp(v, "balance") == 0) {
+		return ENV_BOPART;
+	}
 	if (v && SDL_strcasecmp(v, "endor") == 0) {
 		return ENV_ENDOR;
 	}
@@ -519,14 +729,17 @@ static EnvMode env_mode(void) {
 	/* "random": one of the space scenes, picked once per start. */
 	static EnvMode picked = ENV_OFF;
 	if (picked == ENV_OFF) {
-		static const EnvMode scenes[] = { ENV_ENDOR, ENV_BOXART, ENV_TIEART, ENV_XVTART, ENV_BATTLE };
+		static const EnvMode scenes[] = { ENV_ENDOR,  ENV_BOXART, ENV_TIEART, ENV_XVTART,
+										  ENV_BATTLE, ENV_DOEART, ENV_BOPART };
 		const uint64_t seed = SDL_GetPerformanceCounter() ^ ((uint64_t)time(NULL) * 2654435761u);
 		picked = scenes[(seed ^ (seed >> 17) ^ (seed >> 31)) % (sizeof scenes / sizeof scenes[0])];
 		Aeron_LogInfo("xwa.remaster", "VR environment: random pick %s",
-					  picked == ENV_ENDOR	 ? "endor"
+					  picked == ENV_ENDOR    ? "endor"
 					  : picked == ENV_BOXART ? "xwing"
 					  : picked == ENV_TIEART ? "tiefighter"
 					  : picked == ENV_BATTLE ? "battle"
+					  : picked == ENV_DOEART ? "defender"
+					  : picked == ENV_BOPART ? "balance"
 											 : "xvt");
 	}
 	return picked;
@@ -543,9 +756,18 @@ static const EnvSpaceScene* env_space(void) {
 			return &k_scene_tieart;
 		case ENV_XVTART:
 			return &k_scene_xvtart;
+		case ENV_DOEART:
+			return &k_scene_doeart;
+		case ENV_BOPART:
+			return &k_scene_bopart;
 		default:
 			return NULL;
 	}
+}
+
+/* The played scene's fight (the TIE Fighter scene's when none is). */
+static const EnvAnim* env_anim(void) {
+	return s_env.mode == ENV_DOEART ? &k_anim_doe : s_env.mode == ENV_BOPART ? &k_anim_bop : &k_anim_tie;
 }
 
 int XwaVrEnv_Enabled(void) { return env_mode() != ENV_OFF; }
@@ -709,7 +931,7 @@ static float env_screen_reveal(void) {
 
 /* The title is up: at once, or for the TIE art once its fight is over. */
 static int env_title_shown(void) {
-	return env_title_active() && (s_env.mode != ENV_TIEART || s_env.anim_t >= ENV_TIE_ANIM_SECONDS);
+	return env_title_active() && (!env_played(s_env.mode) || s_env.anim_t >= ENV_TIE_ANIM_SECONDS);
 }
 
 /* The live battle (defined below). */
@@ -719,7 +941,8 @@ static int bt_load_texture(AeronCommandBuffer* cmd, int slot);
 static int bt_tex_needed(int slot);
 
 static int env_is_space(EnvMode m) {
-	return m == ENV_ENDOR || m == ENV_BOXART || m == ENV_TIEART || m == ENV_XVTART || m == ENV_BATTLE;
+	return m == ENV_ENDOR || m == ENV_BOXART || m == ENV_TIEART || m == ENV_XVTART || m == ENV_BATTLE ||
+		   m == ENV_DOEART || m == ENV_BOPART;
 }
 
 int XwaVrEnv_IsSpace(void) { return env_is_space(env_mode()); }
@@ -759,6 +982,28 @@ int XwaVrEnv_SpaceLighting(XwaVrEnvLighting* out) {
 		env_set3(out->ambient_sides, 0.04f, 0.045f, 0.07f);
 		env_set3(out->ambient_top, 0.04f, 0.05f, 0.08f);
 		env_set3(out->ambient_bottom, 0.05f, 0.04f, 0.05f);
+	} else if (m == ENV_DOEART) {
+		/* The Defender of the Empire cover: a cool white light from the upper
+		 * left behind the viewer (the bomber's lit faces), the great
+		 * explosion's orange glow from ahead below left, a violet ambient. */
+		env_set3(out->key_dir, -0.50f, -0.35f, 0.79f);
+		env_set3(out->key_color, 0.85f * sun, 0.88f * sun, 1.0f * sun);
+		env_set3(out->fill_dir, -0.35f, 0.80f, -0.50f);
+		env_set3(out->fill_color, 1.0f * 0.95f, 0.55f * 0.95f, 0.18f * 0.95f);
+		env_set3(out->ambient_sides, 0.05f, 0.04f, 0.08f);
+		env_set3(out->ambient_top, 0.05f, 0.04f, 0.09f);
+		env_set3(out->ambient_bottom, 0.06f, 0.035f, 0.07f);
+	} else if (m == ENV_BOPART) {
+		/* The Balance of Power cover: a pale lavender sun from the upper left
+		 * (the world's and the dreadnought's lit sides), a faint blue fill
+		 * from the right, a deep blue-violet ambient. */
+		env_set3(out->key_dir, -0.62f, 0.30f, 0.72f);
+		env_set3(out->key_color, 0.95f * sun, 0.92f * sun, 1.0f * sun);
+		env_set3(out->fill_dir, 0.70f, -0.20f, -0.30f);
+		env_set3(out->fill_color, 0.30f * 0.6f, 0.35f * 0.6f, 0.60f * 0.6f);
+		env_set3(out->ambient_sides, 0.045f, 0.04f, 0.07f);
+		env_set3(out->ambient_top, 0.05f, 0.045f, 0.08f);
+		env_set3(out->ambient_bottom, 0.035f, 0.03f, 0.055f);
 	} else if (m == ENV_TIEART) {
 		/* The TIE Fighter cover: a cool blue-white light from the upper
 		 * right, the explosion's orange glow from behind and below the
@@ -862,6 +1107,21 @@ static void env_load(AeronCommandBuffer* cmd, int index) {
 		return;
 	}
 	m->size_z = (model.bounds.max.z - model.bounds.min.z) * AERON_OPT_UNITS_PER_METER;
+	m->glow_count = 0;
+	for (uint32_t g = 0; g < model.engine_glow_count && m->glow_count < 8; ++g) {
+		const AeronFlightEngineGlow* eg = &model.engine_glows[g];
+		if (!eg->enabled) {
+			continue;
+		}
+		float* o = m->glow[m->glow_count++];
+		o[0] = eg->position.x;
+		o[1] = eg->position.y;
+		o[2] = eg->position.z;
+		o[3] = 0.45f * fmaxf(eg->dimensions.x, eg->dimensions.y);
+		o[4] = eg->core_rgba[0];
+		o[5] = eg->core_rgba[1];
+		o[6] = eg->core_rgba[2];
+	}
 	m->len_m = model.bounds.max.y - model.bounds.min.y;
 	m->wid_m = model.bounds.max.x - model.bounds.min.x;
 	m->hgt_m = model.bounds.max.z - model.bounds.min.z;
@@ -1236,6 +1496,66 @@ static int env_make_nebula(AeronCommandBuffer* cmd) {
 	return ok;
 }
 
+/* Balance of Power's world: a mottled brown globe, cloud bands swirling
+ * across it, lit from the upper left, its right limb in night, a faint dark
+ * ring's line round it (straight sRGB RGBA; made once). */
+static int env_make_planet(AeronCommandBuffer* cmd) {
+	enum { PN = 512 };
+	uint8_t* px = (uint8_t*)malloc((size_t)PN * PN * 4u);
+	if (!px) {
+		return 0;
+	}
+	const float R = 0.80f;
+	float light[3] = { -0.80f, 0.40f, 0.45f }; /* x right, y up, z toward the viewer */
+	env_norm(light);
+	for (int y = 0; y < PN; ++y) {
+		for (int x = 0; x < PN; ++x) {
+			const float u = ((float)x + 0.5f) / (float)PN * 2.0f - 1.0f;
+			const float v = 1.0f - ((float)y + 0.5f) / (float)PN * 2.0f;
+			const float r = sqrtf(u * u + v * v);
+			float rgb[3] = { 0.0f, 0.0f, 0.0f }, a = 0.0f;
+			if (r < R) {
+				const float nx = u / R, ny = v / R, nz = sqrtf(fmaxf(0.0f, 1.0f - nx * nx - ny * ny));
+				/* Bands tilted a little, warped into swirls. */
+				const float bx = nx * 0.95f + ny * 0.31f, by = ny * 0.95f - nx * 0.31f;
+				const float w = env_fbm(bx * 2.5f + 3.0f, by * 2.5f, 51, 5);
+				const float band = 0.5f + 0.5f * sinf(by * 9.0f + w * 6.0f);
+				const float d = env_fbm(bx * 6.0f + w * 2.0f, by * 6.0f - w, 57, 5);
+				const float m = fminf(fmaxf(0.45f * band + 0.55f * d, 0.0f), 1.0f);
+				static const float dark[3] = { 0.20f, 0.12f, 0.08f }, light_c[3] = { 0.62f, 0.46f, 0.36f },
+								   pale[3] = { 0.78f, 0.66f, 0.58f };
+				const float lit_dot = nx * light[0] + ny * light[1] + nz * light[2];
+				const float lit = fmaxf(0.0f, lit_dot) * 0.95f + 0.03f;
+				for (int c = 0; c < 3; ++c) {
+					float al = dark[c] + (light_c[c] - dark[c]) * m;
+					al += (pale[c] - al) * fmaxf(0.0f, d - 0.62f) * 2.0f;
+					rgb[c] = al * lit;
+				}
+				a = fminf(1.0f, (R - r) * (float)PN * 0.5f);
+			}
+			/* The ring's thin dark line just outside the limb (and its glint
+			 * on the lit side). */
+			const float ring = expf(-powf((r - 0.86f) / 0.006f, 2.0f));
+			if (ring > 0.01f && r >= R) {
+				const float lit = fmaxf(0.0f, -(u / r) * 0.8f + (v / r) * 0.3f);
+				rgb[0] = rgb[1] = rgb[2] = 0.0f;
+				rgb[0] = 0.10f + 0.25f * lit;
+				rgb[1] = 0.08f + 0.18f * lit;
+				rgb[2] = 0.10f + 0.20f * lit;
+				a = 0.55f * ring;
+			}
+			uint8_t* p = &px[((size_t)y * PN + x) * 4];
+			for (int c = 0; c < 3; ++c) {
+				p[c] = (uint8_t)(env_linear_to_srgb(fminf(1.0f, rgb[c])) * 255.0f + 0.5f);
+			}
+			p[3] = (uint8_t)(fminf(fmaxf(a, 0.0f), 1.0f) * 255.0f + 0.5f);
+		}
+	}
+	const int ok = env_make_texture(cmd, ENV_TEX_PLANET, px, PN, PN);
+	free(px);
+	return ok;
+}
+
 /* Image assets: "XWAL", u32 width, u32 height, straight RGBA. Shipped in
  * the APK (assets/vr/<name>.rgba) or next to the executable; never part of
  * the source tree. `override_env` names a variable that overrides the path.
@@ -1341,7 +1661,16 @@ static int env_tex_needed(int slot) {
 		case ENV_TIEART:
 			/* Its animation also uses the glow and the explosion's frames. */
 			return slot != ENV_TEX_DEATHSTAR && slot != ENV_TEX_ENDOR && slot != ENV_TEX_TIE_PILOT &&
-				   slot != ENV_TEX_REBEL_PILOT && slot < ENV_TEX_BACKDROP;
+				   slot != ENV_TEX_REBEL_PILOT && slot != ENV_TEX_PLANET && slot < ENV_TEX_BACKDROP;
+		case ENV_DOEART:
+			/* The TIE pilot's helmet in place of Vader's. */
+			return slot != ENV_TEX_DEATHSTAR && slot != ENV_TEX_ENDOR && slot != ENV_TEX_VADER &&
+				   slot != ENV_TEX_REBEL_PILOT && slot != ENV_TEX_PLANET && slot < ENV_TEX_BACKDROP;
+		case ENV_BOPART:
+			/* No helmet: the dreadnought before its world. */
+			return slot != ENV_TEX_DEATHSTAR && slot != ENV_TEX_ENDOR && slot != ENV_TEX_VADER &&
+				   slot != ENV_TEX_TIE_PILOT && slot != ENV_TEX_REBEL_PILOT && slot != ENV_TEX_NEBULA &&
+				   slot < ENV_TEX_BACKDROP;
 		case ENV_XVTART:
 			return slot != ENV_TEX_DEATHSTAR && slot != ENV_TEX_ENDOR && slot != ENV_TEX_NEBULA &&
 				   slot != ENV_TEX_VADER && slot < ENV_TEX_GLOW;
@@ -1359,12 +1688,14 @@ static int env_load_sprites(AeronCommandBuffer* cmd) {
 			continue;
 		}
 		s_env.tex_tried[i] = 1;
-		if ((s_env.mode == ENV_BATTLE || s_env.mode == ENV_TIEART) && bt_load_texture(cmd, i)) {
+		if ((s_env.mode == ENV_BATTLE || env_played(s_env.mode)) && bt_load_texture(cmd, i)) {
 			/* the battle's own (glow, explosion frames, backdrops) */
 		} else if (i == ENV_TEX_BEAM) {
 			env_make_beam(cmd);
 		} else if (i == ENV_TEX_NEBULA) {
 			env_make_nebula(cmd);
+		} else if (i == ENV_TEX_PLANET) {
+			env_make_planet(cmd);
 		} else if (i == ENV_TEX_LOGO) {
 			env_load_rgba(cmd, i, "logo", "XWA_XR_LOGO");
 		} else if (i == ENV_TEX_FRAME) {
@@ -1829,7 +2160,7 @@ static void env_submit_salvos(AeronScene3D* scene, float reach) {
 		env_ship_basis(sv->shooter, n, r, u);
 		const float dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2];
 		const float dist = sqrtf(dx * dx + dy * dy + dz * dz);
-		if (s_env.mode == ENV_TIEART) {
+		if (env_played(s_env.mode)) {
 			/* Out of the guns where the craft is now. */
 			env_tie_pose(sv->shooter, s_env.anim_t, from, n, u);
 			env_cross(n, u, r);
@@ -2052,10 +2383,12 @@ static void env_submit_boxart_sprites(AeronScene3D* scene) {
 
 /* A great explosion centred on `at` (yaw, pitch, metres, diameter in
  * metres): the blast with two fire clouds in it. */
-static void env_submit_fireball(AeronScene3D* scene, const float at[4]) {
+/* `spread` scales the fire clouds' offsets (degrees) and `step` their steps
+ * toward the viewer (3 m): 1 for the TIE Fighter scene's size. */
+static void env_submit_fireball_tint(AeronScene3D* scene, const float at[4], const float white[4],
+									 float spread, float step) {
 	const float k = AERON_OPT_UNITS_PER_METER;
 	float p[3], c[4][3];
-	static const float white[4] = { 1.5f, 1.4f, 1.3f, 1.0f };
 	static const struct {
 		float dyaw, dpitch, size, roll;
 		int tex;
@@ -2065,13 +2398,18 @@ static void env_submit_fireball(AeronScene3D* scene, const float at[4]) {
 		{ 7.0f, -3.0f, 0.55f, -60.0f, ENV_TEX_FIRE },
 	};
 	for (size_t i = 0; i < sizeof puffs / sizeof puffs[0]; ++i) {
-		env_dir(at[0] + puffs[i].dyaw, at[1] + puffs[i].dpitch, p);
+		env_dir(at[0] + puffs[i].dyaw * spread, at[1] + puffs[i].dpitch * spread, p);
 		for (int a = 0; a < 3; ++a) {
-			p[a] = s_env.view_pos[a] + p[a] * (at[2] - (float)i * 3.0f) * k;
+			p[a] = s_env.view_pos[a] + p[a] * (at[2] - (float)i * 3.0f * step) * k;
 		}
 		env_facing(p, at[3] * puffs[i].size * k, puffs[i].roll, c);
 		env_quad(scene, puffs[i].tex, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
 	}
+}
+
+static void env_submit_fireball(AeronScene3D* scene, const float at[4]) {
+	static const float white[4] = { 1.5f, 1.4f, 1.3f, 1.0f };
+	env_submit_fireball_tint(scene, at, white, 1.0f, 1.0f);
 }
 
 static void env_submit_streaks(AeronScene3D* scene, const EnvStreak* streaks, int count) {
@@ -2097,74 +2435,47 @@ static float env_smooth(float x) {
 	return x * x * (3.0f - 2.0f * x);
 }
 
-/* The TIE Fighter box art, played: the five seconds before the cover's
- * moment, which then holds (see env_tie_animate); the helmet fades in at
- * the end. */
-static void env_submit_tieart_sprites(AeronScene3D* scene) {
+/* The played fight's sprites: the bolts in flight, the cover's salvos
+ * leaving the guns in the last half second, the victim hit, the great
+ * explosion growing into the cover's with the victim catching fire as it
+ * breaks up in it; then the cover's moment, held. Sizes go with the
+ * explosion's (the TIE Fighter scene's 58 m). */
+static void env_submit_fight(AeronScene3D* scene) {
 	const float k = AERON_OPT_UNITS_PER_METER;
 	const float t = s_env.anim_t;
 	const float T = ENV_TIE_ANIM_SECONDS;
-	/* Vader's helmet, looming behind the screen and the fight, a dark
-	 * blue-violet; XWA_XR_VADER_BRIGHTNESS scales it. Fades in once the
-	 * fight has come to the cover's moment. */
-	const float vader = env_smooth((t - T) / env_float("XWA_XR_VADER_FADE_SECONDS", 2.5f));
-	if (s_env.tex[ENV_TEX_VADER] && vader > 0.0f) {
-		const float b = env_float("XWA_XR_VADER_BRIGHTNESS", 1.0f);
-		/* 15 % darker than it was and slightly see-through (premultiplied:
-		 * the colour carries the opacity too). */
-		const float dark = 0.85f, opacity = 0.8f * vader;
-		const float tint[4] = { 0.18f * b * dark * opacity, 0.17f * b * dark * opacity, 0.42f * b * dark * opacity,
-								opacity };
-		const float h = 39.8f; /* 35 %, 20 %, then 15 % smaller than the cover's */
-		const float w = h * (float)s_env.tex_w[ENV_TEX_VADER] / (float)s_env.tex_h[ENV_TEX_VADER];
-		const float pitch = env_float("XWA_XR_VADER_PITCH", 31.0f); /* the eyes above the screen and logo */
-		env_sky_rect(scene, ENV_TEX_VADER, 0.0f, pitch, w, h, 0.0f, tint);
-	}
-	/* Purple clouds below. */
-	{
-		static const struct {
-			float yaw, pitch, w, h, roll, gain;
-		} clouds[] = {
-			{ -30.0f, -42.0f, 110.0f, 40.0f, 6.0f, 0.55f },
-			{ 35.0f, -40.0f, 100.0f, 36.0f, -8.0f, 0.5f },
-			{ 0.0f, -58.0f, 120.0f, 46.0f, 0.0f, 0.45f },
-		};
-		for (size_t i = 0; i < sizeof clouds / sizeof clouds[0]; ++i) {
-			const float g = clouds[i].gain;
-			const float tint[4] = { 0.55f * g, 0.45f * g, 1.0f * g, 1.0f };
-			env_sky_rect(scene, ENV_TEX_NEBULA, clouds[i].yaw, clouds[i].pitch, clouds[i].w, clouds[i].h, clouds[i].roll,
-						 tint);
-		}
-	}
-	static const float white[4] = { 1.5f, 1.4f, 1.3f, 1.0f };
+	const EnvAnim* an = env_anim();
+	const float* blast = an->blast;
+	const float D = blast[3];
+	const float white[4] = { an->blast_tint[0], an->blast_tint[1], an->blast_tint[2], 1.0f };
 	if (t >= T) {
 		/* The cover's moment, held. */
 		env_submit_salvos(scene, 1.0f);
 		float q[3], c[4][3];
-		env_submit_fireball(scene, k_tie_blast);
-		env_ship_pos(5, q);
-		env_facing(q, 16.0f * k, 70.0f, c);
+		env_submit_fireball_tint(scene, blast, white, D / blast[2] / (58.0f / 70.0f), D / 58.0f);
+		env_ship_pos(an->victim, q);
+		env_facing(q, 0.276f * D * k, 70.0f, c);
 		env_quad(scene, ENV_TEX_FIRE, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
-		env_facing(q, 10.0f * k, -20.0f, c);
+		env_facing(q, 0.172f * D * k, -20.0f, c);
 		env_quad(scene, ENV_TEX_BLAST, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
 		/* (The startup title over the cover's moment: env_submit_title.) */
 		env_submit_logo(scene);
 		return;
 	}
-	/* The run-up: bolts in flight, the X-wing hit, then the blast; the
+	/* The run-up: bolts in flight, the victim hit, then the blast; the
 	 * cover's salvos leave the guns in the last half second. */
 	env_tie_submit_bolts(scene);
 	if (t > T - ENV_TIE_SALVO_SECONDS) {
 		env_submit_salvos(scene, env_smooth((t - (T - ENV_TIE_SALVO_SECONDS)) / ENV_TIE_SALVO_SECONDS));
 	}
 	float xw[3], n[3], u[3], c[4][3];
-	env_tie_pose(5, t, xw, n, u);
+	env_tie_pose(an->victim, t, xw, n, u);
 	const float* hits = k_tie_hits;
 	for (int h = 0; h < 3; ++h) {
 		const float a = (t - hits[h]) / 0.35f;
 		if (a > 0.0f && a < 1.0f) {
-			const float tint[4] = { 1.5f, 1.4f, 1.3f, 1.0f - a };
-			env_facing(xw, (3.0f + 5.0f * a) * k, 40.0f * (float)h, c);
+			const float tint[4] = { white[0], white[1], white[2], 1.0f - a };
+			env_facing(xw, (0.0517f + 0.0862f * a) * D * k, 40.0f * (float)h, c);
 			env_quad(scene, ENV_TEX_FIRE, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, tint);
 		}
 	}
@@ -2178,40 +2489,43 @@ static void env_submit_tieart_sprites(AeronScene3D* scene) {
 		const int slot = s_env.tex[ENV_TEX_BOOM + frame] ? ENV_TEX_BOOM + frame : ENV_TEX_BLAST;
 		const float grow = 0.35f + 0.65f * env_smooth(g);
 		float p[3];
-		env_dir(k_tie_blast[0], k_tie_blast[1], p);
+		env_dir(blast[0], blast[1], p);
 		for (int a = 0; a < 3; ++a) {
-			p[a] = s_env.view_pos[a] + p[a] * k_tie_blast[2] * k;
+			p[a] = s_env.view_pos[a] + p[a] * blast[2] * k;
 		}
-		env_facing(p, k_tie_blast[3] * grow * k, 0.0f, c);
+		env_facing(p, D * grow * k, 0.0f, c);
 		env_quad(scene, slot, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
 		static const struct {
 			float dyaw, dpitch, size, roll;
 		} puffs[2] = { { -6.0f, 4.0f, 0.62f, 40.0f }, { 7.0f, -3.0f, 0.55f, -60.0f } };
 		const float fire = env_smooth((g - 0.25f) / 0.75f);
+		/* The puffs' offsets are the TIE Fighter scene's degrees at its size. */
+		const float spread = D / blast[2] / (58.0f / 70.0f);
 		for (int i = 0; i < 2 && fire > 0.0f; ++i) {
 			float q[3];
-			env_dir(k_tie_blast[0] + puffs[i].dyaw, k_tie_blast[1] + puffs[i].dpitch, q);
+			env_dir(blast[0] + puffs[i].dyaw * spread, blast[1] + puffs[i].dpitch * spread, q);
 			for (int a = 0; a < 3; ++a) {
-				q[a] = s_env.view_pos[a] + q[a] * (k_tie_blast[2] - (float)(i + 1) * 3.0f) * k;
+				q[a] = s_env.view_pos[a] + q[a] * (blast[2] - (float)(i + 1) * 3.0f * D / 58.0f) * k;
 			}
-			env_facing(q, k_tie_blast[3] * puffs[i].size * fire * k, puffs[i].roll, c);
+			env_facing(q, D * puffs[i].size * fire * k, puffs[i].roll, c);
 			env_quad(scene, ENV_TEX_FIRE, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c,
 					 white);
 		}
 		const float flash = 1.0f - (t - ENV_TIE_BOOM_AT) / 0.6f;
 		if (flash > 0.0f && s_env.tex[ENV_TEX_GLOW]) {
 			const float f = 1.6f * flash * flash;
-			const float tint[4] = { 1.0f * f, 0.75f * f, 0.45f * f, 1.0f };
-			env_facing(p, k_tie_blast[3] * 0.9f * k, 0.0f, c);
+			const float tint[4] = { 1.0f * f * white[0] / 1.5f, 0.75f * f * white[1] / 1.4f,
+									0.45f * f * white[2] / 1.3f, 1.0f };
+			env_facing(p, D * 0.9f * k, 0.0f, c);
 			env_quad(scene, ENV_TEX_GLOW, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_ADDITIVE, c,
 					 tint);
 		}
-		/* The X-wing catching fire as it breaks up. */
+		/* The victim catching fire as it breaks up. */
 		const float burn = env_smooth((t - ENV_TIE_BOOM_AT - 0.3f) / 1.1f);
 		if (burn > 0.0f) {
-			env_facing(xw, 16.0f * burn * k, 70.0f, c);
+			env_facing(xw, 0.276f * D * burn * k, 70.0f, c);
 			env_quad(scene, ENV_TEX_FIRE, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, white);
-			env_facing(xw, 10.0f * burn * k, -20.0f, c);
+			env_facing(xw, 0.172f * D * burn * k, -20.0f, c);
 			env_quad(scene, ENV_TEX_BLAST, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c,
 					 white);
 		}
@@ -2219,6 +2533,157 @@ static void env_submit_tieart_sprites(AeronScene3D* scene) {
 	if (env_screen_reveal() >= 1.0f) {
 		env_submit_logo(scene); /* the screen shown throughout */
 	}
+}
+
+/* Purple clouds below (the TIE Fighter and Defender of the Empire covers). */
+static void env_submit_low_clouds(AeronScene3D* scene, float gain) {
+	static const struct {
+		float yaw, pitch, w, h, roll, gain;
+	} clouds[] = {
+		{ -30.0f, -42.0f, 110.0f, 40.0f, 6.0f, 0.55f },
+		{ 35.0f, -40.0f, 100.0f, 36.0f, -8.0f, 0.5f },
+		{ 0.0f, -58.0f, 120.0f, 46.0f, 0.0f, 0.45f },
+	};
+	for (size_t i = 0; i < sizeof clouds / sizeof clouds[0]; ++i) {
+		const float g = clouds[i].gain * gain;
+		const float tint[4] = { 0.55f * g, 0.45f * g, 1.0f * g, 1.0f };
+		env_sky_rect(scene, ENV_TEX_NEBULA, clouds[i].yaw, clouds[i].pitch, clouds[i].w, clouds[i].h,
+					 clouds[i].roll, tint);
+	}
+}
+
+/* The TIE Fighter box art, played: the five seconds before the cover's
+ * moment, which then holds (see env_tie_animate); the helmet fades in at
+ * the end. */
+static void env_submit_tieart_sprites(AeronScene3D* scene) {
+	const float t = s_env.anim_t;
+	const float T = ENV_TIE_ANIM_SECONDS;
+	/* Vader's helmet, looming behind the screen and the fight, a dark
+	 * blue-violet; XWA_XR_VADER_BRIGHTNESS scales it. Fades in once the
+	 * fight has come to the cover's moment. */
+	const float vader = env_smooth((t - T) / env_float("XWA_XR_VADER_FADE_SECONDS", 2.5f));
+	if (s_env.tex[ENV_TEX_VADER] && vader > 0.0f) {
+		const float b = env_float("XWA_XR_VADER_BRIGHTNESS", 1.0f);
+		/* 15 % darker than it was and slightly see-through (premultiplied:
+		 * the colour carries the opacity too). */
+		const float dark = 0.85f, opacity = 0.8f * vader;
+		const float tint[4] = { 0.18f * b * dark * opacity, 0.17f * b * dark * opacity,
+								0.42f * b * dark * opacity, opacity };
+		const float h = 39.8f; /* 35 %, 20 %, then 15 % smaller than the cover's */
+		const float w = h * (float)s_env.tex_w[ENV_TEX_VADER] / (float)s_env.tex_h[ENV_TEX_VADER];
+		const float pitch = env_float("XWA_XR_VADER_PITCH", 31.0f); /* the eyes above the screen and logo */
+		env_sky_rect(scene, ENV_TEX_VADER, 0.0f, pitch, w, h, 0.0f, tint);
+	}
+	env_submit_low_clouds(scene, 1.0f);
+	env_submit_fight(scene);
+}
+
+/* Defender of the Empire, played: the TIE pilot's helmet (the X-Wing vs. TIE
+ * Fighter scene's picture, vr/xvt_tie_pilot.rgba) looming behind the screen
+ * in the cover's dark warm tones, fading in at the cover's moment as Vader's
+ * does; the purple clouds below; the fight. XWA_XR_PILOT_BRIGHTNESS,
+ * _PITCH scale and place the helmet; it fades in over XWA_XR_VADER_FADE_SECONDS. */
+static void env_submit_doeart_sprites(AeronScene3D* scene) {
+	const float t = s_env.anim_t;
+	const float T = ENV_TIE_ANIM_SECONDS;
+	const float pilot = env_smooth((t - T) / env_float("XWA_XR_VADER_FADE_SECONDS", 2.5f));
+	const int slot = ENV_TEX_TIE_PILOT;
+	if (s_env.tex[slot] && s_env.tex_h[slot] > 0 && pilot > 0.0f) {
+		const float b = env_float("XWA_XR_PILOT_BRIGHTNESS", 1.0f);
+		const float opacity = 0.85f * pilot;
+		/* The picture is blue-grey: warmed to the cover's bronze and
+		 * purple-brown. */
+		const float tint[4] = { 0.78f * b * opacity, 0.55f * b * opacity, 0.45f * b * opacity, opacity };
+		const float h = 80.0f; /* the helmet itself about 60 degrees tall, looming as on the cover */
+		const float w = h * (float)s_env.tex_w[slot] / (float)s_env.tex_h[slot];
+		env_sky_rect(scene, slot, 0.0f, env_float("XWA_XR_PILOT_PITCH", 16.0f), w, h, 0.0f, tint);
+	}
+	env_submit_low_clouds(scene, 1.15f);
+	env_submit_fight(scene);
+}
+
+static float bt_dot(const float a[3], const float b[3]);
+static int bt_norm(float v[3]);
+
+/* The engines' glow of the craft shown, seen from behind (the B-wings' red,
+ * the A-wing's yellow-white on the Balance of Power cover). */
+static void env_submit_engine_glows(AeronScene3D* scene) {
+	if (!s_env.tex[ENV_TEX_GLOW]) {
+		return;
+	}
+	const float k = AERON_OPT_UNITS_PER_METER;
+	for (int i = 0; i < s_env.count; ++i) {
+		const EnvMesh* m = &s_env.meshes[s_env.mesh_of[i]];
+		if (s_env.hidden[i] || !m->glow_count) {
+			continue;
+		}
+		const float* x = s_env.transform[i];
+		float back[3] = { x[1], x[5], x[9] }; /* model +y: the craft's rear */
+		bt_norm(back);
+		for (int g = 0; g < m->glow_count; ++g) {
+			const float* o = m->glow[g];
+			float p[3], to[3], c[4][3];
+			for (int a = 0; a < 3; ++a) {
+				p[a] = x[a * 4 + 0] * o[0] + x[a * 4 + 1] * o[1] + x[a * 4 + 2] * o[2] + x[a * 4 + 3];
+				to[a] = s_env.view_pos[a] - p[a];
+			}
+			bt_norm(to);
+			const float w = env_smooth(bt_dot(back, to) * 1.6f);
+			if (w <= 0.0f) {
+				continue;
+			}
+			/* Just off the nozzle toward the viewer, so the hull hides none of it. */
+			for (int a = 0; a < 3; ++a) {
+				p[a] += to[a] * 0.6f * k;
+			}
+			const float b = 1.6f * w;
+			const float core[4] = { (0.4f + 0.6f * o[4]) * b, (0.15f + 0.85f * o[5]) * b,
+									(0.15f + 0.85f * o[6]) * b, 1.0f };
+			env_facing(p, o[3] * 2.0f * k, 0.0f, c);
+			env_quad(scene, ENV_TEX_GLOW, AERON_SCENE_BILLBOARD_STAGE_OVERLAY,
+					 AERON_SCENE_BILLBOARD_BLEND_ADDITIVE, c, core);
+		}
+	}
+}
+
+/* Balance of Power, played: the brown world behind the dreadnought, the
+ * red-pink flak bursting around the fight (more of it as the fight comes to
+ * the cover's moment), the B-wings' and A-wing's engines glowing, the fight. */
+static void env_submit_bopart_sprites(AeronScene3D* scene) {
+	const float k = AERON_OPT_UNITS_PER_METER;
+	const float t = s_env.anim_t;
+	{
+		const float b = env_float("XWA_XR_PLANET_BRIGHTNESS", 1.0f);
+		const float tint[4] = { b, b, b, 1.0f };
+		float c[4][3];
+		env_sky_sprite(scene, ENV_TEX_PLANET, -3.0f, 3.0f, 56.0f, 0.0f, tint, c);
+	}
+	/* The flak: each burst comes up in its turn over the last seconds,
+	 * blooms and holds (the cover's). */
+	for (size_t i = 0; i < sizeof k_bop_flak / sizeof k_bop_flak[0]; ++i) {
+		const float at = ENV_TIE_ANIM_SECONDS - 3.2f + 0.7f * (float)i;
+		const float g = env_smooth((t - at) / 0.5f);
+		if (g <= 0.0f) {
+			continue;
+		}
+		float p[3], c[4][3];
+		env_dir(k_bop_flak[i][0], k_bop_flak[i][1], p);
+		for (int a = 0; a < 3; ++a) {
+			p[a] = s_env.view_pos[a] + p[a] * k_bop_flak[i][2] * k;
+		}
+		static const float pink[4] = { 1.7f, 0.75f, 0.95f, 1.0f };
+		env_facing(p, k_bop_flak[i][3] * (0.4f + 0.6f * g) * k, 25.0f * (float)i, c);
+		env_quad(scene, ENV_TEX_BLAST, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA,
+				 c, pink);
+		if (s_env.tex[ENV_TEX_GLOW]) {
+			const float glow[4] = { 0.9f * g, 0.25f * g, 0.35f * g, 1.0f };
+			env_facing(p, k_bop_flak[i][3] * 1.6f * k, 0.0f, c);
+			env_quad(scene, ENV_TEX_GLOW, AERON_SCENE_BILLBOARD_STAGE_OVERLAY,
+					 AERON_SCENE_BILLBOARD_BLEND_ADDITIVE, c, glow);
+		}
+	}
+	env_submit_engine_glows(scene);
+	env_submit_fight(scene);
 }
 
 /* The X-Wing vs. TIE Fighter box art: the explosion and its pillar of
@@ -4064,6 +4529,12 @@ static float env_tie_speed(int ship) {
 		v = 80.0f;
 	} else if (opt && !SDL_strncasecmp(opt, "TieBomber", 9)) {
 		v = 55.0f;
+	} else if (opt && !SDL_strncasecmp(opt, "TieAdvanced", 11)) {
+		v = 85.0f;
+	} else if (opt && !SDL_strncasecmp(opt, "BWing", 5)) {
+		v = 55.0f;
+	} else if (s_env.mode != ENV_TIEART && opt && !SDL_strncasecmp(opt, "AWing", 5)) {
+		v = 80.0f;
 	} else if (!es_is_tie(ship)) {
 		v = 62.0f;
 	}
@@ -4149,7 +4620,7 @@ static float env_tie_path_score(int ship) {
 			steep += fmaxf(fabsf(n[2]) - 0.5f, 0.0f);
 		}
 		/* The X-wing's chaser: the chase right in the middle of the view. */
-		if (ship == ENV_TIE_CHASE_SHIP && i >= 7 && i <= 30) {
+		if (ship == env_anim()->chase_ship && i >= 7 && i <= 30) {
 			out_of_view += 2.0f * (fabsf(yaw) + fabsf(pitch + 6.0f));
 		}
 	}
@@ -4163,12 +4634,19 @@ static float env_tie_path_score(int ship) {
  * the path all the way) if it has one, then a pull out of the forward
  * view. */
 static int env_tie_runner_of(int ship) {
-	for (int r = 0; r < ENV_TIE_RUNNERS; ++r) {
-		if (k_tie_runners[r].ship == ship) {
+	const EnvAnim* an = env_anim();
+	for (int r = 0; r < an->runner_count; ++r) {
+		if (an->runners[r].ship == ship) {
 			return r;
 		}
 	}
 	return -1;
+}
+
+/* The ship `ship` flies in formation on (-1: none). */
+static int env_tie_leader_of(int ship) {
+	const EnvAnim* an = env_anim();
+	return an->leader && ship >= 0 && ship < an->animated ? an->leader[ship] : -1;
 }
 
 static void env_tie_runner_pose(int r, float t, float pos[3], float n[3], float u[3]);
@@ -4176,16 +4654,21 @@ static void env_tie_runner_pose(int r, float t, float pos[3], float n[3], float 
 static void env_tie_runner_plan(void) {
 	const float k = AERON_OPT_UNITS_PER_METER;
 	const float T = ENV_TIE_ANIM_SECONDS;
+	const EnvAnim* an = env_anim();
 	for (int r = 0; r < ENV_TIE_RUNNERS; ++r) {
+		s_env.runner[r].ok = 0;
+	}
+	for (int r = 0; r < an->runner_count && r < ENV_TIE_RUNNERS; ++r) {
 		__typeof__(s_env.runner[0])* rn = &s_env.runner[r];
-		const int chaser = k_tie_runners[r].chaser;
+		const EnvRunner* kr = &an->runners[r];
+		const int chaser = kr->chaser;
 		rn->ok = 0;
-		if (env_space()->count <= k_tie_runners[r].ship || !s_env.anim_fl[chaser].v) {
+		if (env_space()->count <= kr->ship || !s_env.anim_fl[chaser].v) {
 			continue;
 		}
 		const float v = s_env.anim_fl[chaser].v;
-		const float lead = k_tie_runners[r].lead_m * k / v;
-		if (k_tie_runners[r].weave) {
+		const float lead = kr->lead_m * k / v;
+		if (kr->weave) {
 			rn->chaser = chaser;
 			rn->lead = lead;
 			rn->v = v;
@@ -4194,9 +4677,9 @@ static void env_tie_runner_plan(void) {
 			rn->ok = 1;
 			continue;
 		}
-		float tb = T - lead - k_tie_runners[r].end_s;
-		const float break_m = k_tie_runners[r].break_m *
-							  (r == 0 ? env_float("XWA_XR_RUNNER_BREAK_M", 130.0f) / 130.0f : 1.0f);
+		float tb = T - lead - kr->end_s;
+		const float break_m =
+			kr->break_m * (r == 0 ? env_float("XWA_XR_RUNNER_BREAK_M", 130.0f) / 130.0f : 1.0f);
 		for (float t = 0.0f; break_m > 0.0f && t < tb; t += 0.02f) {
 			float p[3], nn[3], uu[3];
 			env_tie_flight_pose(chaser, t + lead, p, nn, uu);
@@ -4209,10 +4692,10 @@ static void env_tie_runner_plan(void) {
 		rn->lead = lead;
 		rn->tb = fmaxf(tb, 0.0f);
 		rn->v = v;
-		rn->roll_time = k_tie_runners[r].roll_s;
+		rn->roll_time = kr->roll_s;
 		rn->helix = 3.0f * k;
 		env_tie_flight_pose(chaser, rn->tb + lead, rn->pb, rn->nb, rn->ub);
-		const float* away = k_tie_runners[r].away;
+		const float* away = kr->away;
 		const float along = bt_dot(away, rn->nb);
 		for (int a = 0; a < 3; ++a) {
 			rn->pull_up[a] = away[a] - rn->nb[a] * along;
@@ -4220,7 +4703,7 @@ static void env_tie_runner_plan(void) {
 		if (!bt_norm(rn->pull_up)) {
 			memcpy(rn->pull_up, rn->ub, sizeof rn->pull_up);
 		}
-		rn->pull_w = k_tie_runners[r].pull_w;
+		rn->pull_w = kr->pull_w;
 		rn->pull_bank = env_tie_roll(rn->ub, rn->pull_up, rn->nb);
 		rn->flyby_done = 0;
 		rn->ok = 1;
@@ -4279,14 +4762,17 @@ static void env_tie_runner_pose(int r, float t, float pos[3], float n[3], float 
 
 static void env_tie_paths(void) {
 	const EnvSpaceScene* sc = env_space();
+	const EnvAnim* an = env_anim();
 	const float k = AERON_OPT_UNITS_PER_METER;
-	const int count = sc->count < 8 ? sc->count : 8;
+	const int count = sc->count < an->animated ? sc->count : an->animated;
+	const int victim = an->victim;
 	s_env.anim_paths = 1; /* env_tie_pose follows anim_fl from here */
 	static float scores[8][ENV_TIE_CANDIDATES];
 	for (int i = 0; i < count; ++i) {
 		int best = 0;
-		if (env_tie_runner_of(i) >= 0) {
-			continue; /* flies after its chaser (env_tie_runner_plan) */
+		s_env.anim_next_shot[i] = 1.2f + 0.27f * (float)i;
+		if (env_tie_runner_of(i) >= 0 || env_tie_leader_of(i) >= 0) {
+			continue; /* flies after its chaser (env_tie_runner_plan) or on its leader */
 		}
 		for (int c = 0; c < ENV_TIE_CANDIDATES; ++c) {
 			env_tie_candidate(i, c);
@@ -4296,24 +4782,23 @@ static void env_tie_paths(void) {
 			}
 		}
 		env_tie_candidate(i, best);
-		s_env.anim_next_shot[i] = 1.2f + 0.27f * (float)i;
 	}
-	/* The X-wing's killer: a TIE fighter (any TIE when there is none). It
-	 * and the X-wing take the paths, among their good ones, on which its
-	 * guns bear best on the X-wing while it hits it. */
+	/* The victim's killer: the scene's, or a TIE fighter (any TIE when there
+	 * is none). It and the victim take the paths, among their good ones, on
+	 * which its guns bear best on the victim while it hits it. */
 	s_env.anim_hunter = -1;
 	env_tie_runner_plan();
-	if (count <= 5) {
+	if (count <= victim) {
 		return;
 	}
 	int fighters = 0;
 	for (int i = 0; i < count; ++i) {
-		fighters += i != 5 && sc->ships[i].opt && !SDL_strncasecmp(sc->ships[i].opt, "TieFighter", 10);
+		fighters += i != victim && sc->ships[i].opt && !SDL_strncasecmp(sc->ships[i].opt, "TieFighter", 10);
 	}
 	/* Each one's best few paths only. */
 	enum { TOP = 24 };
 	int top[8][TOP];
-	for (int i = 0; i < count && i < ENV_TIE_FIRST_RUNNER; ++i) {
+	for (int i = 0; i < count; ++i) {
 		for (int j = 0; j < TOP; ++j) {
 			top[i][j] = -1;
 			for (int c = 0; c < ENV_TIE_CANDIDATES; ++c) {
@@ -4330,22 +4815,29 @@ static void env_tie_paths(void) {
 	float best = -1e9f;
 	int best_h = -1, best_hc = 0, best_xc = 0;
 	for (int h = 0; h < count; ++h) {
-		/* The TIE fighter on the right (any TIE when there is none). */
-		if (h == 5 || !es_is_tie(h) || (fighters && SDL_strncasecmp(sc->ships[h].opt, "TieFighter", 10)) ||
-			(fighters > 1 && sc->ships[h].yaw <= 0.0f)) {
+		if (h == victim || env_tie_runner_of(h) >= 0 || env_tie_leader_of(h) >= 0) {
+			continue;
+		}
+		if (an->hunter >= 0) {
+			if (h != an->hunter) {
+				continue;
+			}
+		} else if (!es_is_tie(h) || (fighters && SDL_strncasecmp(sc->ships[h].opt, "TieFighter", 10)) ||
+				   (fighters > 1 && sc->ships[h].yaw <= 0.0f)) {
+			/* The TIE fighter on the right (any TIE when there is none). */
 			continue;
 		}
 		for (int hj = 0; hj < TOP; ++hj) {
 			const int hc = top[h][hj];
 			env_tie_candidate(h, hc);
 			for (int xj = 0; xj < TOP; ++xj) {
-				const int xc = top[5][xj];
-				env_tie_candidate(5, xc);
+				const int xc = top[victim][xj];
+				env_tie_candidate(victim, xc);
 				float miss = 0.0f, range = 0.0f;
 				for (int q = 0; q < 3; ++q) {
 					float hp[3], hn[3], hu[3], xp[3], xn[3], xu[3], dir[3];
 					env_tie_pose(h, k_tie_hits[q] - 0.15f, hp, hn, hu);
-					env_tie_pose(5, k_tie_hits[q], xp, xn, xu);
+					env_tie_pose(victim, k_tie_hits[q], xp, xn, xu);
 					for (int a = 0; a < 3; ++a) {
 						dir[a] = xp[a] - hp[a];
 					}
@@ -4355,8 +4847,8 @@ static void env_tie_paths(void) {
 				}
 				miss /= 3.0f;
 				range /= 3.0f;
-				const float score =
-					scores[h][hc] + scores[5][xc] - 1.5f * miss - (range > 150.0f ? (range - 150.0f) * 0.3f : 0.0f);
+				const float score = scores[h][hc] + scores[victim][xc] - 1.5f * miss -
+									(range > 150.0f ? (range - 150.0f) * 0.3f : 0.0f);
 				if (score > best) {
 					best = score;
 					best_h = h;
@@ -4375,14 +4867,14 @@ static void env_tie_paths(void) {
 	{
 		int own = 0;
 		for (int c = 0; c < ENV_TIE_CANDIDATES; ++c) {
-			own = scores[5][c] > scores[5][own] ? c : own;
+			own = scores[victim][c] > scores[victim][own] ? c : own;
 		}
-		env_tie_candidate(5, own);
+		env_tie_candidate(victim, own);
 	}
 	if (best_h >= 0) {
 		s_env.anim_hunter = best_h;
 		env_tie_candidate(best_h, best_hc);
-		env_tie_candidate(5, best_xc);
+		env_tie_candidate(victim, best_xc);
 	}
 }
 
@@ -4467,7 +4959,8 @@ static float env_weave(float t) {
 /* The offset (world units) from its base path at t: chased = 0 for the
  * runner, 1 for its chaser. */
 static void env_tie_weave_offset(int r, int chased, float t, float out[3]) {
-	const int chaser = k_tie_runners[r].chaser;
+	const int chaser = env_anim()->runners[r].chaser;
+	const float* blast = env_anim()->blast;
 	const float lead = chased ? 0.0f : s_env.runner[r].lead;
 	const float k = AERON_OPT_UNITS_PER_METER;
 	float p[3], n[3], u[3], side[3];
@@ -4486,18 +4979,18 @@ static void env_tie_weave_offset(int r, int chased, float t, float out[3]) {
 	if (!chased) {
 		/* Onto the explosion's centre as it starts. */
 		float b[3], at[3], an[3], au[3];
-		env_dir(k_tie_blast[0], k_tie_blast[1], b);
+		env_dir(blast[0], blast[1], b);
 		env_tie_flight_pose(chaser, ENV_TIE_BOOM_AT + lead, at, an, au);
 		const float w = env_smoother((t - (ENV_TIE_BOOM_AT - 2.2f)) / 2.2f);
 		for (int a = 0; a < 3; ++a) {
-			b[a] = s_env.view_pos[a] + b[a] * k_tie_blast[2] * k;
+			b[a] = s_env.view_pos[a] + b[a] * blast[2] * k;
 			out[a] += (b[a] - at[a]) * w;
 		}
 	}
 }
 
 static void env_tie_weave_pose(int r, int chased, float t, float pos[3], float n[3], float u[3]) {
-	const int chaser = k_tie_runners[r].chaser;
+	const int chaser = env_anim()->runners[r].chaser;
 	const float lead = chased ? 0.0f : s_env.runner[r].lead;
 	const float h = 0.02f;
 	float b0[3], b1[3], b2[3], o0[3], o1[3], o2[3], bn[3], bu[3], tn[3], tu[3];
@@ -4560,8 +5053,9 @@ static void env_tie_weave_pose(int r, int chased, float t, float pos[3], float n
 
 /* The runner whose chaser `ship` is (weaving after it), or -1. */
 static int env_tie_weave_chaser_of(int ship) {
-	for (int r = 0; r < ENV_TIE_RUNNERS; ++r) {
-		if (k_tie_runners[r].weave && k_tie_runners[r].chaser == ship && s_env.runner[r].ok) {
+	const EnvAnim* an = env_anim();
+	for (int r = 0; r < an->runner_count && r < ENV_TIE_RUNNERS; ++r) {
+		if (an->runners[r].weave && an->runners[r].chaser == ship && s_env.runner[r].ok) {
 			return r;
 		}
 	}
@@ -4572,7 +5066,7 @@ static int env_tie_weave_chaser_of(int ship) {
  * nose along it. */
 static void env_tie_passer_pose(int ship, float t, float pos[3], float n[3], float u[3]) {
 	const float k = AERON_OPT_UNITS_PER_METER;
-	const float* at = k_tie_pass[ship - ENV_TIE_FIRST_PASSER];
+	const float* at = env_anim()->pass[ship - env_anim()->first_passer];
 	/* Heading toward and past the viewer, its x through 0 at the crossing. */
 	float d[3] = { at[0] / ENV_TIE_PASS_CROSS_M, -1.0f, 0.0f };
 	bt_norm(d);
@@ -4587,7 +5081,40 @@ static void env_tie_passer_pose(int ship, float t, float pos[3], float n[3], flo
 }
 
 static int env_tie_is_passer(int ship) {
-	return ship >= ENV_TIE_FIRST_PASSER && ship < ENV_TIE_FIRST_PASSER + ENV_TIE_PASSERS;
+	const EnvAnim* an = env_anim();
+	return an->passers > 0 && ship >= an->first_passer && ship < an->first_passer + an->passers;
+}
+
+/* A formation member's pose: its leader's, the formation (the offset and
+ * the turn from the leader as on the cover) kept in the leader's frame. */
+static void env_tie_follower_pose(int ship, int leader, float t, float pos[3], float n[3], float u[3]) {
+	float lp[3], ln[3], lu[3], lr[3];
+	float cp[3], cn[3], cr[3], cu[3], fp[3], fn[3], fr[3], fu[3];
+	env_tie_pose(leader, t, lp, ln, lu);
+	env_cross(ln, lu, lr);
+	env_ship_pos(leader, cp);
+	env_ship_basis(leader, cn, cr, cu);
+	env_ship_pos(ship, fp);
+	env_ship_basis(ship, fn, fr, fu);
+	float off[3], ob[3], nb[3], ub[3];
+	for (int a = 0; a < 3; ++a) {
+		off[a] = fp[a] - cp[a];
+	}
+	/* In the leader's frame on the cover (right, nose, up). */
+	ob[0] = bt_dot(off, cr);
+	ob[1] = bt_dot(off, cn);
+	ob[2] = bt_dot(off, cu);
+	nb[0] = bt_dot(fn, cr);
+	nb[1] = bt_dot(fn, cn);
+	nb[2] = bt_dot(fn, cu);
+	ub[0] = bt_dot(fu, cr);
+	ub[1] = bt_dot(fu, cn);
+	ub[2] = bt_dot(fu, cu);
+	for (int a = 0; a < 3; ++a) {
+		pos[a] = lp[a] + lr[a] * ob[0] + ln[a] * ob[1] + lu[a] * ob[2];
+		n[a] = lr[a] * nb[0] + ln[a] * nb[1] + lu[a] * nb[2];
+		u[a] = lr[a] * ub[0] + ln[a] * ub[1] + lu[a] * ub[2];
+	}
 }
 
 static void env_tie_pose(int ship, float t, float pos[3], float n[3], float u[3]) {
@@ -4595,10 +5122,15 @@ static void env_tie_pose(int ship, float t, float pos[3], float n[3], float u[3]
 		env_tie_passer_pose(ship, t, pos, n, u);
 		return;
 	}
-	if (s_env.anim_paths && ship < 8 && t < ENV_TIE_ANIM_SECONDS) {
+	if (s_env.anim_paths && ship < env_anim()->animated && t < ENV_TIE_ANIM_SECONDS) {
+		const int leader = env_tie_leader_of(ship);
+		if (leader >= 0 && leader != ship) {
+			env_tie_follower_pose(ship, leader, t, pos, n, u);
+			return;
+		}
 		const int r = env_tie_runner_of(ship);
 		if (r >= 0) {
-			if (k_tie_runners[r].weave) {
+			if (env_anim()->runners[r].weave) {
 				float rr[3];
 				env_ship_basis(ship, n, rr, u);
 				env_ship_pos(ship, pos);
@@ -4624,7 +5156,7 @@ static void env_tie_flight_pose(int ship, float t, float pos[3], float n[3], flo
 	float r[3];
 	env_ship_basis(ship, n, r, u);
 	env_ship_pos(ship, pos);
-	if (!s_env.anim_paths || ship >= 8 || t >= ENV_TIE_ANIM_SECONDS) {
+	if (!s_env.anim_paths || ship >= env_anim()->animated || t >= ENV_TIE_ANIM_SECONDS) {
 		return;
 	}
 	if (env_tie_runner_of(ship) >= 0) {
@@ -4724,7 +5256,7 @@ static void env_tie_hunter_shot(float before, float t, float at, float miss_m) {
 	}
 	const float k = AERON_OPT_UNITS_PER_METER;
 	float hp[3], hn[3], hu[3], x[3], xn[3], xu[3];
-	env_tie_pose(5, at, x, xn, xu);
+	env_tie_pose(env_anim()->victim, at, x, xn, xu);
 	env_tie_pose(h, at, hp, hn, hu);
 	const float flight =
 		sqrtf((x[0] - hp[0]) * (x[0] - hp[0]) + (x[1] - hp[1]) * (x[1] - hp[1]) + (x[2] - hp[2]) * (x[2] - hp[2])) / k /
@@ -4747,9 +5279,9 @@ static void env_tie_hunter_shot(float before, float t, float at, float miss_m) {
 		const float len = bt_len(d) / k;
 		bt_norm(d);
 		/* Gone as they strike (or fly on past for a miss). */
-		env_tie_spawn_bolt(p, d, miss_m != 0.0f ? 1.2f : len / ENV_TIE_BOLT_SPEED, 1);
+		env_tie_spawn_bolt(p, d, miss_m != 0.0f ? 1.2f : len / ENV_TIE_BOLT_SPEED, es_is_tie(h));
 	}
-	es_play(ES_TIE_LASER, pos, 18.0f, 1.0f, 1.0f);
+	es_play(es_is_tie(h) ? ES_TIE_LASER : ES_REBEL_LASER, pos, 18.0f, 1.0f, 1.0f);
 }
 
 /* ---- the TIE art's sound ---------------------------------------------------
@@ -4958,7 +5490,7 @@ static void es_update_craft(float t, float dt) {
 	const float k = AERON_OPT_UNITS_PER_METER;
 	const float T = ENV_TIE_ANIM_SECONDS;
 	const float hum = t < T ? 1.0f : 1.0f - env_smooth((t - T) / 1.5f);
-	for (int i = 0; i < sc->count && i < 8; ++i) {
+	for (int i = 0; i < sc->count && i < env_anim()->animated; ++i) {
 		if (!es_is_tie(i)) {
 			continue;
 		}
@@ -5011,6 +5543,8 @@ static void env_tie_animate(void) {
 		es_load();
 	}
 	const float T = ENV_TIE_ANIM_SECONDS;
+	const EnvAnim* an = env_anim();
+	const int victim = an->victim;
 	/* On the startup title, A during the fight jumps to the cover's moment. */
 	{
 		const int pressed = s_title.pressed;
@@ -5018,9 +5552,9 @@ static void env_tie_animate(void) {
 			if (s_env.anim_t < ENV_TIE_BOOM_AT) {
 				/* Jumped past the blast: still heard. */
 				float p[3];
-				env_dir(k_tie_blast[0], k_tie_blast[1], p);
+				env_dir(an->blast[0], an->blast[1], p);
 				for (int a = 0; a < 3; ++a) {
-					p[a] *= k_tie_blast[2] * AERON_OPT_UNITS_PER_METER;
+					p[a] *= an->blast[2] * AERON_OPT_UNITS_PER_METER;
 				}
 				es_play(ES_BOOM, p, 60.0f, 1.0f, 1.0f);
 			}
@@ -5037,7 +5571,7 @@ static void env_tie_animate(void) {
 		/* The runner is gone by the cover's moment. */
 		const int r = env_tie_runner_of(s_env.ship_of[i]);
 		s_env.hidden[i] = r >= 0 && (t >= T || !s_env.runner[r].ok ||
-									 (k_tie_runners[r].weave && t >= ENV_TIE_BOOM_AT + 0.12f));
+									 (an->runners[r].weave && t >= ENV_TIE_BOOM_AT + 0.12f));
 		/* The passers are gone once well past the viewer. */
 		if (env_tie_is_passer(s_env.ship_of[i]) && t >= ENV_TIE_PASS_AT + 1.5f) {
 			s_env.hidden[i] = 1;
@@ -5045,18 +5579,18 @@ static void env_tie_animate(void) {
 	}
 	/* Their scream just before they pass. */
 	if (before < ENV_TIE_PASS_AT - 0.35f && t >= ENV_TIE_PASS_AT - 0.35f) {
-		for (int ship = ENV_TIE_FIRST_PASSER; ship < ENV_TIE_FIRST_PASSER + ENV_TIE_PASSERS; ++ship) {
+		for (int ship = an->first_passer; ship < an->first_passer + an->passers; ++ship) {
 			if (ship < env_space()->count) {
 				float pos[3], n[3], u[3];
 				env_tie_pose(ship, ENV_TIE_PASS_AT, pos, n, u);
-				es_play(ES_AW_FLYBY, pos, 30.0f, 1.1f, ship == ENV_TIE_FIRST_PASSER ? 1.0f : 1.06f);
+				es_play(ES_AW_FLYBY, pos, 30.0f, 1.1f, ship == an->first_passer ? 1.0f : 1.06f);
 			}
 		}
 	}
-	for (int r = 0; r < ENV_TIE_RUNNERS; ++r) {
+	for (int r = 0; r < an->runner_count && r < ENV_TIE_RUNNERS; ++r) {
 		if (s_env.runner[r].ok && !s_env.runner[r].flyby_done && t >= s_env.runner[r].tb + 0.25f && t < T) {
 			float pos[3], n[3], u[3];
-			env_tie_pose(k_tie_runners[r].ship, t, pos, n, u);
+			env_tie_pose(an->runners[r].ship, t, pos, n, u);
 			s_env.runner[r].flyby_done = 1;
 			es_play(ES_XW_FLYBY, pos, 30.0f, 1.2f, 1.0f);
 		}
@@ -5064,10 +5598,9 @@ static void env_tie_animate(void) {
 	/* Bolts: the cover's shooters, the big Interceptor and the X-wing fire
 	 * along their noses in bursts until the cover's moment. */
 	const float k = AERON_OPT_UNITS_PER_METER;
-	static const int shooters[5] = { 1, 2, 3, 0, 5 };
-	for (int si = 0; si < 5 && t < T - ENV_TIE_SALVO_SECONDS - 0.1f; ++si) {
-		const int ship = shooters[si];
-		if ((ship == 5 && t > ENV_TIE_BOOM_AT) ||
+	for (int si = 0; si < an->shooter_count && t < T - ENV_TIE_SALVO_SECONDS - 0.1f; ++si) {
+		const int ship = an->shooters[si];
+		if ((ship == victim && t > ENV_TIE_BOOM_AT) ||
 			(ship == s_env.anim_hunter && t > k_tie_misses[0] - 1.0f && t < ENV_TIE_BOOM_AT)) {
 			continue; /* the hunter's shots at the X-wing are its own */
 		}
@@ -5075,8 +5608,12 @@ static void env_tie_animate(void) {
 			float pos[3], n[3], u[3], r[3];
 			env_tie_pose(ship, t, pos, n, u);
 			env_cross(n, u, r);
-			const int green = ship != 5;
-			const float spread = green ? 0.7f : 5.2f;
+			const int green = es_is_tie(ship);
+			const char* opt = env_space()->ships[ship].opt;
+			const float spread = green                               ? 0.7f
+								 : !SDL_strncasecmp(opt, "AWing", 5) ? 3.3f
+								 : !SDL_strncasecmp(opt, "BWing", 5) ? 1.6f
+																	 : 5.2f;
 			es_play(green ? ES_TIE_LASER : ES_REBEL_LASER, pos, 18.0f, 0.8f, 0.96f + 0.08f * (float)(si & 1));
 			for (int g = -1; g <= 1; g += 2) {
 				float p[3];
@@ -5127,15 +5664,15 @@ static void env_tie_animate(void) {
 	for (int h = 0; h < 3; ++h) {
 		if (before < hits[h] && t >= hits[h]) {
 			float pos[3], n[3], u[3];
-			env_tie_pose(5, t, pos, n, u);
+			env_tie_pose(victim, t, pos, n, u);
 			es_play(ES_HIT0 + h, pos, 30.0f, 0.8f, 1.0f);
 		}
 	}
 	if (before < ENV_TIE_BOOM_AT && t >= ENV_TIE_BOOM_AT) {
 		float p[3];
-		env_dir(k_tie_blast[0], k_tie_blast[1], p);
+		env_dir(an->blast[0], an->blast[1], p);
 		for (int a = 0; a < 3; ++a) {
-			p[a] *= k_tie_blast[2] * k_m;
+			p[a] *= an->blast[2] * k_m;
 		}
 		es_play(ES_BOOM, p, 60.0f, 1.0f, 1.0f);
 		es_play(ES_HIT2, p, 60.0f, 0.7f, 0.8f);
@@ -5144,7 +5681,7 @@ static void env_tie_animate(void) {
 	if (before < T && t >= T) {
 		int nearest = -1;
 		float nd = 1e30f, np[3] = { 0.0f, 0.0f, 0.0f };
-		for (int i = 0; i < env_space()->count && i < 8; ++i) {
+		for (int i = 0; i < env_space()->count && i < an->animated; ++i) {
 			float p[3], n[3], u[3];
 			if (!es_is_tie(i)) {
 				continue;
@@ -5475,8 +6012,9 @@ static void env_next_scene(void) {
 		EnvMode mode;
 		const char* name;
 	} order[] = {
-		{ ENV_ENDOR, "endor" }, { ENV_BOXART, "xwing" }, { ENV_TIEART, "tiefighter" },
-		{ ENV_XVTART, "xvt" },  { ENV_BATTLE, "battle" },
+		{ ENV_ENDOR, "endor" },   { ENV_BOXART, "xwing" },    { ENV_TIEART, "tiefighter" },
+		{ ENV_XVTART, "xvt" },    { ENV_DOEART, "defender" }, { ENV_BOPART, "balance" },
+		{ ENV_BATTLE, "battle" },
 	};
 	const int n = (int)(sizeof order / sizeof order[0]);
 	int at = -1;
@@ -5541,8 +6079,8 @@ static void env_title_update(void) {
 	s_title.pressed = pressed;
 	/* The TIE art's startup plays to a debriefing theme (ENV_MUSIC_TITLE);
 	 * the menus get theirs back with the screen. */
-	if (s_env.mode == ENV_TIEART && !s_title.go && s_title.music_saved < 0 && g_gameConfig.datapadMusicEnabled &&
-		env_float("XWA_XR_TITLE_MUSIC", 1.0f) != 0.0f) {
+	if (env_played(s_env.mode) && !s_title.go && s_title.music_saved < 0 &&
+		g_gameConfig.datapadMusicEnabled && env_float("XWA_XR_TITLE_MUSIC", 1.0f) != 0.0f) {
 		s_title.music_saved = musicState;
 		Music_SetState(ENV_MUSIC_TITLE);
 	}
@@ -5618,7 +6156,7 @@ void XwaVrEnv_Submit(AeronScene3D* scene) {
 		bt_advance();
 		s_env.count = 0;
 		bt_submit(scene);
-	} else if (s_env.mode == ENV_TIEART) {
+	} else if (env_played(s_env.mode)) {
 		env_tie_animate();
 	}
 	for (int i = 0; i < s_env.count; ++i) {
@@ -5648,6 +6186,10 @@ void XwaVrEnv_Submit(AeronScene3D* scene) {
 		env_submit_tieart_sprites(scene);
 	} else if (s_env.mode == ENV_XVTART) {
 		env_submit_xvtart_sprites(scene);
+	} else if (s_env.mode == ENV_DOEART) {
+		env_submit_doeart_sprites(scene);
+	} else if (s_env.mode == ENV_BOPART) {
+		env_submit_bopart_sprites(scene);
 	}
 	env_submit_title(scene);
 	env_submit_dismissed(scene);
