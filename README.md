@@ -24,17 +24,17 @@ environment.
 
 ## Features
 
-- Seated VR cockpits for the playable craft, with the HUD placed per cockpit
+- VR cockpits for the playable craft, with the HUD placed per cockpit
 - A touch console on your lap: energy, shields, targeting, wingmen and ship
   commands at your fingertips
-- Motion controllers: flight stick and throttle lever in the cockpit, or the
-  thumbsticks
-- Laser pointer for every menu, and a virtual keyboard for pilot names
 - Side panel on your right: tactical map, voice commands and the button
   mapping
 - Radial menu (hold a grip) for wingman orders and other commands
 - Voice commands, recognised on the headset: double-tap a thumb rest and
   say e.g. "attack my target"
+- Motion controllers: flight stick and throttle lever in the cockpit, or the
+  thumbsticks
+- Laser pointer for every menu, and a virtual keyboard for pilot names
 - Immersive 3D menu environments - re-creating the iconic box arts of X-wing games in full 3D.
 - Death menu with Restart Mission and an in-mission Quick Save / Quick Load
 - Pause menu pages for Review Briefing and Mission Hints
