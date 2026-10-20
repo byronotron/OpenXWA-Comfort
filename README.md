@@ -6,7 +6,7 @@ experimental.
 
 OpenXWA VR is a fork of [OpenXWA](https://github.com/elyosh/OpenXWA), the
 open-source reimplementation of the 1999 game by Adrien Moulin. It runs the
-original game data with a VR cockpit, motion controllers and a full VR menu
+original game data with a VR cockpit, motion controllers and a full immersive VR menu
 environment.
 
 [![OpenXWA VR gameplay on Meta Quest 3: click for the video](assets/vr/gameplay.gif)](assets/vr/openxwa-vr-trailer.mp4)
@@ -35,10 +35,12 @@ environment.
 - Radial menu (hold a grip) for wingman orders and other commands
 - Voice commands, recognised on the headset: double-tap a thumb rest and
   say e.g. "attack my target"
-- VR menu environments around the game screen
+- Immersive 3D menu environments - re-creating the iconic box arts of X-wing games in full 3D.
 - Death menu with Restart Mission and an in-mission Quick Save / Quick Load
 - Pause menu pages for Review Briefing and Mission Hints
 - Your PC pilots can be brought along
+
+Gameplay video: https://www.reddit.com/r/OculusQuest/s/OZG4dItx3W
 
 ## Screenshots
 
