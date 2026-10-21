@@ -37,7 +37,8 @@
  * logo filling the picture, and it recedes, slowing, about its centre. Its
  * outline's height in film pixels follows 1 / (cubic in the time since the
  * cut), within 0.4 px over frames 52..151; its width is 2.26 times that.
- * It fades out (linearly in the picture's values) from 9.87 to 10.75 s. */
+ * It fades out (linearly in the picture's values) from 9.87 to 10.75 s
+ * (the VR scene keeps its own, shorter timetable: CRAWL_LOGO_END). */
 #define CRAWL_FILM_CX 320.0f
 #define CRAWL_FILM_CY 200.0f
 #define CRAWL_FILM_W 640.0f
@@ -45,8 +46,17 @@
 static const double k_logo_inv_h[4] = { 0.002576953439566483, 0.003376103021604383, -0.00019466942423813978,
 										1.0588799955058198e-05 };
 #define CRAWL_LOGO_ASPECT 2.26f
-#define CRAWL_LOGO_FADE_FROM 9.867f
-#define CRAWL_LOGO_FADE_TO 10.75f
+/* The VR scene's own timetable, in seconds from the logo's cut (the film's
+ * logo stays to 10.75 s and its text slides in from below the picture, out
+ * of the screen's frame but in view round it): the logo recedes for
+ * LOGO_END seconds, fading out over the last LOGO_FADE; nothing of the text
+ * shows before TEXT_FROM, where it fades in over TEXT_FADE_IN while it
+ * already crawls (at the film's speed, in step with it). Tunable with
+ * XWA_XR_CRAWL_LOGO_END / _LOGO_FADE / _TEXT_FROM / _TEXT_FADE_IN. */
+#define CRAWL_LOGO_END 6.0f
+#define CRAWL_LOGO_FADE 1.0f
+#define CRAWL_TEXT_FROM 7.0f
+#define CRAWL_TEXT_FADE_IN 1.5f
 
 /* The crawl: text on a plane seen in perspective, its vanishing line
  * CRAWL_YV (film y), scrolling at a constant speed. A point of the text is
@@ -912,7 +922,10 @@ static void crawl_quad(AeronScene3D* scene, AeronTexture* tex, const float c[4][
  * XWA_XR_CRAWL_LOGO_DISTANCE metres away. */
 static void crawl_submit_logo(AeronScene3D* scene, const CrawlView* v) {
 	const float t = s_crawl.t;
-	if (!s_crawl.logo.tex || t < CRAWL_START || t >= CRAWL_LOGO_FADE_TO) {
+	const float logo_end = CRAWL_START + fmaxf(crawl_env("XWA_XR_CRAWL_LOGO_END", CRAWL_LOGO_END), 0.1f);
+	const float logo_fade = fminf(fmaxf(crawl_env("XWA_XR_CRAWL_LOGO_FADE", CRAWL_LOGO_FADE), 0.01f),
+								  logo_end - CRAWL_START);
+	if (!s_crawl.logo.tex || t < CRAWL_START || t >= logo_end) {
 		return;
 	}
 	const double u = (double)(t - CRAWL_START);
@@ -934,7 +947,7 @@ static void crawl_submit_logo(AeronScene3D* scene, const CrawlView* v) {
 	crawl_world(v, x1, y1, -dist, c[2]);
 	crawl_world(v, x0, y1, -dist, c[3]);
 	static const float uv[4][2] = { { 0, 1 }, { 1, 1 }, { 1, 0 }, { 0, 0 } };
-	const float fade = 1.0f - crawl_clamp01((t - CRAWL_LOGO_FADE_FROM) / (CRAWL_LOGO_FADE_TO - CRAWL_LOGO_FADE_FROM));
+	const float fade = 1.0f - crawl_clamp01((t - (logo_end - logo_fade)) / logo_fade);
 	crawl_quad(scene, s_crawl.logo.tex, c, uv, k_logo_srgb, s_crawl.logo_tint, fade);
 }
 
@@ -958,7 +971,9 @@ static void crawl_plane_point(const CrawlView* v, float xn, float s, float out[3
 
 static void crawl_submit_text(AeronScene3D* scene, const CrawlView* v) {
 	const float t = s_crawl.t;
-	if (!s_crawl.text.tex || t < CRAWL_START || t >= CRAWL_FADE_TO) {
+	const float text_from = CRAWL_START + fmaxf(crawl_env("XWA_XR_CRAWL_TEXT_FROM", CRAWL_TEXT_FROM), 0.0f);
+	const float fade_in = fmaxf(crawl_env("XWA_XR_CRAWL_TEXT_FADE_IN", CRAWL_TEXT_FADE_IN), 0.01f);
+	if (!s_crawl.text.tex || t < text_from || t >= CRAWL_FADE_TO) {
 		return;
 	}
 	/* The film's centre column sits at xn 0 (x = CX). */
@@ -970,7 +985,8 @@ static void crawl_submit_text(AeronScene3D* scene, const CrawlView* v) {
 	crawl_plane_point(v, xb, sa, c[2]);
 	crawl_plane_point(v, xa, sa, c[3]);
 	static const float uv[4][2] = { { 0, 1 }, { 1, 1 }, { 1, 0 }, { 0, 0 } };
-	const float fade = 1.0f - crawl_clamp01((t - CRAWL_FADE_FROM) / (CRAWL_FADE_TO - CRAWL_FADE_FROM));
+	const float fade = fminf(crawl_clamp01((t - text_from) / fade_in),
+							 1.0f - crawl_clamp01((t - CRAWL_FADE_FROM) / (CRAWL_FADE_TO - CRAWL_FADE_FROM)));
 	crawl_quad(scene, s_crawl.text.tex, c, uv, k_text_srgb, s_crawl.text_tint, fade);
 }
 
