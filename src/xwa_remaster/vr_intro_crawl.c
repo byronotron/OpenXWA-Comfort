@@ -51,12 +51,19 @@ static const double k_logo_inv_h[4] = { 0.002576953439566483, 0.0033761030216043
  * of the screen's frame but in view round it): the logo recedes for
  * LOGO_END seconds, fading out over the last LOGO_FADE; nothing of the text
  * shows before TEXT_FROM, where it fades in over TEXT_FADE_IN while it
- * already crawls (at the film's speed, in step with it). Tunable with
- * XWA_XR_CRAWL_LOGO_END / _LOGO_FADE / _TEXT_FROM / _TEXT_FADE_IN. */
-#define CRAWL_LOGO_END 6.0f
+ * already crawls (at the film's speed). The text does not start where the
+ * film has it then (mid-view): its scroll runs late by however much puts
+ * the first line's top TEXT_ENTRY_DEG below the line of sight to the logo
+ * (about where the headset's view ends below) at TEXT_ENTRY_AT, so it
+ * fades in on the edge of the view and crawls up into it. Tunable with
+ * XWA_XR_CRAWL_LOGO_END / _LOGO_FADE / _TEXT_FROM / _TEXT_FADE_IN /
+ * _TEXT_ENTRY_DEG / _TEXT_ENTRY_AT. */
+#define CRAWL_LOGO_END 7.5f
 #define CRAWL_LOGO_FADE 1.0f
-#define CRAWL_TEXT_FROM 7.0f
+#define CRAWL_TEXT_FROM 7.5f
 #define CRAWL_TEXT_FADE_IN 1.5f
+#define CRAWL_TEXT_ENTRY_DEG 45.0f
+#define CRAWL_TEXT_ENTRY_AT 9.0f
 
 /* The crawl: text on a plane seen in perspective, its vanishing line
  * CRAWL_YV (film y), scrolling at a constant speed. A point of the text is
@@ -959,11 +966,30 @@ static void crawl_submit_logo(AeronScene3D* scene, const CrawlView* v) {
  * y = z tan phi - h / cos phi; the eye sees the screen as that camera's
  * picture, so in LOCAL space the point lies at (x, y + z lift / dist, -z).
  * That is linear in xn and s: one quad. */
+/* How late the scroll runs (TEXT_ENTRY_DEG, above): a point (xn, s) is
+ * seen at tan(elevation) = tan(phi) + lift / dist - K / (f (t + T0 - s)),
+ * the plane's height cancelling, so the first line's top (s = 0) is at the
+ * wanted elevation at scroll time K / (f (tan(phi) + lift / dist -
+ * tan(elevation))) - T0. */
+static float crawl_scroll_delay(const CrawlView* v) {
+	const float tan_phi = (CRAWL_FILM_CY - CRAWL_YV) / v->f;
+	const float entry = fminf(fmaxf(crawl_env("XWA_XR_CRAWL_TEXT_ENTRY_DEG", CRAWL_TEXT_ENTRY_DEG), 0.0f), 80.0f);
+	const float at = CRAWL_START + crawl_env("XWA_XR_CRAWL_TEXT_ENTRY_AT", CRAWL_TEXT_ENTRY_AT);
+	const float logo_el = atanf(v->lift / v->dist);
+	const float tan_el = tanf(logo_el - entry * 0.017453293f);
+	const float den = tan_phi + v->lift / v->dist - tan_el;
+	if (entry <= 0.0f || den <= 1e-3f) {
+		return 0.0f;
+	}
+	return fmaxf(at - (CRAWL_K / (v->f * den) - CRAWL_T0), 0.0f);
+}
+
 static void crawl_plane_point(const CrawlView* v, float xn, float s, float out[3]) {
 	const float h = fmaxf(crawl_env("XWA_XR_CRAWL_HEIGHT", 12.0f), 1.0f);
 	const float tan_phi = (CRAWL_FILM_CY - CRAWL_YV) / v->f;
 	const float inv_cos = sqrtf(1.0f + tan_phi * tan_phi);
-	const float z = v->f * h * (s_crawl.t + CRAWL_T0 - s) * inv_cos / CRAWL_K;
+	const float t = s_crawl.t - crawl_scroll_delay(v);
+	const float z = v->f * h * (t + CRAWL_T0 - s) * inv_cos / CRAWL_K;
 	const float x = (xn + 0.0f) * h * inv_cos;
 	const float y = z * tan_phi - h * inv_cos;
 	crawl_world(v, x, y + z * v->lift / v->dist, -z, out);
@@ -976,15 +1002,23 @@ static void crawl_submit_text(AeronScene3D* scene, const CrawlView* v) {
 	if (!s_crawl.text.tex || t < text_from || t >= CRAWL_FADE_TO) {
 		return;
 	}
-	/* The film's centre column sits at xn 0 (x = CX). */
+	/* The film's centre column sits at xn 0 (x = CX). Lines still to come
+	 * (t + T0 - s <= 0) would lie on the plane behind the player: the quad
+	 * stops a little short of them. */
 	const float xa = CRAWL_TEX_X0, xb = -CRAWL_TEX_X0;
-	const float sa = CRAWL_TEX_S0, sb = s_crawl.text_s1;
+	const float sa = CRAWL_TEX_S0, s1 = s_crawl.text_s1;
+	const float s_here = t - crawl_scroll_delay(v) + CRAWL_T0 - 0.25f;
+	const float sb = fminf(s1, s_here);
+	if (sb <= sa) {
+		return;
+	}
+	const float vb = (sb - sa) / (s1 - sa);
 	float c[4][3];
 	crawl_plane_point(v, xa, sb, c[0]);
 	crawl_plane_point(v, xb, sb, c[1]);
 	crawl_plane_point(v, xb, sa, c[2]);
 	crawl_plane_point(v, xa, sa, c[3]);
-	static const float uv[4][2] = { { 0, 1 }, { 1, 1 }, { 1, 0 }, { 0, 0 } };
+	const float uv[4][2] = { { 0, vb }, { 1, vb }, { 1, 0 }, { 0, 0 } };
 	const float fade = fminf(crawl_clamp01((t - text_from) / fade_in),
 							 1.0f - crawl_clamp01((t - CRAWL_FADE_FROM) / (CRAWL_FADE_TO - CRAWL_FADE_FROM)));
 	crawl_quad(scene, s_crawl.text.tex, c, uv, k_text_srgb, s_crawl.text_tint, fade);
