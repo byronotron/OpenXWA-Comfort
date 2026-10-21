@@ -59,6 +59,10 @@ GitHub:
   options above, and `PKG_CONFIG_LIBDIR` pointing at the prefix.
 - **Packaging.** `apk_repack_sign.py` swaps the new `libmain.so` (stripped)
   into the previous APK, aligns it and signs it with APK Signature Scheme v2.
+  `sdl_clipboard_dex.py` rewrites the previous APK's `classes.dex` with SDL's
+  clipboard handler tolerating a missing clipboard service (Steam Frame),
+  using Apktool's baksmali/smali; `build_apk.py` patches the Java source the
+  same way.
 
 ## Signing key
 
