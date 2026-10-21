@@ -95,7 +95,8 @@ Settings and log files
 In %APPDATA%\TotallyOpen\OpenXWA (paste that into the Explorer address bar):
   openxwa.log       the log of the last run (openxwa-prev.log: the one before)
   openxwa-vr.cfg    the VR settings (written by the VR Options; a few more
-                    are described in the file)
+                    are described in the file, e.g. SDL_GPU_DRIVER=vulkan to
+                    use Vulkan instead of Direct3D 12)
   config.yaml       the game's settings, pilots are next to it
 
 

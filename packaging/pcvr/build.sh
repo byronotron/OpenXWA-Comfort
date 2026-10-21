@@ -291,6 +291,10 @@ fi
 
 log "OpenXWA $VERSION ($DESCRIBE)"
 GAME_BUILD=$BUILD/openxwa-win
+# One build tree; start it afresh when the source tree changes (export vs. --worktree).
+if [ -f "$GAME_BUILD/CMakeCache.txt" ] && ! grep -qx "CMAKE_HOME_DIRECTORY:INTERNAL=$SOURCE" "$GAME_BUILD/CMakeCache.txt"; then
+	rm -rf "$GAME_BUILD"
+fi
 cmake -S "$SOURCE" -B "$GAME_BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
 	-DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
 	-DAERON_FSR3_SHADERGEN_EXECUTABLE="$HOST/bin/aeron_fsr3_shadergen" \
