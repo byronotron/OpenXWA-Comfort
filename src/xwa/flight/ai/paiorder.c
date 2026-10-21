@@ -2383,14 +2383,14 @@ char paiorder_completegohomeorder(void) {
 							 .fg.skipTriggers[orderSlot + 4 * g_paiContext.curOrderCoord.fields.regionIdx]
 							 .triggers[1]
 							 .condition != 0)) {
-					const XwaTriggerPair* skipTriggers;
-
-					skipTriggers =
-						&g_missionFlightGroups[g_paiContext.curOrderCoord.fields.flightGroupIdx]
-							 .fg.skipTriggers[orderSlot + 4 * g_paiContext.curOrderCoord.fields.regionIdx];
-					if ((Mission_EvaluateTriggerPair(skipTriggers, 0) & 1) != 0) {
-						return 0;
-					}
+					/* A conditional order (one with skip triggers) that has not run yet keeps
+					 * the craft here: once its trigger fires, CHECKCONDITIONALORDR (next in
+					 * the plan) switches to it. Going home while it is still pending lost
+					 * craft that finish their first order before the trigger, e.g. the
+					 * Vasudra in 1B0M6FW: it flies its loop at Brint-wo, then has to wait
+					 * for the hospital buoy (FG 60) before its "hyper to region 2" order, and
+					 * left the mission instead. */
+					return 0;
 				}
 			}
 			if (completionState == 3) {
