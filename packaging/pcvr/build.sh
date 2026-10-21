@@ -184,10 +184,12 @@ fi
 export LD_LIBRARY_PATH="$HOST/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 # ---- Windows libraries -----------------------------------------------------
-if ! stamp win-sdl-$SDL_COMMIT; then
+if ! stamp win-sdl-$SDL_COMMIT-xrlog1; then
 	log "SDL3 (Windows, OpenXR GPU support)"
 	git_at https://github.com/libsdl-org/SDL.git "$SDL_COMMIT" "$SRC/SDL-win"
 	git -C "$SRC/SDL-win" apply "$REPO/packaging/common/sdl-gpu-d3d12-hdr.patch"
+	# OpenXR failures name their XrResult (instance vs. no headset).
+	git -C "$SRC/SDL-win" apply "$REPO/packaging/common/sdl-openxr-results.patch"
 	rm -rf "$BUILD/sdl-win"
 	cmake -S "$SRC/SDL-win" -B "$BUILD/sdl-win" -G Ninja -DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_INSTALL_PREFIX="$WIN" -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
@@ -197,7 +199,7 @@ if ! stamp win-sdl-$SDL_COMMIT; then
 	cmake --build "$BUILD/sdl-win" --parallel "$JOBS" >> "$BUILD/sdl-win.log"
 	cmake --install "$BUILD/sdl-win" >> "$BUILD/sdl-win.log"
 	mkdir -p "$WIN/licenses" && cp "$SRC/SDL-win/LICENSE.txt" "$WIN/licenses/SDL3.txt"
-	done_stamp win-sdl-$SDL_COMMIT
+	done_stamp win-sdl-$SDL_COMMIT-xrlog1
 fi
 
 if ! stamp win-zstd-$ZSTD_VERSION; then
