@@ -8,6 +8,7 @@
 #include "aeron/scene/mesh.h"
 #include "xwa_remaster/vr_lap_console.h"
 
+#include <SDL3/SDL_stdinc.h>
 #include <SDL3/SDL_timer.h>
 #include <math.h>
 #include <stdio.h>
@@ -480,7 +481,7 @@ void XwaVrStick_Update(void) {
 				s_st.moving = 0;
 				snprintf(s_st.placement, sizeof s_st.placement, "%.3f,%.3f,%.3f", s_st.pivot[0], s_st.pivot[1],
 						 s_st.pivot[2]);
-				setenv("XWA_XR_STICK_POS", s_st.placement, 1);
+				SDL_setenv_unsafe("XWA_XR_STICK_POS", s_st.placement, 1);
 				s_st.dirty = 1;
 				Aeron_XrHapticPulse(h, 0.3f, 20);
 			} else {

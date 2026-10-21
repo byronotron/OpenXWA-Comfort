@@ -104,6 +104,15 @@ static const char* vv_model_dir(void) {
 	snprintf(dir, sizeof dir, "%s/voice-en", internal ? internal : ".");
 #else
 	const char* env = getenv("XWA_VOICE_MODEL_DIR");
+	const char* base = SDL_GetBasePath();
+#if defined(_WIN32)
+	/* PCVR: the voice folder next to OpenXWA.exe. */
+	if (!(env && env[0]) && base) {
+		snprintf(dir, sizeof dir, "%svoice", base);
+		return dir;
+	}
+#endif
+	(void)base;
 	snprintf(dir, sizeof dir, "%s", env && env[0] ? env : "voice");
 #endif
 	return dir;
@@ -181,6 +190,8 @@ static int SDLCALL vv_worker(void* unused) {
 			if (ok) {
 #if defined(SDL_PLATFORM_ANDROID)
 				const char* lib = "libsherpa-onnx-c-api.so";
+#elif defined(_WIN32)
+				const char* lib = getenv("XWA_VOICE_LIB") ? getenv("XWA_VOICE_LIB") : "sherpa-onnx-c-api.dll";
 #else
 				const char* lib = getenv("XWA_VOICE_LIB") ? getenv("XWA_VOICE_LIB") : "libsherpa-onnx-c-api.so";
 #endif

@@ -218,9 +218,32 @@ int XwaModernVrOptions_Available(void) {
 /* Writes KEY=value lines into openxwa-quest.cfg: an active KEY= line is
  * replaced, else the template's commented #KEY= line is activated, else the
  * line is appended. Other lines are kept as they are. */
-static void vr_write_cfg(const char* const* keys, const char* const* values, int count) {
+int XwaModernVrOptions_SettingsPath(char* out, size_t size) {
 #if defined(SDL_PLATFORM_ANDROID)
 	const char* external = SDL_GetAndroidExternalStoragePath();
+	if (!out || !size || !external || !external[0]) {
+		return 0;
+	}
+	snprintf(out, size, "%s/openxwa-quest.cfg", external);
+	return 1;
+#elif defined(_WIN32)
+	char* pref = SDL_GetPrefPath("TotallyOpen", "OpenXWA");
+	if (!out || !size || !pref) {
+		SDL_free(pref);
+		return 0;
+	}
+	snprintf(out, size, "%sopenxwa-vr.cfg", pref);
+	SDL_free(pref);
+	return 1;
+#else
+	(void)out;
+	(void)size;
+	return 0;
+#endif
+}
+
+static void vr_write_cfg(const char* const* keys, const char* const* values, int count) {
+#if defined(SDL_PLATFORM_ANDROID) || defined(_WIN32)
 	char path[1024];
 	char* text = NULL;
 	size_t length = 0;
@@ -228,10 +251,9 @@ static void vr_write_cfg(const char* const* keys, const char* const* values, int
 	int has_active[32] = { 0 };
 	int written[32] = { 0 };
 
-	if (count <= 0 || count > 32 || !external || !external[0]) {
+	if (count <= 0 || count > 32 || !XwaModernVrOptions_SettingsPath(path, sizeof path)) {
 		return;
 	}
-	snprintf(path, sizeof path, "%s/openxwa-quest.cfg", external);
 	char tmp_path[1100];
 	snprintf(tmp_path, sizeof tmp_path, "%s.new", path);
 	f = fopen(path, "rb");
@@ -416,7 +438,11 @@ static const struct {
 	{ "XWA_XR_FOVEATION", "high" },
 	{ "AERON_XR_RESOLUTION_SCALE", "1.1" },
 	{ "XWA_XR_FLIGHT_STICK", "0" },
+#if defined(SDL_PLATFORM_ANDROID)
 	{ "AERON_XR_REFRESH_RATE", "72" },
+#else
+	{ "AERON_XR_REFRESH_RATE", "0" }, /* PC: the runtime's own setting */
+#endif
 	{ "XWA_XR_HUD_LAYOUT", "cockpit" },
 	{ "XWA_XR_HUD_SCALE", "0.55" },
 	{ "XWA_XR_SHADING", "lite" },

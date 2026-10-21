@@ -12,7 +12,11 @@
 #include <string.h>
 
 #if defined(_WIN32)
-#define XV_NO_DLOPEN 1
+/* Windows (PCVR): sherpa-onnx-c-api.dll and onnxruntime.dll next to the exe,
+ * through SDL's loader. */
+#include <SDL3/SDL_error.h>
+#include <SDL3/SDL_loadso.h>
+#define XV_SDL_LOADSO 1
 #else
 #include <dlfcn.h>
 #endif
@@ -58,15 +62,28 @@ int XwaVoice_Load(const char* lib, const char* model_dir, int threads, char* err
 	return 0;
 #else
 	if (!s_xv.lib) {
+#if defined(XV_SDL_LOADSO)
+		s_xv.lib = SDL_LoadObject(lib);
+		if (!s_xv.lib) {
+			snprintf(error, (size_t)error_size, "cannot load %s: %s", lib, SDL_GetError());
+			return 0;
+		}
+#else
 		s_xv.lib = dlopen(lib, RTLD_NOW | RTLD_LOCAL);
 		if (!s_xv.lib) {
 			snprintf(error, (size_t)error_size, "cannot load %s: %s", lib, dlerror());
 			return 0;
 		}
+#endif
 	}
+#if defined(XV_SDL_LOADSO)
+#define XV_LOOKUP(name) ((void*)SDL_LoadFunction((SDL_SharedObject*)s_xv.lib, name))
+#else
+#define XV_LOOKUP(name) dlsym(s_xv.lib, name)
+#endif
 #define XV_SYM(field, name)                                                                                        \
 	do {                                                                                                         \
-		*(void**)(&s_xv.field) = dlsym(s_xv.lib, name);                                                          \
+		*(void**)(&s_xv.field) = XV_LOOKUP(name);                                                                \
 		if (!s_xv.field) {                                                                                       \
 			snprintf(error, (size_t)error_size, "%s: missing %s", lib, name);                                    \
 			return 0;                                                                                            \

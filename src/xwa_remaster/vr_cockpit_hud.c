@@ -10,6 +10,7 @@
 #include "xwa_remaster/hud_fixed.h"
 #include "xwa_remaster/hud_text.h"
 
+#include <SDL3/SDL_stdinc.h>
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -386,7 +387,7 @@ static void ck_save_layout(void) {
 			break;
 		}
 	}
-	setenv(s_ck.cockpit_key, s_ck.layout_text, 1);
+	SDL_setenv_unsafe(s_ck.cockpit_key, s_ck.layout_text, 1);
 	snprintf(s_ck.pose_env, sizeof s_ck.pose_env, "%s", s_ck.layout_text);
 	s_ck.layout_dirty = 1;
 	Aeron_LogInfo("xwa.remaster", "VR HUD layout %s saved", s_ck.cockpit_key);

@@ -1,6 +1,8 @@
 #ifndef XWA_RUNTIME_MODERN_VR_OPTIONS_SCREEN_H
 #define XWA_RUNTIME_MODERN_VR_OPTIONS_SCREEN_H
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -18,12 +20,19 @@ int XwaModernVrOptions_Available(void);
  * return to the parent video menu. */
 int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row);
 
-/* Writes KEY=value into openxwa-quest.cfg (Android; elsewhere a no-op). */
+/* Writes KEY=value into the VR settings file (Android, Windows; elsewhere a
+ * no-op). */
 void XwaModernVrOptions_SaveValue(const char* key, const char* value);
 /* "Restore VR Defaults": every VR option and hand-placed spot back to the
  * recommended settings (applied now and saved; "(restart)" options take
  * effect at the next start). */
 void XwaModernVrOptions_RestoreDefaults(void);
+
+/* The VR settings file (KEY=VALUE lines applied as environment variables at
+ * start, written by the VR options): openxwa-quest.cfg in the app's external
+ * storage on Quest, openxwa-vr.cfg in the user folder on Windows (PCVR).
+ * 0 where there is none. */
+int XwaModernVrOptions_SettingsPath(char* out, size_t size);
 
 #ifdef __cplusplus
 }

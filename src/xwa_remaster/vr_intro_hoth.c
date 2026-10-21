@@ -2,6 +2,7 @@
 #include "aeron/aeron.h"
 #include "aeron/asset/opt_model.h"
 #include "aeron/log.h"
+#include "aeron/paths.h"
 #include "aeron/scene/billboard.h"
 #include "aeron/scene/mesh.h"
 #include "aeron/vfs.h"
@@ -709,10 +710,20 @@ static void hoth_load_boom(AeronCommandBuffer* cmd) {
 /* The X-Wing Alliance logo the menus show (vr/logo.rgba: "XWAL", u32 w, h,
  * straight RGBA; an APK asset, never in the repo). */
 static void hoth_load_logo(AeronCommandBuffer* cmd) {
-	static const char* const paths[2] = { "vr/logo.rgba", "assets/vr/logo.rgba" };
+	static char beside_exe[1024];
+	const char* const paths[3] = { "vr/logo.rgba", "assets/vr/logo.rgba", beside_exe };
 	const char* override = getenv("XWA_XR_LOGO");
-	for (int i = -1; i < 2 && !s_hoth.logo; ++i) {
+	beside_exe[0] = '\0';
+#if !defined(SDL_PLATFORM_ANDROID)
+	if (!Aeron_ApplicationPath("vr/logo.rgba", beside_exe, sizeof beside_exe)) {
+		beside_exe[0] = '\0';
+	}
+#endif
+	for (int i = -1; i < 3 && !s_hoth.logo; ++i) {
 		const char* path = i < 0 ? (override && override[0] && strcmp(override, "0") ? override : NULL) : paths[i];
+		if (path && !path[0]) {
+			continue;
+		}
 		if (!path) {
 			continue;
 		}

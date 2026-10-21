@@ -21,9 +21,12 @@
 #include "xwa_runtime/runtime/presentation.h"
 #include "xwa_runtime/timing/modern_flight_timing.h"
 
+#include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_hints.h>
 #include <SDL3/SDL_timer.h>
+#if !defined(_WIN32)
 #include <dlfcn.h>
+#endif
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -398,6 +401,102 @@ static int resolve_game_data(const XwaLaunchOptions* launch, const XwaHostConfig
 	return select_game_data(vfs, selected, selected_capacity, cancelled, error, error_size);
 }
 
+#if defined(SDL_PLATFORM_ANDROID) || defined(_WIN32)
+/* KEY=VALUE lines of a settings file become environment variables ('#'
+ * starts a comment line). */
+static void apply_settings_lines(FILE* f) {
+	char line[2048]; /* HUD layouts are long lines */
+	while (fgets(line, sizeof line, f)) {
+		char* eq;
+		char* end;
+		char* key = line;
+		while (*key == ' ' || *key == '\t') {
+			key++;
+		}
+		if (*key == '#' || *key == '\0' || *key == '\n' || *key == '\r') {
+			continue;
+		}
+		eq = strchr(key, '=');
+		if (!eq) {
+			continue;
+		}
+		*eq = '\0';
+		end = eq + 1 + strcspn(eq + 1, "\r\n");
+		*end = '\0';
+		SDL_setenv_unsafe(key, eq + 1, 1);
+	}
+}
+#endif
+
+#if defined(_WIN32)
+/* PCVR (Windows): VR settings in openxwa-vr.cfg in the user folder
+ * (%APPDATA%\TotallyOpen\OpenXWA), written by the VR options like the
+ * Quest's openxwa-quest.cfg; and the log in openxwa.log there, since a GUI
+ * program has no console. Returns 1 when the settings file was just created
+ * (a first VR start). */
+static int pc_load_settings(int xr_requested) {
+	char path[1024];
+	FILE* f;
+	char* pref = SDL_GetPrefPath("TotallyOpen", "OpenXWA");
+	if (pref && !SDL_getenv("AERON_LOG_FILE")) {
+		char prev[1100];
+		snprintf(path, sizeof path, "%sopenxwa.log", pref);
+		snprintf(prev, sizeof prev, "%sopenxwa-prev.log", pref);
+		remove(prev);
+		rename(path, prev);
+		SDL_setenv_unsafe("AERON_LOG_FILE", path, 1);
+	}
+	SDL_free(pref);
+	if (!XwaModernVrOptions_SettingsPath(path, sizeof path)) {
+		return 0;
+	}
+	f = fopen(path, "r");
+	if (f) {
+		apply_settings_lines(f);
+		fclose(f);
+		return 0;
+	}
+	if (!xr_requested || (f = fopen(path, "w")) == NULL) {
+		return 0;
+	}
+	fputs("# OpenXWA PCVR settings: KEY=VALUE lines, read at every start. The VR\n"
+		  "# options in the game write their values here; remove a line to go back to\n"
+		  "# the default. A few that have no menu entry:\n"
+		  "# 1 = always start in VR (as with --xr), 0 = only with --xr:\n"
+		  "#AERON_XR=1\n"
+		  "# Virtual screen for menus, briefings and films: distance and width in\n"
+		  "# metres, and its pixel size:\n"
+		  "#AERON_XR_SCREEN_DISTANCE=3.2\n"
+		  "#AERON_XR_SCREEN_WIDTH=2.1\n"
+		  "#AERON_XR_SCREEN_PIXELS=1920x1440\n"
+		  "# Per-eye pixel budget (caps the resolution scale; unset = no cap):\n"
+		  "#AERON_XR_EYE_PIXELS=6000000\n"
+		  "# 1 = no desktop mirror window swapchain (saves a little GPU time):\n"
+		  "#AERON_XR_HEADLESS=0\n"
+		  "# Voice commands: doubletap (thumb rest), hold or off; the speech model\n"
+		  "# is the voice folder next to OpenXWA.exe:\n"
+		  "#XWA_XR_VOICE=doubletap\n"
+		  "# 1 = the Quest render profile (no SSAO/FSR/motion blur, MSAA 2x, lite\n"
+		  "# shading) for slower GPUs:\n"
+		  "#XWA_QUEST_PROFILE=0\n"
+		  "# 0 = keep the game running while the headset is off / the dashboard is open:\n"
+		  "#XWA_XR_AUTO_PAUSE=1\n",
+		  f);
+	fclose(f);
+	return 1;
+}
+
+/* Desktop VR defaults the Quest build sets in android_xr_defaults. */
+static void pc_xr_defaults(void) {
+	if (!SDL_getenv("AERON_XR_SCREEN_DISTANCE")) {
+		SDL_setenv_unsafe("AERON_XR_SCREEN_DISTANCE", "3.2", 1);
+	}
+	if (!SDL_getenv("AERON_XR_SCREEN_PIXELS")) {
+		SDL_setenv_unsafe("AERON_XR_SCREEN_PIXELS", "1920x1440", 1);
+	}
+}
+#endif
+
 #if defined(SDL_PLATFORM_ANDROID)
 #include <SDL3/SDL_system.h>
 #include <dirent.h>
@@ -417,7 +516,6 @@ static int s_android_fresh_settings;
 static void android_load_settings(void) {
 	const char* external = SDL_GetAndroidExternalStoragePath();
 	char path[1024];
-	char line[2048]; /* HUD layouts are long lines */
 	FILE* f;
 	if (!external || !external[0]) {
 		return;
@@ -596,25 +694,7 @@ static void android_load_settings(void) {
 		}
 		return;
 	}
-	while (fgets(line, sizeof line, f)) {
-		char* eq;
-		char* end;
-		char* key = line;
-		while (*key == ' ' || *key == '\t') {
-			key++;
-		}
-		if (*key == '#' || *key == '\0' || *key == '\n' || *key == '\r') {
-			continue;
-		}
-		eq = strchr(key, '=');
-		if (!eq) {
-			continue;
-		}
-		*eq = '\0';
-		end = eq + 1 + strcspn(eq + 1, "\r\n");
-		*end = '\0';
-		SDL_setenv_unsafe(key, eq + 1, 1);
-	}
+	apply_settings_lines(f);
 	fclose(f);
 	{
 		const char* res = SDL_getenv("AERON_XR_RESOLUTION_SCALE");
@@ -964,6 +1044,18 @@ int main(int argc, char** argv) {
 		XwaModernVrOptions_RestoreDefaults();
 	}
 	android_xr_defaults();
+#elif defined(_WIN32)
+	{
+		const int fresh = pc_load_settings(launch.xr_enabled);
+		const char* xr_env = SDL_getenv("AERON_XR");
+		if (launch.xr_enabled || (xr_env && xr_env[0] && strcmp(xr_env, "0") != 0)) {
+			if (fresh) {
+				/* A first VR start begins from the recommended VR settings. */
+				XwaModernVrOptions_RestoreDefaults();
+			}
+			pc_xr_defaults();
+		}
+	}
 #endif
 	memset(&config, 0, sizeof(config));
 	config.org_name = "TotallyOpen";

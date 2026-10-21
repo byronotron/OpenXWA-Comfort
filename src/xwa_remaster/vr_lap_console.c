@@ -15,6 +15,7 @@
 #include "xwa_runtime/runtime/vr_buttons.h"
 #include "xwa_runtime/snapshot/snapshot.h"
 
+#include <SDL3/SDL_stdinc.h>
 #include <ctype.h>
 
 #include <math.h>
@@ -866,7 +867,7 @@ static void vc_grab_end(VcPlace* pl) {
 	}
 	snprintf(s_vc.placement, sizeof s_vc.placement, "%.4f,%.4f,%.4f,%.5f,%.5f,%.5f,%.5f", pl->cpos[0], pl->cpos[1],
 			 pl->cpos[2], pl->cq[0], pl->cq[1], pl->cq[2], pl->cq[3]);
-	setenv("XWA_XR_CONSOLE_POSE", s_vc.placement, 1);
+	SDL_setenv_unsafe("XWA_XR_CONSOLE_POSE", s_vc.placement, 1);
 	snprintf(s_vc.pose_env, sizeof s_vc.pose_env, "%s", s_vc.placement);
 	s_vc.placement_dirty = 1;
 	Aeron_LogInfo("xwa.remaster", "lap console moved to %s", s_vc.placement);
@@ -3206,7 +3207,7 @@ static void vp_press(int hand, int what) {
 		if (what != s_vp.tab) {
 			s_vp.tab = what;
 			s_vp.tab_dirty = 1;
-			setenv("XWA_XR_PANEL_TAB", k_vp_tab_keys[what], 1);
+			SDL_setenv_unsafe("XWA_XR_PANEL_TAB", k_vp_tab_keys[what], 1);
 		}
 	} else if (s_vp.map_help) {
 		s_vp.map_help = 0; /* a touch on the legend closes it */

@@ -4,6 +4,7 @@
 #include "aeron/asset/opt_model.h"
 #include "aeron/audio.h"
 #include "aeron/log.h"
+#include "aeron/paths.h"
 #include "aeron/scene/billboard.h"
 #include "aeron/scene/draw_list2d.h"
 #include "aeron/scene/font_atlas.h"
@@ -1577,10 +1578,22 @@ static int env_load_rgba(AeronCommandBuffer* cmd, int slot, const char* name, co
 	if (override && strcmp(override, "0") == 0) {
 		return 0;
 	}
-	char asset[2][64];
+	char asset[3][1024];
 	snprintf(asset[0], sizeof asset[0], "vr/%s.rgba", name);
 	snprintf(asset[1], sizeof asset[1], "assets/vr/%s.rgba", name);
-	const char* paths[] = { override && override[0] ? override : NULL, asset[0], asset[1] };
+	asset[2][0] = '\0';
+#if !defined(SDL_PLATFORM_ANDROID)
+	{
+		/* PC: the vr folder next to OpenXWA.exe, whatever the working directory. */
+		char rel[96];
+		snprintf(rel, sizeof rel, "vr/%s.rgba", name);
+		if (!Aeron_ApplicationPath(rel, asset[2], sizeof asset[2])) {
+			asset[2][0] = '\0';
+		}
+	}
+#endif
+	const char* paths[] = { override && override[0] ? override : NULL, asset[0], asset[1],
+							asset[2][0] ? asset[2] : NULL };
 	for (size_t i = 0; i < sizeof paths / sizeof paths[0]; ++i) {
 		if (!paths[i]) {
 			continue;

@@ -520,6 +520,8 @@ endif()
 
 if(WIN32)
     set_target_properties(xwa PROPERTIES WIN32_EXECUTABLE TRUE)
+    # Netplay (src/xwa_runtime/net) uses Winsock.
+    target_link_libraries(xwa_core PUBLIC ws2_32)
 
     # Executable icon and VERSIONINFO resource. FILEVERSION needs numeric
     # components; non-release versions such as 0.0.0-dev fall back to 0.0.0.

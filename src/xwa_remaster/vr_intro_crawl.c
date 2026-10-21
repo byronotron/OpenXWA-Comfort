@@ -4,6 +4,7 @@
 #include "aeron/aeron.h"
 #include "aeron/asset/opt_model.h"
 #include "aeron/log.h"
+#include "aeron/paths.h"
 #include "aeron/scene/billboard.h"
 #include "aeron/scene/present.h"
 #include "aeron/xr.h"
@@ -160,13 +161,24 @@ static float crawl_linear_to_srgb(float c) {
 	return c <= 0.0031308f ? c * 12.92f : 1.055f * powf(c, 1.0f / 2.4f) - 0.055f;
 }
 
-/* An APK asset (or a file beside the game): vr/<name>. */
+/* An APK asset (or a file beside the game): vr/<name>, on PC also the vr
+ * folder next to OpenXWA.exe. */
 static void* crawl_load(const char* name, size_t* size) {
-	char path[2][96];
+	char path[3][1024];
 	snprintf(path[0], sizeof path[0], "vr/%s", name);
 	snprintf(path[1], sizeof path[1], "assets/vr/%s", name);
-	for (int i = 0; i < 2; ++i) {
-		void* data = SDL_LoadFile(path[i], size);
+	path[2][0] = '\0';
+#if !defined(SDL_PLATFORM_ANDROID)
+	{
+		char rel[128];
+		snprintf(rel, sizeof rel, "vr/%s", name);
+		if (!Aeron_ApplicationPath(rel, path[2], sizeof path[2])) {
+			path[2][0] = '\0';
+		}
+	}
+#endif
+	for (int i = 0; i < 3; ++i) {
+		void* data = path[i][0] ? SDL_LoadFile(path[i], size) : NULL;
 		if (data) {
 			return data;
 		}
