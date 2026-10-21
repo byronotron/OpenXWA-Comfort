@@ -24,19 +24,21 @@
  * camera at 65.7 s, the camera whips round after it to the Star Destroyers
  * and the film cuts to an X-wing's cockpit at 67.93 s. Later: the ion
  * cannon's bolt leaves Hoth at 75.5 s, strikes the Star Destroyer's
- * superstructure at 77.1 s and its left shield generator bursts into fire
- * from 77.7 s; the transport crosses the Star Destroyer's hull at 98-101 s
- * (ion lightning crawling over it until 106 s) and jumps to hyperspace at
- * 109.3 s. */
+ * superstructure at 77.1 s and its left shield generator blows up at
+ * 77.7 s; the transport crosses the Star Destroyer's hull at 98-101 s and
+ * jumps to hyperspace at 109.3 s. The first line spoken (INTRO_FINAL.SUB,
+ * frame 899) is at 59.93 s. */
 
 #define HOTH_PLANET_GROUP 6030 /* the palest, icy world of PLANET.DAT: the film's Hoth */
 #define HOTH_AZ (-70.0f)
 #define HOTH_EL (-13.0f)
 #define HOTH_RADIUS_DEG 45.0f
-#define HOTH_FADE_FROM 50.0f
-#define HOTH_FADE_TO 53.0f
+/* Hoth and the scene fade in over the 3 s before the first line spoken
+ * (59.93 s); until then the crawl's starfield alone. */
+#define HOTH_FADE_FROM 56.93f
+#define HOTH_FADE_TO 59.93f
 /* The craft are drawn from here (out at 1.4-1.9 km, unlit). */
-#define HOTH_SHIPS_FROM 51.0f
+#define HOTH_SHIPS_FROM 56.93f
 /* The light comes up over these seconds: the craft lit as they near, the
  * Star Destroyers out of the dark. */
 #define HOTH_LIGHT_FROM 62.5f
@@ -49,9 +51,11 @@
 #define HOTH_ION_LAUNCH 75.9f
 #define HOTH_ION_HIT 77.1f
 #define HOTH_SHIELD_BURST 77.7f
-/* Ion lightning over the hull: after the strike, and again as the
- * transport crosses the hull. */
-#define HOTH_ARCS_A_FROM 77.1f
+/* The shield generator's dome is gone (the game's destroyed component:
+ * hidden) once the burst covers it. */
+#define HOTH_SHIELD_GONE 77.9f
+/* Ion lightning wanders over the hull from the strike until the scene ends;
+ * thicker just after the strike and as the transport crosses the hull. */
 #define HOTH_ARCS_A_TO 79.5f
 #define HOTH_ARCS_B_FROM 98.0f
 #define HOTH_ARCS_B_TO 106.3f
@@ -134,6 +138,7 @@ typedef struct HothMesh {
 	float len_m;
 	int shield_count;
 	float shield[2][3]; /* the shield generators (ShieldGen parts), model metres */
+	int shield_slot[2]; /* their mesh slots */
 	float bridge[3];    /* the bridge (Bridge part) */
 } HothMesh;
 
@@ -146,6 +151,17 @@ typedef struct HothPath {
 	int n;
 	HothPathKey k[HOTH_PATH_MAX];
 } HothPath;
+
+/* The lead Star Destroyer's upper surfaces, seen from above: the highest
+ * upward-facing surface in each cell (model metres), for the ion lightning
+ * to crawl over; NAN where there is no hull. */
+#define HOTH_DECK_NX 32
+#define HOTH_DECK_NY 64
+typedef struct HothDeck {
+	int ok;
+	float x0, y0, cx, cy; /* the grid's corner and cell size */
+	float z[HOTH_DECK_NY][HOTH_DECK_NX];
+} HothDeck;
 
 typedef struct HothFrame {
 	float pos[3], n[3], u[3], r[3]; /* LOCAL: position, nose, up, starboard */
@@ -164,6 +180,7 @@ static struct {
 	int paths_built;
 	HothPath transport, xwing[2];
 	HothFrame isd[2];
+	HothDeck deck;
 	/* The last Submit's view. */
 	int submitted;
 	float org[3], right[3], up[3], fwd[3], k;
@@ -629,6 +646,81 @@ static void hoth_make_sprites(AeronCommandBuffer* cmd) {
 	s_hoth.beam = hoth_texture(cmd, beam, BW, BH, 0, "xwa.vr_intro_hoth.beam");
 }
 
+/* The deck map (HothDeck) from the model's triangles: each upward-facing
+ * one sampled finely enough to touch every cell under it. */
+static void hoth_build_deck(const AeronFlightModel* model) {
+	HothDeck* d = &s_hoth.deck;
+	const AeronGltfModel* r = &model->render;
+	d->ok = 0;
+	if (!r->vertices || !r->indices || r->index_count < 3) {
+		return;
+	}
+	d->x0 = model->bounds.min.x;
+	d->y0 = model->bounds.min.y;
+	d->cx = (model->bounds.max.x - model->bounds.min.x) / (float)HOTH_DECK_NX;
+	d->cy = (model->bounds.max.y - model->bounds.min.y) / (float)HOTH_DECK_NY;
+	if (d->cx <= 0.0f || d->cy <= 0.0f) {
+		return;
+	}
+	for (int j = 0; j < HOTH_DECK_NY; ++j) {
+		for (int i = 0; i < HOTH_DECK_NX; ++i) {
+			d->z[j][i] = NAN;
+		}
+	}
+	const float step = 0.4f * fminf(d->cx, d->cy);
+	for (uint32_t t = 0; t + 2 < r->index_count; t += 3) {
+		const int slot = (int)r->vertices[r->indices[t]].mesh_index;
+		const HothMesh* hm = &s_hoth.mesh[HOTH_ISD];
+		if ((hm->shield_count > 0 && slot == hm->shield_slot[0]) ||
+			(hm->shield_count > 1 && slot == hm->shield_slot[1])) {
+			continue; /* not the shield generators' domes (one is blown away) */
+		}
+		const float* a = r->vertices[r->indices[t]].pos;
+		const float* b = r->vertices[r->indices[t + 1]].pos;
+		const float* c = r->vertices[r->indices[t + 2]].pos;
+		const float e1[3] = { b[0] - a[0], b[1] - a[1], b[2] - a[2] };
+		const float e2[3] = { c[0] - a[0], c[1] - a[1], c[2] - a[2] };
+		float n[3];
+		hoth_cross(e1, e2, n);
+		const float nl = hoth_len(n);
+		if (nl <= 0.0f || fabsf(n[2]) < 0.3f * nl) {
+			continue; /* not facing up (either winding) */
+		}
+		const float span = fmaxf(fmaxf(hoth_len(e1), hoth_len(e2)), hypotf(c[0] - b[0], c[1] - b[1]));
+		const int steps = (int)fminf(ceilf(span / step), 96.0f) + 1;
+		for (int u = 0; u <= steps; ++u) {
+			for (int v = 0; u + v <= steps; ++v) {
+				const float fu = (float)u / (float)steps, fv = (float)v / (float)steps;
+				const float x = a[0] + e1[0] * fu + e2[0] * fv;
+				const float y = a[1] + e1[1] * fu + e2[1] * fv;
+				const float z = a[2] + e1[2] * fu + e2[2] * fv;
+				const int i = (int)((x - d->x0) / d->cx), j = (int)((y - d->y0) / d->cy);
+				if (i < 0 || j < 0 || i >= HOTH_DECK_NX || j >= HOTH_DECK_NY) {
+					continue;
+				}
+				if (!(d->z[j][i] >= z)) {
+					d->z[j][i] = z;
+				}
+			}
+		}
+	}
+	d->ok = 1;
+}
+
+/* The deck's height at model (x, y); 0 where there is no hull. */
+static int hoth_deck_at(float x, float y, float* z) {
+	const HothDeck* d = &s_hoth.deck;
+	if (!d->ok) {
+		return 0;
+	}
+	const int i = (int)floorf((x - d->x0) / d->cx), j = (int)floorf((y - d->y0) / d->cy);
+	if (i < 0 || j < 0 || i >= HOTH_DECK_NX || j >= HOTH_DECK_NY || isnan(d->z[j][i])) {
+		return 0;
+	}
+	*z = d->z[j][i];
+	return 1;
+}
+
 static void hoth_load_mesh(AeronCommandBuffer* cmd, int index) {
 	HothMesh* m = &s_hoth.mesh[index];
 	AeronFlightModel model;
@@ -662,11 +754,15 @@ static void hoth_load_mesh(AeronCommandBuffer* cmd, int index) {
 	for (uint32_t c = 0; c < model.component_count; ++c) {
 		const AeronFlightComponent* comp = &model.components[c];
 		const float centre[3] = { comp->center.x, comp->center.y, comp->center.z };
-		if (comp->mesh_type == 8 && m->shield_count < 2) {
+		if (comp->mesh_type == 8 && m->shield_count < 2 && c < AERON_MAX_MESH_SLOTS) {
+			m->shield_slot[m->shield_count] = (int)c;
 			memcpy(m->shield[m->shield_count++], centre, sizeof centre);
 		} else if (comp->mesh_type == 7) {
 			memcpy(m->bridge, centre, sizeof centre);
 		}
+	}
+	if (index == HOTH_ISD) {
+		hoth_build_deck(&model);
 	}
 	AeronSceneMeshCreateStatus status;
 	m->mesh = AeronScene_MeshCreate(cmd, &model, k_opt[index], &status);
@@ -953,7 +1049,8 @@ static void hoth_matrix(const float pos[3], const float nose[3], const float upv
 	m[15] = 1.0f;
 }
 
-static void hoth_add(AeronScene3D* scene, int mesh, const float m[16], int far) {
+static void hoth_add_table(AeronScene3D* scene, int mesh, const float m[16], int far,
+						   const AeronSceneMeshTable* table) {
 	if (!s_hoth.mesh[mesh].mesh) {
 		return;
 	}
@@ -968,7 +1065,12 @@ static void hoth_add(AeronScene3D* scene, int mesh, const float m[16], int far) 
 	if (far) {
 		inst.shadow_flags |= AERON_SCENE_INSTANCE_NO_CAST_SHADOW;
 	}
+	inst.mesh_table = table;
 	AeronScene_AddMeshInstance(scene, &inst);
+}
+
+static void hoth_add(AeronScene3D* scene, int mesh, const float m[16], int far) {
+	hoth_add_table(scene, mesh, m, far, NULL);
 }
 
 /* The engines' glow, seen from behind. */
@@ -1009,23 +1111,57 @@ static void hoth_isd_matrix(int i, float m[16]) {
 	hoth_matrix(f->pos, f->n, f->u, m);
 }
 
-/* The lead Star Destroyer's shield generator that bursts (the film's left
- * one): the one nearer the viewer, so the tower does not hide its fire;
- * LOCAL, a little above the dome. */
-static void hoth_left_shield(float out[3]) {
+/* The lead Star Destroyer's shield generator that blows up (the film's
+ * left one): the one nearer the viewer, so the tower does not hide it;
+ * LOCAL, a little above the dome. Returns its mesh slot (-1: no such part,
+ * a stand-in place). */
+static int hoth_left_shield(float out[3]) {
 	const HothMesh* hm = &s_hoth.mesh[HOTH_ISD];
-	if (hm->shield_count < 2) {
+	if (hm->shield_count < 1) {
 		const float m[3] = { -100.0f, 0.35f * hm->len_m, 0.11f * hm->len_m };
 		hoth_model_to_local(&s_hoth.isd[0], m, out);
-		return;
+		return -1;
 	}
-	float a[3], b[3];
-	hoth_model_to_local(&s_hoth.isd[0], hm->shield[0], a);
-	hoth_model_to_local(&s_hoth.isd[0], hm->shield[1], b);
-	memcpy(out, hoth_len(a) < hoth_len(b) ? a : b, 3 * sizeof(float));
+	int pick = 0;
+	hoth_model_to_local(&s_hoth.isd[0], hm->shield[0], out);
+	if (hm->shield_count > 1) {
+		float b[3];
+		hoth_model_to_local(&s_hoth.isd[0], hm->shield[1], b);
+		if (hoth_len(b) < hoth_len(out)) {
+			memcpy(out, b, sizeof b);
+			pick = 1;
+		}
+	}
 	for (int i = 0; i < 3; ++i) {
 		out[i] += 25.0f * s_hoth.isd[0].u[i];
 	}
+	return hm->shield_slot[pick];
+}
+
+/* The lead Star Destroyer once its shield generator is gone: every part as
+ * modelled but that dome, hidden as the game hides a destroyed component
+ * (ship.c, XwaRemasterShip_BuildMeshTable). NULL when there is no such
+ * part. */
+static const AeronSceneMeshTable* hoth_isd_wrecked_table(void) {
+	static AeronSceneMeshTable table;
+	static int built_slot = -2;
+	float dome[3];
+	const int slot = hoth_left_shield(dome);
+	if (slot < 0) {
+		return NULL;
+	}
+	if (built_slot != slot) {
+		for (uint32_t mi = 0; mi < AERON_MAX_MESH_SLOTS; ++mi) {
+			memset(table.rows[mi], 0, sizeof table.rows[mi]);
+			table.rows[mi][0][0] = table.rows[mi][1][1] = table.rows[mi][2][2] = 1.0f;
+			table.visibility_packed[mi >> 2][mi & 3] = (int)mi == slot ? 0.0f : 1.0f;
+			table.highlight_packed[mi >> 2][mi & 3] = 0.0f;
+			table.markings_packed[mi >> 2][mi & 3] = 0.0f;
+			table.emissive_packed[mi >> 2][mi & 3] = 1.0f;
+		}
+		built_slot = slot;
+	}
+	return &table;
 }
 
 /* The ion cannon: a glow on Hoth, the bolt across, a blue flash on the
@@ -1063,50 +1199,65 @@ static void hoth_submit_ion(AeronScene3D* scene, float t) {
 		const float rgb[3] = { blue[0] * 1.6f * g, blue[1] * 1.6f * g, blue[2] * 1.6f * g };
 		hoth_glow(scene, hit, hoth_bolt_width(hit, 700.0f, 6.0f) * (0.6f + 0.4f * g), rgb);
 	}
-	/* The shield generator: a burst, then fire, until the scene ends. */
-	if (t >= HOTH_SHIELD_BURST) {
+	/* The shield generator: it blows up once (the dome hidden from
+	 * SHIELD_GONE, XwaVrIntroHoth_Submit). */
+	if (t >= HOTH_SHIELD_BURST && t < HOTH_SHIELD_BURST + 1.6f) {
 		float dome[3];
 		hoth_left_shield(dome);
-		hoth_boom(scene, dome, 260.0f, (t - HOTH_SHIELD_BURST) / 1.2f, 1.0f);
-		for (int i = 0; i < 64; ++i) {
-			const float t0 = HOTH_SHIELD_BURST + 0.5f + 0.42f * (float)i;
-			if (t0 > t) {
-				break;
-			}
-			const float age = (t - t0) / 1.1f;
-			if (age >= 1.0f) {
-				continue;
-			}
-			float p[3];
-			for (int a = 0; a < 3; ++a) {
-				p[a] = dome[a] + (hoth_hash((uint32_t)i * 5u + (uint32_t)a + 900u) - 0.5f) * 40.0f;
-			}
-			p[1] += 15.0f;
-			hoth_boom(scene, p, 100.0f + 50.0f * hoth_hash((uint32_t)i + 777u), age, 0.85f);
-		}
+		hoth_boom(scene, dome, 260.0f, (t - HOTH_SHIELD_BURST) / 1.6f, 1.0f);
 	}
-	/* Ion lightning crawling over the hull. */
-	const int arcs_a = t >= HOTH_ARCS_A_FROM && t < HOTH_ARCS_A_TO;
-	const int arcs_b = t >= HOTH_ARCS_B_FROM && t < HOTH_ARCS_B_TO;
-	if (arcs_a || arcs_b) {
+	/* Ion lightning wandering over the hull until the scene ends: each arc's
+	 * foot drifts over the deck (slow sines, every arc its own), its jagged
+	 * path struck afresh 14 times a second, an arc now and then dark. */
+	if (t >= HOTH_ION_HIT) {
+		const float arc[3] = { blue[0] * 1.4f, blue[1] * 1.4f, blue[2] * 1.4f };
+		const float since = t - HOTH_ION_HIT;
+		const int busy = t < HOTH_ARCS_A_TO || (t >= HOTH_ARCS_B_FROM && t < HOTH_ARCS_B_TO);
+		const int arcs = busy ? 7 : 4;
 		const uint32_t tick = (uint32_t)(t * 14.0f);
 		const float len = s_hoth.mesh[HOTH_ISD].len_m;
-		for (int i = 0; i < 6; ++i) {
+		for (int i = 0; i < arcs; ++i) {
+			const float fi = (float)i;
 			const uint32_t s = tick * 31u + (uint32_t)i * 7u;
-			/* On the deck: across its width, along its length, at its height. */
-			const float my = (hoth_hash(s) - 0.65f) * 0.9f * len;
-			const float half_w = 0.23f * len * (0.5f - my / len);
-			float m[3] = { (hoth_hash(s + 1u) - 0.5f) * 2.0f * fmaxf(half_w, 20.0f), my,
-						   my > 0.1f * len ? 120.0f : 10.0f + 0.05f * (my + 0.5f * len) };
+			if (hoth_hash(s + 50u) < 0.22f) {
+				continue;
+			}
+			/* Along the deck (-1 bow .. 1 aft) and across it (-1 .. 1). */
+			const float along = 0.6f * sinf(since * (0.23f + 0.05f * fi) + 1.7f * fi) +
+								0.4f * sinf(since * (0.11f + 0.03f * fi) + 2.9f * fi + 0.4f);
+			const float across = 0.7f * sinf(since * (0.31f + 0.04f * fi) + 0.9f * fi + 0.5f) +
+								 0.3f * sinf(since * (0.17f + 0.02f * fi) + 2.3f * fi);
+			/* Bow (-0.5) to aft of the tower (0.3); the wedge's beam there. */
+			const float my = (-0.1f + 0.36f * along) * len;
+			const float half_w = fmaxf(0.234f * len * (my / len + 0.5f) * 0.85f, 15.0f);
+			float m[3] = { across * half_w, my, 0.0f };
+			/* Onto the hull: in towards the keel line until there is deck. */
+			int on = 0;
+			for (int tries = 0; tries < 6 && !on; ++tries) {
+				on = hoth_deck_at(m[0], m[1], &m[2]);
+				if (!on) {
+					m[0] *= 0.5f;
+				}
+			}
+			if (!on) {
+				continue;
+			}
+			m[2] += 4.0f;
 			float prev[3];
 			hoth_model_to_local(&s_hoth.isd[0], m, prev);
-			for (int seg = 0; seg < 4; ++seg) {
-				m[0] += (hoth_hash(s + 10u + (uint32_t)seg) - 0.5f) * 140.0f;
-				m[1] += (hoth_hash(s + 20u + (uint32_t)seg) - 0.5f) * 140.0f;
-				m[2] += (hoth_hash(s + 30u + (uint32_t)seg) - 0.3f) * 25.0f;
+			for (int seg = 0; seg < 5; ++seg) {
+				const float dx = (hoth_hash(s + 10u + (uint32_t)seg) - 0.5f) * 110.0f;
+				const float dy = (hoth_hash(s + 20u + (uint32_t)seg) - 0.5f) * 110.0f;
+				float z;
+				if (!hoth_deck_at(m[0] + dx, m[1] + dy, &z) || fabsf(z - m[2]) > 70.0f) {
+					break; /* off the hull's edge or up a wall: the arc ends */
+				}
+				m[0] += dx;
+				m[1] += dy;
+				m[2] = z + 2.0f + 6.0f * hoth_hash(s + 30u + (uint32_t)seg);
 				float p[3];
 				hoth_model_to_local(&s_hoth.isd[0], m, p);
-				hoth_bolt(scene, prev, p, hoth_bolt_width(p, 5.0f, 0.12f), blue);
+				hoth_bolt(scene, prev, p, hoth_bolt_width(p, 6.0f, 0.15f), arc);
 				memcpy(prev, p, sizeof prev);
 			}
 		}
@@ -1325,7 +1476,7 @@ void XwaVrIntroHoth_Submit(AeronScene3D* scene, const float org[3], const float 
 	float m[16];
 	for (int i = 0; i < 2; ++i) {
 		hoth_isd_matrix(i, m);
-		hoth_add(scene, HOTH_ISD, m, 1);
+		hoth_add_table(scene, HOTH_ISD, m, 1, i == 0 && t >= HOTH_SHIELD_GONE ? hoth_isd_wrecked_table() : NULL);
 	}
 	hoth_submit_transport(scene, t);
 	/* The X-wings that flew past, then in their fight. */

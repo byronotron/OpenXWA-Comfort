@@ -9,10 +9,12 @@
  * camera and they run at the waiting Star Destroyers; here the viewer sits
  * still and turns their head:
  *
- *   ~50-53 s  Hoth fades in on the left (centre 70 deg left, 13 deg down,
- *             45 deg radius in view; RESDATA/PLANET.DAT group 6030).
- *   51 s on   the transport (FAMILYTRANSPORT) and the X-wings come in from
- *             in front of Hoth, unlit against the planet.
+ *   until 56.93 s the crawl's starfield alone.
+ *   56.93-59.93 s  Hoth fades in on the left, ready for the first line
+ *             spoken (centre 70 deg left, 13 deg down, 45 deg radius in
+ *             view; RESDATA/PLANET.DAT group 6030); the transport
+ *             (FAMILYTRANSPORT) and the X-wings come in from in front of
+ *             Hoth, unlit against the planet.
  *   62.5-66 s the light comes up: the craft lit, and out of the dark the two
  *             Star Destroyers (55 deg right at 1.6 km, 33 deg right at
  *             2.6 km) as the ships turn towards them; far off, X-wings and
@@ -25,8 +27,9 @@
  *             and in the other (83, 90.5, 95 s).
  *   75.5 s    the ion cannon: a glow on Hoth, the bolt across, a blue flash
  *             on the lead Star Destroyer's superstructure (77.1 s), its left
- *             shield generator bursts (77.7 s) and burns on; ion lightning
- *             crawls over its hull (77.1-79.5 s, 98-106.3 s).
+ *             shield generator blows up once (77.7 s) and is gone after, as
+ *             the game shows a destroyed one; ion lightning wanders over its
+ *             hull from the strike until the scene ends.
  *   98-101 s  the transport crosses the lead Star Destroyer's hull, then
  *             flies on beyond it and jumps to hyperspace at 109.3 s.
  *   111.67 s  the film's X-Wing Alliance logo card: the screen is put away
@@ -34,8 +37,10 @@
  *             as the film's does (in 111.67-112.0 s, out 116.4-118.45 s).
  *   120.93 s  the film's cut into the hyperspace tunnel: the screen is back
  *             and the scene round it becomes the game's hyperspace tunnel
- *             (flight.c), at half brightness, fading out with the film's at
- *             147-148 s into the startup films' stars until the film ends.
+ *             (flight.c), at half brightness, for 3 s only, fading to black
+ *             in its last half second; black then until the film drops out
+ *             of hyperspace (147-148 s), the startup films' stars from there
+ *             until the film ends.
  *
  * Positions are the viewer's LOCAL metres (x right, y up, -z ahead, the
  * screen at 0 degrees).
@@ -58,8 +63,12 @@ extern "C" {
 #define XWA_VR_HOTH_LOGO_OUT 116.4f
 #define XWA_VR_HOTH_LOGO_FADE 2.05f
 /* The film's cut into its hyperspace tunnel (frame 1814); its tunnel fades
- * out over HYPER_FADE..HYPER_END. */
+ * out over HYPER_FADE..HYPER_END. The scene's own tunnel lasts
+ * TUNNEL_SECONDS (VR: the whole of it is too much), fading to black over
+ * its last TUNNEL_FADE. */
 #define XWA_VR_HOTH_HYPER 120.93f
+#define XWA_VR_HOTH_TUNNEL_SECONDS 3.0f
+#define XWA_VR_HOTH_TUNNEL_FADE 0.5f
 #define XWA_VR_HOTH_HYPER_FADE 147.0f
 #define XWA_VR_HOTH_HYPER_END 148.0f
 

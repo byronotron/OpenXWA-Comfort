@@ -63,7 +63,7 @@ static const double k_logo_inv_h[4] = { 0.002576953439566483, 0.0033761030216043
 #define CRAWL_LOGO_FADE 1.0f
 #define CRAWL_TEXT_FROM 7.5f
 #define CRAWL_TEXT_FADE_IN 1.5f
-#define CRAWL_TEXT_ENTRY_DEG 45.0f
+#define CRAWL_TEXT_ENTRY_DEG 40.0f
 #define CRAWL_TEXT_ENTRY_AT 9.0f
 
 /* The crawl: text on a plane seen in perspective, its vanishing line
@@ -720,15 +720,17 @@ float XwaVrIntroCrawl_Brightness(void) {
 }
 
 int XwaVrIntroCrawl_Hyperspace(float* tunnel_seconds, float* level) {
-	if (!s_crawl.active || !crawl_hoth() || s_crawl.t < XWA_VR_HOTH_HYPER || s_crawl.t >= XWA_VR_HOTH_HYPER_END) {
+	const float end = XWA_VR_HOTH_HYPER + XWA_VR_HOTH_TUNNEL_SECONDS;
+	if (!s_crawl.active || !crawl_hoth() || s_crawl.t < XWA_VR_HOTH_HYPER || s_crawl.t >= end) {
 		return 0;
 	}
 	if (tunnel_seconds) {
 		*tunnel_seconds = s_crawl.t - XWA_VR_HOTH_HYPER;
 	}
 	if (level) {
-		*level = 1.0f - crawl_smooth((s_crawl.t - XWA_VR_HOTH_HYPER_FADE) /
-									 (XWA_VR_HOTH_HYPER_END - XWA_VR_HOTH_HYPER_FADE));
+		/* A short spell only, then quickly to black (StarLevel: the stars
+		 * with the film's drop out of hyperspace). */
+		*level = 1.0f - crawl_smooth((s_crawl.t - (end - XWA_VR_HOTH_TUNNEL_FADE)) / XWA_VR_HOTH_TUNNEL_FADE);
 	}
 	return 1;
 }
