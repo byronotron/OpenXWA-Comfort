@@ -23,6 +23,7 @@
 #include "xwa_remaster/vr_hud_occlusion.h"
 #include "xwa_remaster/vr_hand_overlay.h"
 #include "xwa_remaster/vr_env.h"
+#include "xwa_remaster/vr_intro_crawl.h"
 #include "xwa/assets/object_type.h"
 #include "xwa_remaster/vr_menu_beam.h"
 #include "xwa_remaster/vr_gloves.h"
@@ -4353,7 +4354,8 @@ static int fl_xr_output_eye(AeronCommandBuffer* cmd, AeronRenderTarget* target, 
 		return 0;
 	}
 	s_xr_bloom_last = NULL;
-	if (fl_xr_bloom_mode() == 0) {
+	/* No bloom round the intro's crawl (the film has none). */
+	if (fl_xr_bloom_mode() == 0 || XwaVrIntroCrawl_Active()) {
 		bloom_tex = NULL;
 	} else if (!bloom_tex && s.bloom && AeronSceneBloom_Intensity() > 0.0f) {
 		if (!AeronSceneBloom_Apply(s.bloom, cmd, scene_tex, s.rt_w, s.rt_h, s.rt_h)) {
@@ -5636,6 +5638,8 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 		XwaVrGloves_Idle();
 		return 0;
 	}
+	/* The intro film's opening as a 3D scene (vr_intro_crawl.h). */
+	XwaVrIntroCrawl_Update(cmd);
 	/* The startup films play in empty space (stars only) while the scene
 	 * loads behind them. */
 	if (!XwaVrEnv_Prepare(cmd) && !XwaVrEnv_Bare()) {
@@ -5675,7 +5679,7 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 		static const float world_to_cube[9] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, -1.0f, 0.0f };
 		const XwaRemasterSkyStarsParams stars = {
 			.exposure = s.sky_exposure,
-			.brightness = s.star_brightness,
+			.brightness = s.star_brightness * XwaVrIntroCrawl_StarLevel(),
 			.density = s.star_density,
 			.grid_n = s.star_grid,
 			.core_radius_px = s.star_core_px * fl_xr_env("XWA_XR_STAR_MIN_SCALE", 2.5f),
@@ -5688,13 +5692,17 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 	}
 
 	XwaVrEnv_Submit(s.scene);
+	XwaVrIntroCrawl_Submit(s.scene, base.pos, rows);
 	/* The startup title (or the TIE art's fight): no screen, no hands, and
-	 * the controllers reach nothing but the A it waits for. */
-	const int screen_hidden = XwaVrEnv_ScreenHidden();
+	 * the controllers reach nothing but the A it waits for. The intro's
+	 * crawl hides the screen too (its film plays on underneath). */
+	const int screen_hidden = XwaVrEnv_ScreenHidden() || XwaVrIntroCrawl_ScreenHidden();
 	const int input_blocked = XwaVrEnv_InputBlocked();
 	Aeron_XrSetInputBlocked(input_blocked);
-	Aeron_XrSetScreenFade(XwaVrEnv_ScreenFade());
-	if (input_blocked) {
+	Aeron_XrSetScreenFade(XwaVrEnv_ScreenFade() * XwaVrIntroCrawl_ScreenFade());
+	/* No gloves in the crawl's space (unlit there, they would only black
+	 * out the text). */
+	if (input_blocked || XwaVrIntroCrawl_ScreenHidden()) {
 		XwaVrGloves_Idle();
 	} else {
 		XwaVrGloves_Submit(s.scene, cmd, rows, base.pos,
@@ -5790,7 +5798,10 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 			  1.0f);
 	/* Films: the displayed brightness eases down to XWA_XR_ENV_FILM_DIM (half). */
 	const float film_level = fminf(fmaxf(fl_xr_env("XWA_XR_ENV_FILM_DIM", 0.5f), 0.0f), 1.0f);
-	s_xr_eye_gain = powf(brightness * (1.0f - film_dim * (1.0f - film_level)), 2.2f);
+	/* The intro's crawl shows at the film's own brightness, easing back
+	 * as the screen returns. */
+	const float crawl = XwaVrIntroCrawl_Level();
+	s_xr_eye_gain = powf(brightness * (1.0f - film_dim * (1.0f - film_level)) * (1.0f - crawl) + crawl, 2.2f);
 	/* Direct output here too; the hands' overlay alpha is then written at
 	 * the end of each eye's forward pass (else by the tonemap pass). */
 	const int direct = fl_xr_direct_output();

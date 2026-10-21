@@ -295,6 +295,7 @@ add_library(xwa_remaster STATIC
     src/xwa_remaster/vr_ktx2_decode.cpp
     src/xwa_remaster/vr_flight_stick.c
     src/xwa_remaster/vr_env.c
+    src/xwa_remaster/vr_intro_crawl.c
     src/xwa_remaster/vr_menu_beam.c
     src/xwa_remaster/assets.c
     src/xwa_remaster/text.c
@@ -327,7 +328,8 @@ target_include_directories(xwa_remaster
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src
     PRIVATE
-        # stb_image: the VR controller models' textures.
+        # stb_image: the VR controller models' textures; stb_truetype: the
+        # VR intro crawl's text.
         ${CMAKE_CURRENT_SOURCE_DIR}/aeron/third_party/stb
 )
 target_link_libraries(xwa_remaster
