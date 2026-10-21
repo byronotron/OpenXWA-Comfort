@@ -375,7 +375,9 @@ for s in hyperspace_streak.vert hyperspace_tunnel.frag; do
 done
 test -f "$PKG/resources/aeron/scene3d_defaults.yaml"
 test -f "$PKG/resources/remaster/config.yaml"
-"$TOOLCHAIN/bin/x86_64-w64-mingw32-objdump" -p "$PKG/OpenXWA.exe" | grep -Eq 'Subsystem[[:space:]]+00000002'
+# (Not "objdump | grep -q": grep exiting early makes objdump fail under pipefail.)
+pe_header=$("$TOOLCHAIN/bin/x86_64-w64-mingw32-objdump" -p "$PKG/OpenXWA.exe")
+grep -Eq 'Subsystem[[:space:]]+00000002' <<<"$pe_header"
 grep -a -q "openxr_loader.dll" "$PKG/SDL3.dll"
 
 rm -f "$OUT/$NAME.zip"
