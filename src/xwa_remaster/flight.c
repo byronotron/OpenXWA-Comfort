@@ -5747,7 +5747,9 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 	lights[0] = key;
 	const int space = XwaVrEnv_IsSpace();
 	XwaVrEnvLighting space_light;
-	if (space && XwaVrEnv_SpaceLighting(&space_light)) {
+	/* The intro's Hoth shot brings its own sun (vr_intro_hoth.h). */
+	const int intro_light = XwaVrIntroCrawl_Lighting(&space_light);
+	if (intro_light || (space && XwaVrEnv_SpaceLighting(&space_light))) {
 		/* The space scene's own sun, fill and deep-space ambient. */
 		memset(lights, 0, sizeof lights);
 		const float* dirs[2] = { space_light.key_dir, space_light.fill_dir };
@@ -5773,7 +5775,9 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 	}
 	/* The scene fading in after loading: its craft come up out of the dark. */
 	{
-		const float fade = XwaVrEnv_Fade();
+		/* (The intro's Hoth shot plays in the startup's empty space, before
+		 * any scene has faded in: its light is its own.) */
+		const float fade = intro_light ? 1.0f : XwaVrEnv_Fade();
 		for (int l = 0; l < light_count; l++) {
 			lights[l].intensity *= fade;
 		}
@@ -5801,7 +5805,9 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 	/* The intro's crawl shows at the film's own brightness, easing back
 	 * as the screen returns. */
 	const float crawl = XwaVrIntroCrawl_Level();
-	s_xr_eye_gain = powf(brightness * (1.0f - film_dim * (1.0f - film_level)) * (1.0f - crawl) + crawl, 2.2f);
+	s_xr_eye_gain = powf(brightness * (1.0f - film_dim * (1.0f - film_level)) * (1.0f - crawl) +
+							 crawl * XwaVrIntroCrawl_Brightness(),
+						 2.2f);
 	/* Direct output here too; the hands' overlay alpha is then written at
 	 * the end of each eye's forward pass (else by the tonemap pass). */
 	const int direct = fl_xr_direct_output();

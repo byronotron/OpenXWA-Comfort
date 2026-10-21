@@ -296,6 +296,7 @@ add_library(xwa_remaster STATIC
     src/xwa_remaster/vr_flight_stick.c
     src/xwa_remaster/vr_env.c
     src/xwa_remaster/vr_intro_crawl.c
+    src/xwa_remaster/vr_intro_hoth.c
     src/xwa_remaster/vr_menu_beam.c
     src/xwa_remaster/assets.c
     src/xwa_remaster/text.c

@@ -9,8 +9,11 @@
  * crawls away on a huge tilted plane, in 3D, matching the film frame for
  * frame straight ahead (measured from the film: the logo's size each
  * frame, the plane's vanishing line and scroll, the lines' size, spacing
- * and justification, the colours and fades, its star field). In the black
- * after the crawl (49 s) the screen comes back for the rest of the film,
+ * and justification, the colours and fades, its star field). Then the
+ * film's Hoth shot plays on in the game's models (vr_intro_hoth.h) until
+ * the film's cut at 67.93 s, where the screen comes back and the scene
+ * holds at half brightness round it to the film's end. Without the Hoth
+ * shot's models the screen comes back in the black after the crawl (49 s),
  * showing just the stars the scene had there.
  *
  * Needs, as APK assets (never in the repo): vr/starwars_logo.rgba (XWAL),
@@ -29,6 +32,7 @@
 
 #include "aeron/render.h"
 #include "aeron/scene/scene3d.h"
+#include "xwa_remaster/vr_env.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -56,6 +60,11 @@ float XwaVrIntroCrawl_Level(void);
 /* The menus' stars' brightness: 0 while the film's own are drawn (or in
  * its black opening), easing back over the handover. */
 float XwaVrIntroCrawl_StarLevel(void);
+/* The scene's displayed brightness on top of its own look: 1, easing to
+ * half after the Hoth shot's cut (vr_intro_hoth.h) until the film ends. */
+float XwaVrIntroCrawl_Brightness(void);
+/* The Hoth shot's lights while it plays; 0 otherwise. */
+int XwaVrIntroCrawl_Lighting(XwaVrEnvLighting* out);
 
 #ifdef __cplusplus
 }

@@ -1,4 +1,5 @@
 #include "xwa_remaster/vr_intro_crawl.h"
+#include "xwa_remaster/vr_intro_hoth.h"
 
 #include "aeron/aeron.h"
 #include "aeron/asset/opt_model.h"
@@ -134,6 +135,7 @@ static struct {
 	float text_s1;     /* s at the text texture's bottom edge */
 	float logo_tint[3], text_tint[3], star_tint[3]; /* HDR colours at load (see the LUTs) */
 	int release_in;    /* frames until the textures are freed */
+	int hoth_loaded;   /* the Hoth shot's loading is done (vr_intro_hoth.h) */
 } s_crawl;
 
 static float crawl_env(const char* name, float fallback) {
@@ -612,6 +614,14 @@ static void crawl_release(void) {
 	memset(&s_crawl.logo, 0, sizeof s_crawl.logo);
 	memset(&s_crawl.text, 0, sizeof s_crawl.text);
 	memset(&s_crawl.stars, 0, sizeof s_crawl.stars);
+	XwaVrIntroHoth_Release();
+	s_crawl.hoth_loaded = 0;
+}
+
+/* The Hoth shot follows the crawl (vr_intro_hoth.h) when its models are
+ * there; XWA_XR_INTRO_HOTH=0 ends the scene after the crawl as before. */
+static int crawl_hoth(void) {
+	return s_crawl.ok && XwaVrIntroHoth_Ready() && crawl_env("XWA_XR_INTRO_HOTH", 1.0f) != 0.0f;
 }
 
 /* ---- per frame ------------------------------------------------------------ */
@@ -650,9 +660,16 @@ void XwaVrIntroCrawl_Update(AeronCommandBuffer* cmd) {
 	if (!s_crawl.ok) {
 		return;
 	}
+	/* The Hoth shot's planet, sprites and models, one piece a frame in the
+	 * film's black opening. */
+	if (s_crawl.active && !s_crawl.hoth_loaded) {
+		s_crawl.hoth_loaded = XwaVrIntroHoth_Load(cmd);
+	}
 	const float hold = crawl_env("XWA_XR_CRAWL_TIME", -1.0f);
 	s_crawl.t = hold >= 0.0f ? hold : (float)((double)XwaMovieTask_PositionUs() * 1e-6);
-	if (s_crawl.active && s_crawl.t >= CRAWL_HANDOVER_TO) {
+	/* With the Hoth shot the scene stays (held at half brightness round the
+	 * screen) until the film ends. */
+	if (s_crawl.active && !crawl_hoth() && s_crawl.t >= CRAWL_HANDOVER_TO) {
 		/* The film has the screen again: free the textures. */
 		s_crawl.active = 0;
 		s_crawl.release_in = 3;
@@ -664,7 +681,11 @@ void XwaVrIntroCrawl_Update(AeronCommandBuffer* cmd) {
 
 int XwaVrIntroCrawl_Active(void) { return s_crawl.active; }
 
-int XwaVrIntroCrawl_ScreenHidden(void) { return s_crawl.active && s_crawl.t < CRAWL_HANDOVER_FROM; }
+/* With the Hoth shot the screen comes back, solid and at once, on the
+ * film's cut to the X-wing cockpit. */
+int XwaVrIntroCrawl_ScreenHidden(void) {
+	return s_crawl.active && s_crawl.t < (crawl_hoth() ? XWA_VR_HOTH_CUT : CRAWL_HANDOVER_FROM);
+}
 
 float XwaVrIntroCrawl_ScreenFade(void) { return XwaVrIntroCrawl_ScreenHidden() ? 0.0f : 1.0f; }
 
@@ -672,7 +693,21 @@ float XwaVrIntroCrawl_Level(void) {
 	if (!s_crawl.active) {
 		return 0.0f;
 	}
+	if (crawl_hoth()) {
+		return 1.0f;
+	}
 	return 1.0f - crawl_smooth((s_crawl.t - CRAWL_HANDOVER_FROM) / (CRAWL_HANDOVER_TO - CRAWL_HANDOVER_FROM));
+}
+
+float XwaVrIntroCrawl_Brightness(void) {
+	if (!s_crawl.active || !crawl_hoth()) {
+		return 1.0f;
+	}
+	return 1.0f - 0.5f * crawl_smooth((s_crawl.t - XWA_VR_HOTH_CUT) / XWA_VR_HOTH_DIM_SECONDS);
+}
+
+int XwaVrIntroCrawl_Lighting(XwaVrEnvLighting* out) {
+	return s_crawl.active && crawl_hoth() && XwaVrIntroHoth_Lighting(s_crawl.t, out);
 }
 
 /* The film's own stars (vr/intro_stars.rgba) stand in for the menus' until
@@ -1113,6 +1148,9 @@ void XwaVrIntroCrawl_Submit(AeronScene3D* scene, const float view_pos[3], const 
 		return;
 	}
 	crawl_submit_stars(scene, &v);
+	if (crawl_hoth()) {
+		XwaVrIntroHoth_Submit(scene, v.org, v.right, v.up, v.fwd, v.k, s_crawl.t);
+	}
 	crawl_submit_text(scene, &v);
 	crawl_submit_logo(scene, &v);
 }
