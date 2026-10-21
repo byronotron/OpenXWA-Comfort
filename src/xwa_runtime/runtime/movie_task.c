@@ -236,15 +236,45 @@ void XwaMovieTask_ReapFinished(void) {
 	}
 }
 
+/* VR: the right controller's A, pressed (not held over from before). */
+static int XwaMovieTask_XrAPressed(int track_only) {
+	static int held;
+	AeronXrHand hand;
+	const int now = Aeron_XrGetHand(1, &hand) && (hand.buttons & AERON_XR_HAND_BUTTON_LOWER) != 0;
+	const int pressed = now && !held && !track_only;
+	held = now;
+	return pressed;
+}
+
 static int XwaMovieTask_LocalSkipRequested(void) {
 	const AeronInputSnapshot* input;
+	const int xr = Aeron_XrIsPresenting();
 
 	if (g_movieFrameNumber <= XWA_MOVIE_SKIP_GATE_FRAME) {
 		Keyboard_FlushCharBuffer();
 		FrontendMouse_ClearClicks();
+		if (xr) {
+			XwaMovieTask_XrAPressed(1);
+		}
 		return 0;
 	}
 	input = Aeron_InputSnapshot();
+	if (xr) {
+		/* In VR only A or the menu button (Escape) skips: the pointer's
+		 * trigger and the grips are no skip (a resting grip or a stray pull
+		 * would end the film). A keyboard still can. */
+		if (XwaMovieTask_XrAPressed(0) ||
+			(input != NULL && (input->key_pressed[AERON_KEY_ESCAPE] || input->key_pressed[AERON_KEY_SPACE] ||
+							   input->key_pressed[AERON_KEY_RETURN] || input->key_pressed[AERON_KEY_BACKSPACE])) ||
+			Keyboard_BufferContains(27) || Keyboard_BufferContains(32) || Keyboard_BufferContains(13) ||
+			Keyboard_BufferContains(8)) {
+			Keyboard_FlushCharBuffer();
+			FrontendMouse_ClearClicks();
+			return 1;
+		}
+		FrontendMouse_ClearClicks();
+		return 0;
+	}
 	if ((input != NULL &&
 		 (input->key_pressed[AERON_KEY_ESCAPE] || input->key_pressed[AERON_KEY_SPACE] ||
 		  input->key_pressed[AERON_KEY_RETURN] || input->key_pressed[AERON_KEY_BACKSPACE] ||

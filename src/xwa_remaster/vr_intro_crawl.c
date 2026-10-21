@@ -63,7 +63,7 @@ static const double k_logo_inv_h[4] = { 0.002576953439566483, 0.0033761030216043
 #define CRAWL_LOGO_FADE 1.0f
 #define CRAWL_TEXT_FROM 7.5f
 #define CRAWL_TEXT_FADE_IN 1.5f
-#define CRAWL_TEXT_ENTRY_DEG 40.0f
+#define CRAWL_TEXT_ENTRY_DEG 35.0f
 #define CRAWL_TEXT_ENTRY_AT 9.0f
 
 /* The crawl: text on a plane seen in perspective, its vanishing line

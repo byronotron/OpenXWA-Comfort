@@ -105,11 +105,13 @@ typedef struct HothCapital {
 static const HothCapital k_isd[2] = { { 55.0f, 7.0f, 1600.0f }, { 33.0f, 2.0f, 2600.0f } };
 #define HOTH_ISD_BOW_TURN (-139.0f)
 
-/* The far fights: craft wheeling round a centre, X-wings against TIEs. */
+/* The fights: craft wheeling round a centre, X-wings against TIEs, close
+ * enough to make out (the nearest pass ~150 m off), well clear of the Star
+ * Destroyers; `size` scales the wheels (1: 170-310 m round). */
 typedef struct HothFight {
-	float az, el, dist;
+	float az, el, dist, size;
 } HothFight;
-static const HothFight k_fight[2] = { { 40.0f, 31.0f, 1300.0f }, { -38.0f, 20.0f, 1800.0f } };
+static const HothFight k_fight[2] = { { 40.0f, 24.0f, 450.0f, 0.55f }, { -38.0f, 15.0f, 550.0f, 0.6f } };
 enum { HOTH_SIDE_REBEL, HOTH_SIDE_EMPIRE };
 typedef struct HothFighter {
 	uint8_t fight, side;
@@ -179,7 +181,8 @@ static struct {
 	AeronTexture* boom[HOTH_BOOM_FRAMES];
 	int paths_built;
 	HothPath transport, xwing[2];
-	HothFrame isd[2];
+	HothFrame isd[2];      /* the Star Destroyers now (the lead drifting, hoth_isd_drift) */
+	HothFrame isd_base[2]; /* as placed */
 	HothDeck deck;
 	/* The last Submit's view. */
 	int submitted;
@@ -256,6 +259,40 @@ static void hoth_isd_frame(int i, HothFrame* f) {
 	hoth_norm(f->u);
 }
 
+/* The lead Star Destroyer disabled by the ion cannon: from the strike it
+ * sinks, gathering to DRIFT_SPEED over DRIFT_EASE seconds (~120 m down,
+ * ~4 degrees, by the scene's end), and slowly lists to port. */
+#define HOTH_DRIFT_SPEED 3.0f
+#define HOTH_DRIFT_EASE 6.0f
+#define HOTH_DRIFT_LIST_DEG 3.0f
+/* How far it has sunk at `t` (metres): the speed easing up linearly over
+ * EASE, then steady. */
+static float hoth_drift_drop(float t) {
+	const float s = t - 77.1f; /* HOTH_ION_HIT */
+	if (s <= 0.0f) {
+		return 0.0f;
+	}
+	return s < HOTH_DRIFT_EASE ? 0.5f * HOTH_DRIFT_SPEED * s * s / HOTH_DRIFT_EASE
+							   : HOTH_DRIFT_SPEED * (s - 0.5f * HOTH_DRIFT_EASE);
+}
+
+static void hoth_isd_drift(float t) {
+	s_hoth.isd[0] = s_hoth.isd_base[0];
+	const float s = t - 77.1f; /* HOTH_ION_HIT */
+	if (s <= 0.0f) {
+		return;
+	}
+	HothFrame* f = &s_hoth.isd[0];
+	f->pos[1] -= hoth_drift_drop(t);
+	const float a = HOTH_DRIFT_LIST_DEG * 0.017453293f * hoth_smooth(s / 40.0f);
+	const float c = cosf(a), sn = sinf(a);
+	for (int i = 0; i < 3; ++i) {
+		const float u = f->u[i], r = f->r[i];
+		f->u[i] = c * u + sn * r;
+		f->r[i] = c * r - sn * u;
+	}
+}
+
 /* Model metres (x starboard, y aft, z up) of frame `f` -> LOCAL. */
 static void hoth_model_to_local(const HothFrame* f, const float m[3], float out[3]) {
 	for (int a = 0; a < 3; ++a) {
@@ -291,7 +328,8 @@ static void hoth_path_add_keys(HothPath* p, const HothKey* keys, int n) {
 
 static void hoth_build_paths(void) {
 	for (int i = 0; i < 2; ++i) {
-		hoth_isd_frame(i, &s_hoth.isd[i]);
+		hoth_isd_frame(i, &s_hoth.isd_base[i]);
+		s_hoth.isd[i] = s_hoth.isd_base[i];
 	}
 	memset(&s_hoth.transport, 0, sizeof s_hoth.transport);
 	hoth_path_add_keys(&s_hoth.transport, k_transport, (int)(sizeof k_transport / sizeof k_transport[0]));
@@ -350,7 +388,7 @@ static void hoth_wheel(int f, float t, float out[3]) {
 	float c[3];
 	hoth_dir(fight->az, fight->el, fight->dist, c);
 	const uint32_t s = (uint32_t)f * 97u + 13u;
-	const float radius = 170.0f + 140.0f * hoth_hash(s);
+	const float radius = (170.0f + 140.0f * hoth_hash(s)) * fight->size;
 	const float w = (0.42f + 0.28f * hoth_hash(s + 1u)) * (hoth_hash(s + 2u) < 0.5f ? -1.0f : 1.0f);
 	const float phase = 6.2831853f * hoth_hash(s + 3u);
 	float e1[3] = { hoth_hash(s + 4u) - 0.5f, (hoth_hash(s + 5u) - 0.5f) * 0.6f, hoth_hash(s + 6u) - 0.5f };
@@ -363,9 +401,9 @@ static void hoth_wheel(int f, float t, float out[3]) {
 	hoth_norm(e2);
 	hoth_cross(e1, e2, e3);
 	const float a = w * t + phase;
-	const float weave = 70.0f * sinf(0.63f * w * t + 2.0f * phase);
+	const float weave = 70.0f * fight->size * sinf(0.63f * w * t + 2.0f * phase);
 	/* The centre drifts a little too. */
-	const float drift = 90.0f * sinf(0.11f * t + phase);
+	const float drift = 90.0f * fight->size * sinf(0.11f * t + phase);
 	for (int i = 0; i < 3; ++i) {
 		out[i] = c[i] + radius * (cosf(a) * e1[i] + sinf(a) * e2[i]) + weave * e3[i] + drift * e1[i];
 	}
@@ -431,22 +469,105 @@ static void hoth_pose_from(const float a[3], const float pos[3], const float b[3
 	}
 }
 
-static void hoth_transport_pose(float t, float pos[3], float nose[3], float upv[3]) {
+/* A craft's position at `t`: the transport (who -1) or fighter `who`. */
+static void hoth_craft_pos(int who, float t, float out[3]) {
+	if (who < 0) {
+		/* Its run round and across the lead Star Destroyer (keyed in its
+		 * frame) goes down with it. */
+		hoth_path(&s_hoth.transport, t, out);
+		out[1] -= hoth_drift_drop(t) * hoth_smooth((t - 73.0f) / 7.0f);
+	} else {
+		hoth_fighter_pos(who, t, out);
+	}
+}
+
+/* The craft's pose straight from its flight (hoth_pose_from). */
+static void hoth_craft_pose_raw(int who, float t, float pos[3], float nose[3], float upv[3]) {
 	const float h = 0.05f;
 	float a[3], b[3];
-	hoth_path(&s_hoth.transport, t, pos);
-	hoth_path(&s_hoth.transport, t - h, a);
-	hoth_path(&s_hoth.transport, t + h, b);
+	hoth_craft_pos(who, t, pos);
+	hoth_craft_pos(who, t - h, a);
+	hoth_craft_pos(who, t + h, b);
 	hoth_pose_from(a, pos, b, h, nose, upv);
 }
 
+/* The unbanked up for `nose` (LOCAL up, square to it) and its side. */
+static int hoth_unbanked(const float nose[3], float u0[3], float side[3]) {
+	const float y = nose[1];
+	u0[0] = -y * nose[0];
+	u0[1] = 1.0f - y * nose[1];
+	u0[2] = -y * nose[2];
+	if (!hoth_norm(u0)) {
+		return 0;
+	}
+	hoth_cross(nose, u0, side);
+	return 1;
+}
+
+/* The bank (radians) of up `upv` about `nose`; 0 when straight up/down. */
+static float hoth_bank_of(const float nose[3], const float upv[3]) {
+	float u0[3], side[3];
+	if (!hoth_unbanked(nose, u0, side)) {
+		return 0.0f;
+	}
+	return atan2f(hoth_dot(upv, side), hoth_dot(upv, u0));
+}
+
+/* The roll at most this fast (radians a second): as the craft whip past and
+ * into the curve towards the Star Destroyers their bank follows the turn at
+ * about a quarter of the ~650 deg/s it would; the turn's bank is first
+ * averaged over +-ROLL_AVG steps so brief wiggles of the path don't roll
+ * them at all. */
+#define HOTH_ROLL_RATE (160.0f * 0.017453293f)
+#define HOTH_ROLL_STEPS 150
+#define HOTH_ROLL_AVG 15
+#define HOTH_ROLL_DT 0.02f
+
+/* The craft's pose with its bank smoothed and rate-limited: followed from
+ * 3 s back (long enough to settle) to `t`, a function of `t` alone. */
+static void hoth_craft_pose(int who, float t, float pos[3], float nose[3], float upv[3]) {
+	hoth_craft_pose_raw(who, t, pos, nose, upv);
+	float u0[3], side[3];
+	if (!hoth_unbanked(nose, u0, side)) {
+		return;
+	}
+	enum { N = HOTH_ROLL_STEPS + 1 + 2 * HOTH_ROLL_AVG };
+	float raw[N];
+	const float t0 = t - (float)(HOTH_ROLL_STEPS + HOTH_ROLL_AVG) * HOTH_ROLL_DT;
+	for (int i = 0; i < N; ++i) {
+		float p[3], n[3], u[3];
+		hoth_craft_pose_raw(who, t0 + (float)i * HOTH_ROLL_DT, p, n, u);
+		raw[i] = hoth_bank_of(n, u);
+	}
+	/* raw[i .. i + 2 AVG] averaged: the target at step i. */
+	float sum = 0.0f;
+	for (int i = 0; i <= 2 * HOTH_ROLL_AVG; ++i) {
+		sum += raw[i];
+	}
+	const float inv = 1.0f / (float)(2 * HOTH_ROLL_AVG + 1);
+	float bank = sum * inv;
+	const float step = HOTH_ROLL_RATE * HOTH_ROLL_DT;
+	for (int i = 1; i <= HOTH_ROLL_STEPS; ++i) {
+		sum += raw[i + 2 * HOTH_ROLL_AVG] - raw[i - 1];
+		const float d = sum * inv - bank;
+		bank += d > step ? step : (d < -step ? -step : d);
+	}
+	const float c = cosf(bank), sn = sinf(bank);
+	for (int i = 0; i < 3; ++i) {
+		upv[i] = c * u0[i] + sn * side[i];
+	}
+}
+
+static void hoth_transport_pose(float t, float pos[3], float nose[3], float upv[3]) {
+	hoth_craft_pose(-1, t, pos, nose, upv);
+}
+
 static void hoth_fighter_pose(int f, float t, float pos[3], float nose[3], float upv[3]) {
-	const float h = 0.05f;
-	float a[3], b[3];
-	hoth_fighter_pos(f, t, pos);
-	hoth_fighter_pos(f, t - h, a);
-	hoth_fighter_pos(f, t + h, b);
-	hoth_pose_from(a, pos, b, h, nose, upv);
+	if (k_fighters[f].keyed > 0) {
+		hoth_craft_pose(f, t, pos, nose, upv);
+	} else {
+		hoth_craft_pose_raw(f, t, pos, nose, upv);
+	}
 }
 
 /* ---- loading ---------------------------------------------------------------- */
@@ -1468,6 +1589,7 @@ void XwaVrIntroHoth_Submit(AeronScene3D* scene, const float org[3], const float 
 	memcpy(s_hoth.fwd, fwd, sizeof s_hoth.fwd);
 	s_hoth.k = k;
 	s_hoth.submitted = 1;
+	hoth_isd_drift(t);
 	hoth_submit_planet(scene, t);
 	hoth_submit_logo(scene, t, screen_dist, screen_w, lift);
 	if (t < HOTH_SHIPS_FROM) {
