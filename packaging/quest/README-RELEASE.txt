@@ -32,10 +32,15 @@ After you have allowed USB debugging once, the headset can stay on the desk
 (switched on, cable connected) while the launcher copies: the OpenXWA app
 receives and unpacks the files itself, without starting the game.
 
-Steam Frame: turn on Developer Mode, start "Lepton Development" from your
-Steam Library and keep it running; the launcher then connects to it over
-the USB cable (or Wi-Fi). OpenXWA appears in the Lepton window's Android
-home screen. Not tested on a Steam Frame yet.
+Steam Frame: turn on Developer Mode. Once, before starting "Lepton
+Development": in your Steam Library, open its Properties and set Launch
+Options to
+   LEPTON_NO_CLEANUP=1 %command%
+Without this, closing Lepton Development deletes OpenXWA and the copied
+game files; with it they should stay. Then start "Lepton Development"
+and keep it running; the launcher connects to it over the USB cable (or
+Wi-Fi). OpenXWA appears in the Lepton Development window's Android home
+screen. Not tested on a Steam Frame yet.
 
 Windows may say "Windows protected your PC": the launcher is not
 code-signed yet. Click "More info", then "Run anyway".
