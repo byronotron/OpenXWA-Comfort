@@ -749,10 +749,19 @@ void XwaRemaster_Frame(int32_t delta_us) {
 		}
 	}
 
+	/* Ship models still building (in the background in the menus, several
+	 * frames for a large OPT) hold back flight frames only. A frontend tick
+	 * must still reach its reconstruction: its persistent screen is built
+	 * from each tick's records once (a room paints its background in its
+	 * first frame only), and the next snapshot replaces this one, so a
+	 * skipped tick would leave that screen black under the per-frame sprites
+	 * until the room repaints. Its ship previews draw once their model is in
+	 * (rm_prepare_model_previews: none until then). */
+	const int render_blocked = assets_pending && !frontend_scene;
 	/* Required classic output is re-submitted on idle game ticks. Opaque HD
 	 * flight frames omit that layer; the remaster texture below then owns the
 	 * complete presentation frame. */
-	if (!assets_pending && flight_render_needed && (render_snapshot || presentation_change) &&
+	if (!render_blocked && flight_render_needed && (render_snapshot || presentation_change) &&
 		(!retain_scene_frame || presentation_change)) {
 		AeronTexture* next_scene_tex = g.scene_tex;
 		int next_scene_is_direct = g.scene_is_direct;
@@ -844,7 +853,7 @@ void XwaRemaster_Frame(int32_t delta_us) {
 		g.scene_is_tonemapped = next_scene_is_tonemapped;
 		g.last_tick = snap->tick_index;
 		g.force_scene_render = 0;
-	} else if (!assets_pending && flight_render_needed && render_snapshot && retain_scene_frame) {
+	} else if (!render_blocked && flight_render_needed && render_snapshot && retain_scene_frame) {
 		g.last_tick = snap->tick_index;
 		g.force_scene_render = 0;
 	}
