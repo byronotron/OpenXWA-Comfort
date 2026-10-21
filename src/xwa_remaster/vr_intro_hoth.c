@@ -7,6 +7,7 @@
 #include "aeron/vfs.h"
 #include "xwa_2d.h"
 #include "xwa_remaster/ship.h"
+#include <SDL3/SDL_iostream.h>
 #include <SDL3/SDL_stdinc.h>
 #include <math.h>
 #include <stdio.h>
@@ -21,7 +22,12 @@
  * camera turns 49 degrees left onto Hoth over 52-63 s, the transport shows
  * against the planet from 60.9 s and fills the picture as it passes the
  * camera at 65.7 s, the camera whips round after it to the Star Destroyers
- * and the film cuts to an X-wing's cockpit at 67.93 s. */
+ * and the film cuts to an X-wing's cockpit at 67.93 s. Later: the ion
+ * cannon's bolt leaves Hoth at 75.5 s, strikes the Star Destroyer's
+ * superstructure at 77.1 s and its left shield generator bursts into fire
+ * from 77.7 s; the transport crosses the Star Destroyer's hull at 98-101 s
+ * (ion lightning crawling over it until 106 s) and jumps to hyperspace at
+ * 109.3 s. */
 
 #define HOTH_PLANET_GROUP 6030 /* the palest, icy world of PLANET.DAT: the film's Hoth */
 #define HOTH_AZ (-70.0f)
@@ -36,50 +42,114 @@
 #define HOTH_LIGHT_FROM 62.5f
 #define HOTH_LIGHT_TO 66.0f
 #define HOTH_LIGHT_FLOOR 0.004f
-/* Where the run goes after the cut: between the two Star Destroyers. */
-#define HOTH_AIM_AZ 18.0f
-#define HOTH_AIM_EL 3.0f
-#define HOTH_AIM_DIST 2600.0f
-#define HOTH_RUN_SPEED 120.0f
+/* The fights far off: they start as the light comes up. */
+#define HOTH_FIGHT_FROM 64.0f
+/* The ion cannon: the glow on Hoth, the bolt's flight, the strike. */
+#define HOTH_ION_GLOW 75.5f
+#define HOTH_ION_LAUNCH 75.9f
+#define HOTH_ION_HIT 77.1f
+#define HOTH_SHIELD_BURST 77.7f
+/* Ion lightning over the hull: after the strike, and again as the
+ * transport crosses the hull. */
+#define HOTH_ARCS_A_FROM 77.1f
+#define HOTH_ARCS_A_TO 79.5f
+#define HOTH_ARCS_B_FROM 98.0f
+#define HOTH_ARCS_B_TO 106.3f
+/* The transport's jump. */
+#define HOTH_JUMP 109.3f
 
 typedef struct HothKey {
 	float t, az, el, dist;
 } HothKey;
+/* A key in the lead Star Destroyer's model frame (metres: x starboard,
+ * y aft, z up). */
+typedef struct HothShipKey {
+	float t, x, y, z;
+} HothShipKey;
 
+/* The transport: from in front of Hoth, past the viewer, towards the Star
+ * Destroyers until the cut... */
 static const HothKey k_transport[] = {
-	{ 51.0f, -76.0f, 0.0f, 1450.0f },  { 60.9f, -75.0f, -1.0f, 450.0f }, { 62.9f, -74.0f, -1.2f, 265.0f },
-	{ 64.7f, -66.0f, -2.0f, 105.0f },  { 65.2f, -55.0f, -3.0f, 60.0f },  { 65.7f, -15.0f, -9.0f, 18.0f },
-	{ 66.3f, 40.0f, -2.0f, 45.0f },    { 66.9f, 35.0f, -0.5f, 95.0f },   { 67.93f, 22.0f, 0.5f, 220.0f },
+	{ 51.0f, -76.0f, 0.0f, 1450.0f }, { 60.9f, -75.0f, -1.0f, 450.0f }, { 62.9f, -74.0f, -1.2f, 265.0f },
+	{ 64.7f, -66.0f, -2.0f, 105.0f }, { 65.2f, -55.0f, -3.0f, 60.0f },  { 65.7f, -15.0f, -9.0f, 18.0f },
+	{ 66.3f, 48.0f, -2.0f, 45.0f },   { 66.9f, 47.0f, -0.5f, 95.0f },   { 67.93f, 45.0f, 0.5f, 220.0f },
+	{ 73.0f, 46.0f, 8.0f, 650.0f },
+};
+/* ...then round the lead Star Destroyer's bow side, across its hull
+ * (98-101 s) and away beyond it to the jump. */
+static const HothShipKey k_transport_isd[] = {
+	{ 80.0f, -900.0f, -500.0f, 650.0f }, { 88.0f, -1100.0f, 300.0f, 700.0f }, { 94.0f, -800.0f, -200.0f, 450.0f },
+	{ 97.0f, -560.0f, -260.0f, 280.0f }, { 98.0f, -360.0f, -240.0f, 230.0f }, { 99.5f, 0.0f, -200.0f, 210.0f },
+	{ 101.0f, 380.0f, -170.0f, 230.0f }, { 104.0f, 1100.0f, -60.0f, 420.0f }, { 109.3f, 2300.0f, 150.0f, 800.0f },
 };
 static const HothKey k_xwing1[] = {
 	{ 51.0f, -73.0f, 4.0f, 1650.0f }, { 62.9f, -72.0f, 3.0f, 470.0f }, { 64.8f, -69.0f, 3.7f, 260.0f },
 	{ 65.6f, -65.0f, 4.7f, 160.0f },  { 66.36f, -48.0f, 8.5f, 62.0f }, { 66.75f, 0.0f, 14.0f, 30.0f },
-	{ 67.2f, 40.0f, 5.0f, 70.0f },    { 67.93f, 28.0f, 2.0f, 160.0f },
+	{ 67.2f, 52.0f, 5.0f, 70.0f },    { 67.93f, 46.0f, 2.0f, 160.0f },
 };
 static const HothKey k_xwing2[] = {
 	{ 51.0f, -80.0f, 6.0f, 1900.0f }, { 62.9f, -79.0f, 5.0f, 520.0f }, { 65.0f, -72.0f, 8.0f, 245.0f },
-	{ 65.7f, -63.0f, 12.2f, 141.0f }, { 66.4f, -15.0f, 25.0f, 60.0f }, { 66.95f, 24.0f, 15.0f, 95.0f },
-	{ 67.93f, 14.0f, 8.0f, 220.0f },
+	{ 65.7f, -63.0f, 12.2f, 141.0f }, { 66.4f, -15.0f, 25.0f, 60.0f }, { 66.95f, 34.0f, 15.0f, 95.0f },
+	{ 67.93f, 38.0f, 8.0f, 220.0f },
 };
 
 typedef struct HothCapital {
 	float az, el, dist;
 } HothCapital;
-/* Star Destroyer 1 (the lead, higher and nearer) and 2, their bows towards
- * the incoming ships (three-quarter view). */
-static const HothCapital k_isd[2] = { { 30.0f, 7.0f, 1600.0f }, { 8.0f, 2.0f, 2600.0f } };
+/* Star Destroyer 1 (the lead, higher and nearer) and 2. Their bows point
+ * 139 degrees left of the line to them: long in view, three-quarter. */
+static const HothCapital k_isd[2] = { { 55.0f, 7.0f, 1600.0f }, { 33.0f, 2.0f, 2600.0f } };
+#define HOTH_ISD_BOW_TURN (-139.0f)
 
-enum { HOTH_TRANSPORT, HOTH_XWING, HOTH_ISD, HOTH_MESHES };
-static const char* const k_opt[HOTH_MESHES] = { "FamilyTransport", "XWing", "ImperialStarDestroyer2" };
+/* The far fights: craft wheeling round a centre, X-wings against TIEs. */
+typedef struct HothFight {
+	float az, el, dist;
+} HothFight;
+static const HothFight k_fight[2] = { { 40.0f, 31.0f, 1300.0f }, { -38.0f, 20.0f, 1800.0f } };
+enum { HOTH_SIDE_REBEL, HOTH_SIDE_EMPIRE };
+typedef struct HothFighter {
+	uint8_t fight, side;
+	int8_t keyed;   /* -1: wheels from the start; 1, 2: the X-wing that flew past, joining after the cut */
+	float dies;     /* film time it explodes; 0 = never */
+} HothFighter;
+static const HothFighter k_fighters[] = {
+	{ 0, HOTH_SIDE_REBEL, 1, 0.0f },    { 0, HOTH_SIDE_REBEL, 2, 0.0f },     { 0, HOTH_SIDE_EMPIRE, -1, 0.0f },
+	{ 0, HOTH_SIDE_EMPIRE, -1, 83.0f }, { 0, HOTH_SIDE_EMPIRE, -1, 0.0f },   { 0, HOTH_SIDE_EMPIRE, -1, 90.5f },
+	{ 0, HOTH_SIDE_EMPIRE, -1, 0.0f },  { 1, HOTH_SIDE_REBEL, -1, 0.0f },    { 1, HOTH_SIDE_REBEL, -1, 0.0f },
+	{ 1, HOTH_SIDE_EMPIRE, -1, 95.0f }, { 1, HOTH_SIDE_EMPIRE, -1, 0.0f },   { 1, HOTH_SIDE_EMPIRE, -1, 0.0f },
+};
+#define HOTH_FIGHTERS ((int)(sizeof k_fighters / sizeof k_fighters[0]))
+
+enum { HOTH_TRANSPORT, HOTH_XWING, HOTH_ISD, HOTH_TIE, HOTH_MESHES };
+static const char* const k_opt[HOTH_MESHES] = { "FamilyTransport", "XWing", "ImperialStarDestroyer2", "TieFighter" };
 
 #define HOTH_MAX_GLOWS 8
+#define HOTH_BOOM_FRAMES 12
+#define HOTH_PATH_MAX 24
 
 typedef struct HothMesh {
 	AeronSceneMesh* mesh;
 	int glow_count;
 	float glow[HOTH_MAX_GLOWS][7]; /* model metres x y z, radius, core rgb */
 	float len_m;
+	int shield_count;
+	float shield[2][3]; /* the shield generators (ShieldGen parts), model metres */
+	float bridge[3];    /* the bridge (Bridge part) */
 } HothMesh;
+
+typedef struct HothPathKey {
+	float t;
+	float p[3];
+} HothPathKey;
+
+typedef struct HothPath {
+	int n;
+	HothPathKey k[HOTH_PATH_MAX];
+} HothPath;
+
+typedef struct HothFrame {
+	float pos[3], n[3], u[3], r[3]; /* LOCAL: position, nose, up, starboard */
+} HothFrame;
 
 static struct {
 	int step; /* the next load step */
@@ -88,6 +158,12 @@ static struct {
 	float planet_disc; /* the disc's radius over half the image's width */
 	AeronTexture* glow;
 	AeronTexture* beam;
+	AeronTexture* logo;
+	float logo_aspect; /* height / width */
+	AeronTexture* boom[HOTH_BOOM_FRAMES];
+	int paths_built;
+	HothPath transport, xwing[2];
+	HothFrame isd[2];
 	/* The last Submit's view. */
 	int submitted;
 	float org[3], right[3], up[3], fwd[3], k;
@@ -107,13 +183,14 @@ static void hoth_dir(float az, float el, float d, float out[3]) {
 	out[2] = -d * cosf(e) * cosf(a);
 }
 static float hoth_dot(const float a[3], const float b[3]) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+static float hoth_len(const float a[3]) { return sqrtf(hoth_dot(a, a)); }
 static void hoth_cross(const float a[3], const float b[3], float out[3]) {
 	out[0] = a[1] * b[2] - a[2] * b[1];
 	out[1] = a[2] * b[0] - a[0] * b[2];
 	out[2] = a[0] * b[1] - a[1] * b[0];
 }
 static int hoth_norm(float v[3]) {
-	const float l = sqrtf(hoth_dot(v, v));
+	const float l = hoth_len(v);
 	if (l < 1e-9f) {
 		return 0;
 	}
@@ -147,79 +224,161 @@ static void hoth_wpos(const float p[3], float out[3]) {
 	}
 }
 
-/* ---- the paths ---------------------------------------------------------------- */
+/* A Star Destroyer's frame: bows turned from the line of sight, rolled
+ * ~25 degrees towards the viewer so its decks and bridge tower show. */
+static void hoth_isd_frame(int i, HothFrame* f) {
+	const HothCapital* c = &k_isd[i];
+	hoth_dir(c->az, c->el, c->dist, f->pos);
+	hoth_dir(c->az + HOTH_ISD_BOW_TURN, 0.0f, 1.0f, f->n);
+	float tilt[3] = { -f->pos[0], -f->pos[1], -f->pos[2] };
+	hoth_norm(tilt);
+	float u[3] = { 0.47f * tilt[0], 1.0f + 0.47f * tilt[1], 0.47f * tilt[2] };
+	hoth_cross(f->n, u, f->r);
+	hoth_norm(f->r);
+	hoth_cross(f->r, f->n, f->u);
+	hoth_norm(f->u);
+}
 
-/* Position on a keyed path at `t` (LOCAL metres): a cubic Hermite through
- * the keys with tangents from the neighbours, then a straight run at the
- * aim point. */
-static void hoth_path(const HothKey* keys, int n, float t, float out[3]) {
-	if (t <= keys[0].t) {
-		hoth_dir(keys[0].az, keys[0].el, keys[0].dist, out);
-		return;
-	}
-	if (t >= keys[n - 1].t) {
-		float last[3], before[3], aim[3], d[3];
-		hoth_dir(keys[n - 1].az, keys[n - 1].el, keys[n - 1].dist, last);
-		hoth_dir(HOTH_AIM_AZ, HOTH_AIM_EL, HOTH_AIM_DIST, aim);
-		hoth_dir(keys[n - 2].az, keys[n - 2].el, keys[n - 2].dist, before);
-		for (int a = 0; a < 3; ++a) {
-			d[a] = aim[a] - last[a];
-		}
-		hoth_norm(d);
-		for (int a = 0; a < 3; ++a) {
-			out[a] = last[a] + d[a] * HOTH_RUN_SPEED * (t - keys[n - 1].t);
-		}
-		(void)before;
-		return;
-	}
-	int i = 0;
-	while (i < n - 2 && t > keys[i + 1].t) {
-		++i;
-	}
-	float p[4][3];
-	float tt[4];
-	for (int j = -1; j <= 2; ++j) {
-		int idx = i + j;
-		if (idx < 0) {
-			idx = 0;
-		}
-		if (idx >= n) {
-			/* Past the last key: the run's point one second on. */
-			float last[3], aim[3], d[3];
-			hoth_dir(keys[n - 1].az, keys[n - 1].el, keys[n - 1].dist, last);
-			hoth_dir(HOTH_AIM_AZ, HOTH_AIM_EL, HOTH_AIM_DIST, aim);
-			for (int a = 0; a < 3; ++a) {
-				d[a] = aim[a] - last[a];
-			}
-			hoth_norm(d);
-			for (int a = 0; a < 3; ++a) {
-				p[j + 1][a] = last[a] + d[a] * HOTH_RUN_SPEED;
-			}
-			tt[j + 1] = keys[n - 1].t + 1.0f;
-			continue;
-		}
-		hoth_dir(keys[idx].az, keys[idx].el, keys[idx].dist, p[j + 1]);
-		tt[j + 1] = keys[idx].t;
-	}
-	const float t0 = tt[1], t1 = tt[2], h = t1 - t0;
-	const float s = (t - t0) / h;
-	const float h00 = 2.0f * s * s * s - 3.0f * s * s + 1.0f, h10 = s * s * s - 2.0f * s * s + s;
-	const float h01 = -2.0f * s * s * s + 3.0f * s * s, h11 = s * s * s - s * s;
+/* Model metres (x starboard, y aft, z up) of frame `f` -> LOCAL. */
+static void hoth_model_to_local(const HothFrame* f, const float m[3], float out[3]) {
 	for (int a = 0; a < 3; ++a) {
-		const float m0 = (i > 0 ? (p[2][a] - p[0][a]) / (tt[2] - tt[0]) : (p[2][a] - p[1][a]) / h);
-		const float m1 = (p[3][a] - p[1][a]) / (tt[3] - tt[1]);
-		out[a] = h00 * p[1][a] + h10 * h * m0 + h01 * p[2][a] + h11 * h * m1;
+		out[a] = f->pos[a] + m[0] * f->r[a] - m[1] * f->n[a] + m[2] * f->u[a];
 	}
 }
 
-/* A craft's pose on its path: position, nose along the flight and up
- * banked into the turn. */
-static void hoth_pose(const HothKey* keys, int n, float t, float pos[3], float nose[3], float upv[3]) {
-	const float h = 0.05f;
-	float a[3], b[3];
-	hoth_path(keys, n, t, pos);
-	hoth_path(keys, n, t - h, a);
-	hoth_path(keys, n, t + h, b);
+/* LOCAL -> model metres of frame `f`. */
+static void hoth_local_to_model(const HothFrame* f, const float p[3], float out[3]) {
+	const float d[3] = { p[0] - f->pos[0], p[1] - f->pos[1], p[2] - f->pos[2] };
+	out[0] = hoth_dot(d, f->r);
+	out[1] = -hoth_dot(d, f->n);
+	out[2] = hoth_dot(d, f->u);
+}
+
+/* ---- the paths ---------------------------------------------------------------- */
+
+static void hoth_path_add(HothPath* p, float t, const float pos[3]) {
+	if (p->n < HOTH_PATH_MAX) {
+		p->k[p->n].t = t;
+		memcpy(p->k[p->n].p, pos, sizeof p->k[p->n].p);
+		p->n++;
+	}
+}
+
+static void hoth_path_add_keys(HothPath* p, const HothKey* keys, int n) {
+	for (int i = 0; i < n; ++i) {
+		float pos[3];
+		hoth_dir(keys[i].az, keys[i].el, keys[i].dist, pos);
+		hoth_path_add(p, keys[i].t, pos);
+	}
+}
+
+static void hoth_build_paths(void) {
+	for (int i = 0; i < 2; ++i) {
+		hoth_isd_frame(i, &s_hoth.isd[i]);
+	}
+	memset(&s_hoth.transport, 0, sizeof s_hoth.transport);
+	hoth_path_add_keys(&s_hoth.transport, k_transport, (int)(sizeof k_transport / sizeof k_transport[0]));
+	for (size_t i = 0; i < sizeof k_transport_isd / sizeof k_transport_isd[0]; ++i) {
+		const float m[3] = { k_transport_isd[i].x, k_transport_isd[i].y, k_transport_isd[i].z };
+		float pos[3];
+		hoth_model_to_local(&s_hoth.isd[0], m, pos);
+		hoth_path_add(&s_hoth.transport, k_transport_isd[i].t, pos);
+	}
+	memset(s_hoth.xwing, 0, sizeof s_hoth.xwing);
+	hoth_path_add_keys(&s_hoth.xwing[0], k_xwing1, (int)(sizeof k_xwing1 / sizeof k_xwing1[0]));
+	hoth_path_add_keys(&s_hoth.xwing[1], k_xwing2, (int)(sizeof k_xwing2 / sizeof k_xwing2[0]));
+	s_hoth.paths_built = 1;
+}
+
+/* Position on a keyed path at `t` (LOCAL metres): a cubic Hermite through
+ * the keys with tangents from the neighbours; past the ends it carries on
+ * along the end segment's direction. */
+static void hoth_path(const HothPath* path, float t, float out[3]) {
+	const int n = path->n;
+	const HothPathKey* k = path->k;
+	if (n < 2) {
+		memcpy(out, k[0].p, 3 * sizeof(float));
+		return;
+	}
+	if (t <= k[0].t || t >= k[n - 1].t) {
+		const int a = t <= k[0].t ? 0 : n - 2;
+		const float dt = k[a + 1].t - k[a].t;
+		const float ref = t <= k[0].t ? k[0].t : k[n - 1].t;
+		const float* p = t <= k[0].t ? k[0].p : k[n - 1].p;
+		for (int c = 0; c < 3; ++c) {
+			out[c] = p[c] + (k[a + 1].p[c] - k[a].p[c]) / dt * (t - ref);
+		}
+		return;
+	}
+	int i = 0;
+	while (i < n - 2 && t > k[i + 1].t) {
+		++i;
+	}
+	const int i0 = i > 0 ? i - 1 : i, i3 = i + 2 < n ? i + 2 : i + 1;
+	const float t0 = k[i].t, t1 = k[i + 1].t, h = t1 - t0;
+	const float s = (t - t0) / h;
+	const float h00 = 2.0f * s * s * s - 3.0f * s * s + 1.0f, h10 = s * s * s - 2.0f * s * s + s;
+	const float h01 = -2.0f * s * s * s + 3.0f * s * s, h11 = s * s * s - s * s;
+	for (int c = 0; c < 3; ++c) {
+		const float m0 = (k[i + 1].p[c] - k[i0].p[c]) / (k[i + 1].t - k[i0].t);
+		const float m1 = (k[i3].p[c] - k[i].p[c]) / (k[i3].t - k[i].t);
+		out[c] = h00 * k[i].p[c] + h10 * h * m0 + h01 * k[i + 1].p[c] + h11 * h * m1;
+	}
+}
+
+/* Where fighter `f` wheels in its fight at `t`: a tilted circle round the
+ * fight's centre with a slow weave, its own size, speed and phase. */
+static void hoth_wheel(int f, float t, float out[3]) {
+	const HothFight* fight = &k_fight[k_fighters[f].fight];
+	float c[3];
+	hoth_dir(fight->az, fight->el, fight->dist, c);
+	const uint32_t s = (uint32_t)f * 97u + 13u;
+	const float radius = 170.0f + 140.0f * hoth_hash(s);
+	const float w = (0.42f + 0.28f * hoth_hash(s + 1u)) * (hoth_hash(s + 2u) < 0.5f ? -1.0f : 1.0f);
+	const float phase = 6.2831853f * hoth_hash(s + 3u);
+	float e1[3] = { hoth_hash(s + 4u) - 0.5f, (hoth_hash(s + 5u) - 0.5f) * 0.6f, hoth_hash(s + 6u) - 0.5f };
+	float e3[3] = { hoth_hash(s + 7u) - 0.5f, 1.0f, hoth_hash(s + 8u) - 0.5f };
+	if (!hoth_norm(e1)) {
+		e1[0] = 1.0f;
+	}
+	float e2[3];
+	hoth_cross(e3, e1, e2);
+	hoth_norm(e2);
+	hoth_cross(e1, e2, e3);
+	const float a = w * t + phase;
+	const float weave = 70.0f * sinf(0.63f * w * t + 2.0f * phase);
+	/* The centre drifts a little too. */
+	const float drift = 90.0f * sinf(0.11f * t + phase);
+	for (int i = 0; i < 3; ++i) {
+		out[i] = c[i] + radius * (cosf(a) * e1[i] + sinf(a) * e2[i]) + weave * e3[i] + drift * e1[i];
+	}
+}
+
+/* Where fighter `f` is at `t`: the X-wings that flew past keep to their
+ * keyed run, then ease into their fight after the cut. */
+static void hoth_fighter_pos(int f, float t, float out[3]) {
+	const int keyed = k_fighters[f].keyed;
+	if (keyed <= 0) {
+		hoth_wheel(f, t, out);
+		return;
+	}
+	float run[3], wheel[3];
+	hoth_path(&s_hoth.xwing[keyed - 1], t, run);
+	const float b = hoth_smooth((t - XWA_VR_HOTH_CUT) / 7.0f);
+	if (b <= 0.0f) {
+		memcpy(out, run, sizeof run);
+		return;
+	}
+	hoth_wheel(f, t, wheel);
+	for (int i = 0; i < 3; ++i) {
+		out[i] = run[i] + (wheel[i] - run[i]) * b;
+	}
+}
+
+/* A craft's pose from its positions round `t`: nose along the flight and
+ * up banked into the turn, at most 70 degrees. */
+static void hoth_pose_from(const float a[3], const float pos[3], const float b[3], float h, float nose[3],
+						   float upv[3]) {
 	float acc[3];
 	for (int i = 0; i < 3; ++i) {
 		nose[i] = b[i] - a[i];
@@ -230,8 +389,6 @@ static void hoth_pose(const HothKey* keys, int n, float t, float pos[3], float n
 		nose[1] = 0.0f;
 		nose[2] = -1.0f;
 	}
-	/* Bank: up leans into the turn (lift = gravity-like pull + the turn's
-	 * pull), at most 70 degrees. */
 	const float along = hoth_dot(acc, nose);
 	float lat[3];
 	for (int i = 0; i < 3; ++i) {
@@ -239,14 +396,13 @@ static void hoth_pose(const HothKey* keys, int n, float t, float pos[3], float n
 	}
 	const float g = 30.0f;
 	float u[3] = { lat[0], g + lat[1], lat[2] };
-	const float ln = sqrtf(hoth_dot(lat, lat));
+	const float ln = hoth_len(lat);
 	if (ln > g * 2.75f) { /* tan(70 deg) */
 		const float sc = g * 2.75f / ln;
 		u[0] = lat[0] * sc;
 		u[1] = g + lat[1] * sc;
 		u[2] = lat[2] * sc;
 	}
-	/* Orthogonal to the nose. */
 	const float un = hoth_dot(u, nose);
 	for (int i = 0; i < 3; ++i) {
 		upv[i] = u[i] - un * nose[i];
@@ -256,6 +412,24 @@ static void hoth_pose(const HothKey* keys, int n, float t, float pos[3], float n
 		upv[1] = 1.0f;
 		upv[2] = 0.0f;
 	}
+}
+
+static void hoth_transport_pose(float t, float pos[3], float nose[3], float upv[3]) {
+	const float h = 0.05f;
+	float a[3], b[3];
+	hoth_path(&s_hoth.transport, t, pos);
+	hoth_path(&s_hoth.transport, t - h, a);
+	hoth_path(&s_hoth.transport, t + h, b);
+	hoth_pose_from(a, pos, b, h, nose, upv);
+}
+
+static void hoth_fighter_pose(int f, float t, float pos[3], float nose[3], float upv[3]) {
+	const float h = 0.05f;
+	float a[3], b[3];
+	hoth_fighter_pos(f, t, pos);
+	hoth_fighter_pos(f, t - h, a);
+	hoth_fighter_pos(f, t + h, b);
+	hoth_pose_from(a, pos, b, h, nose, upv);
 }
 
 /* ---- loading ---------------------------------------------------------------- */
@@ -292,9 +466,46 @@ static AeronTexture* hoth_texture(AeronCommandBuffer* cmd, const uint8_t* px, in
 	return t;
 }
 
-/* The planet: the group's first sprite (its fully lit face), premultiplied. */
-static void hoth_load_planet(AeronCommandBuffer* cmd) {
-	static const char* const paths[2] = { "Resdata/Planet.dat", "RESDATA/PLANET.DAT" };
+/* Straight sRGB RGBA -> premultiplied sRGB texture; `disc` (optional) gets
+ * the opaque disc's radius over half the width. */
+static AeronTexture* hoth_texture_pma(AeronCommandBuffer* cmd, const uint8_t* rgba, int w, int h, float* disc,
+									  const char* name) {
+	uint8_t* px = (uint8_t*)malloc((size_t)w * (size_t)h * 4u);
+	if (!px) {
+		return NULL;
+	}
+	float r2max = 0.0f;
+	for (int y = 0; y < h; ++y) {
+		for (int x = 0; x < w; ++x) {
+			const uint8_t* s = &rgba[((size_t)y * w + x) * 4];
+			uint8_t* d = &px[((size_t)y * w + x) * 4];
+			const float a = (float)s[3] / 255.0f;
+			for (int c = 0; c < 3; ++c) {
+				d[c] = (uint8_t)(hoth_linear_to_srgb(hoth_srgb_to_linear((float)s[c] / 255.0f) * a) * 255.0f + 0.5f);
+			}
+			d[3] = s[3];
+			if (disc && s[3] > 128) {
+				const float dx = ((float)x + 0.5f) / (float)w - 0.5f, dy = ((float)y + 0.5f) / (float)h - 0.5f;
+				r2max = fmaxf(r2max, dx * dx + dy * dy);
+			}
+		}
+	}
+	if (disc) {
+		*disc = r2max > 0.01f ? 2.0f * sqrtf(r2max) : 0.95f;
+	}
+	AeronTexture* t = hoth_texture(cmd, px, w, h, 1, name);
+	free(px);
+	return t;
+}
+
+/* One DAT group of Resdata (Planet, Explosions). */
+static int hoth_read_group(const char* dat, int group, Xwa2dFrameSet* set) {
+	char paths[2][64];
+	snprintf(paths[0], sizeof paths[0], "Resdata/%s.dat", dat);
+	snprintf(paths[1], sizeof paths[1], "RESDATA/%s.DAT", dat);
+	for (char* c = paths[1]; *c; ++c) {
+		*c = (char)SDL_toupper((unsigned char)*c);
+	}
 	AeronVfs* vfs = Aeron_GetVfs();
 	uint8_t* bytes = NULL;
 	size_t size = 0;
@@ -305,55 +516,91 @@ static void hoth_load_planet(AeronCommandBuffer* cmd) {
 		}
 	}
 	if (!bytes) {
-		Aeron_LogWarn("xwa.remaster", "VR intro Hoth: no Resdata/Planet.dat");
-		return;
+		Aeron_LogWarn("xwa.remaster", "VR intro Hoth: no %s", paths[0]);
+		return 0;
 	}
-	Xwa2dFrameSet set;
-	memset(&set, 0, sizeof set);
+	memset(set, 0, sizeof *set);
 	char error[256];
 	error[0] = 0;
-	const int ok = Xwa2d_DatAppendGroup(bytes, size, (uint16_t)HOTH_PLANET_GROUP, &set, error, sizeof error);
+	const int ok = Xwa2d_DatAppendGroup(bytes, size, (uint16_t)group, set, error, sizeof error) && set->count > 0;
 	free(bytes);
+	if (!ok) {
+		Aeron_LogWarn("xwa.remaster", "VR intro Hoth: DAT group %d unavailable: %s", group, error);
+		Xwa2dFrameSet_Free(set);
+	}
+	return ok;
+}
+
+/* The planet: the group's first sprite (its fully lit face). */
+static void hoth_load_planet(AeronCommandBuffer* cmd) {
+	Xwa2dFrameSet set;
+	if (!hoth_read_group("Planet", HOTH_PLANET_GROUP, &set)) {
+		return;
+	}
 	const Xwa2dFrame* pick = NULL;
-	for (int i = 0; ok && i < set.count; ++i) {
+	for (int i = 0; i < set.count; ++i) {
 		if (set.frames[i].rgba && (!pick || set.frames[i].sprite_id < pick->sprite_id)) {
 			pick = &set.frames[i];
 		}
 	}
 	if (pick) {
-		const int w = pick->width, h = pick->height;
-		uint8_t* px = (uint8_t*)malloc((size_t)w * (size_t)h * 4u);
-		if (px) {
-			/* The disc's radius: the farthest opaque texel from the centre. */
-			float r2max = 0.0f;
-			for (int y = 0; y < h; ++y) {
-				for (int x = 0; x < w; ++x) {
-					const uint8_t* s = &pick->rgba[((size_t)y * w + x) * 4];
-					uint8_t* d = &px[((size_t)y * w + x) * 4];
-					const float a = (float)s[3] / 255.0f;
-					for (int c = 0; c < 3; ++c) {
-						d[c] = (uint8_t)(hoth_linear_to_srgb(hoth_srgb_to_linear((float)s[c] / 255.0f) * a) * 255.0f +
-										 0.5f);
-					}
-					d[3] = s[3];
-					if (s[3] > 128) {
-						const float dx = ((float)x + 0.5f) / (float)w - 0.5f, dy = ((float)y + 0.5f) / (float)h - 0.5f;
-						r2max = fmaxf(r2max, dx * dx + dy * dy);
-					}
-				}
-			}
-			s_hoth.planet_disc = r2max > 0.01f ? 2.0f * sqrtf(r2max) : 0.95f;
-			s_hoth.planet = hoth_texture(cmd, px, w, h, 1, "xwa.vr_intro_hoth.planet");
-			free(px);
-		}
-	} else {
-		Aeron_LogWarn("xwa.remaster", "VR intro Hoth: planet group %d unavailable: %s", HOTH_PLANET_GROUP, error);
+		s_hoth.planet = hoth_texture_pma(cmd, pick->rgba, pick->width, pick->height, &s_hoth.planet_disc,
+										 "xwa.vr_intro_hoth.planet");
 	}
 	Xwa2dFrameSet_Free(&set);
 }
 
-/* A soft round glow (engines) and a bolt: a bright core along u, soft
- * across v, tapered at both ends. */
+/* The fighter explosion (Explosions.dat group 2005, frames 1-12). */
+static void hoth_load_boom(AeronCommandBuffer* cmd) {
+	Xwa2dFrameSet set;
+	if (!hoth_read_group("Explosions", 2005, &set)) {
+		return;
+	}
+	for (int f = 0; f < HOTH_BOOM_FRAMES; ++f) {
+		for (int i = 0; i < set.count; ++i) {
+			if (set.frames[i].sprite_id == f + 1 && set.frames[i].rgba) {
+				s_hoth.boom[f] = hoth_texture_pma(cmd, set.frames[i].rgba, set.frames[i].width, set.frames[i].height,
+												  NULL, "xwa.vr_intro_hoth.boom");
+				break;
+			}
+		}
+	}
+	Xwa2dFrameSet_Free(&set);
+}
+
+/* The X-Wing Alliance logo the menus show (vr/logo.rgba: "XWAL", u32 w, h,
+ * straight RGBA; an APK asset, never in the repo). */
+static void hoth_load_logo(AeronCommandBuffer* cmd) {
+	static const char* const paths[2] = { "vr/logo.rgba", "assets/vr/logo.rgba" };
+	const char* override = getenv("XWA_XR_LOGO");
+	for (int i = -1; i < 2 && !s_hoth.logo; ++i) {
+		const char* path = i < 0 ? (override && override[0] && strcmp(override, "0") ? override : NULL) : paths[i];
+		if (!path) {
+			continue;
+		}
+		size_t size = 0;
+		uint8_t* data = (uint8_t*)SDL_LoadFile(path, &size);
+		if (!data) {
+			continue;
+		}
+		if (size >= 12 && memcmp(data, "XWAL", 4) == 0) {
+			uint32_t w, h;
+			memcpy(&w, data + 4, 4);
+			memcpy(&h, data + 8, 4);
+			if (w && h && w <= 4096 && h <= 4096 && size >= 12 + (size_t)w * h * 4u) {
+				s_hoth.logo = hoth_texture_pma(cmd, data + 12, (int)w, (int)h, NULL, "xwa.vr_intro_hoth.logo");
+				s_hoth.logo_aspect = (float)h / (float)w;
+			}
+		}
+		SDL_free(data);
+	}
+	if (!s_hoth.logo) {
+		Aeron_LogInfo("xwa.remaster", "VR intro Hoth: no vr/logo.rgba (no logo card)");
+	}
+}
+
+/* A soft round glow (engines, flashes) and a bolt: a bright core along u,
+ * soft across v, tapered at both ends. */
 static void hoth_make_sprites(AeronCommandBuffer* cmd) {
 	enum { G = 64, BW = 64, BH = 16 };
 	static uint8_t glow[G * G * 4], beam[BW * BH * 4];
@@ -391,9 +638,6 @@ static void hoth_load_mesh(AeronCommandBuffer* cmd, int index) {
 		return;
 	}
 	m->len_m = model.bounds.max.y - model.bounds.min.y;
-	Aeron_LogInfo("xwa.remaster", "VR intro Hoth: %s %.0f x %.0f x %.0f m", k_opt[index],
-				  (double)(model.bounds.max.x - model.bounds.min.x), (double)m->len_m,
-				  (double)(model.bounds.max.z - model.bounds.min.z));
 	m->glow_count = 0;
 	for (uint32_t g = 0; g < model.engine_glow_count && m->glow_count < HOTH_MAX_GLOWS; ++g) {
 		const AeronFlightEngineGlow* eg = &model.engine_glows[g];
@@ -409,11 +653,89 @@ static void hoth_load_mesh(AeronCommandBuffer* cmd, int index) {
 		o[5] = eg->core_rgba[1];
 		o[6] = eg->core_rgba[2];
 	}
+	/* The parts the ion cannon's strike needs (OPT mesh types: 7 bridge,
+	 * 8 shield generator). */
+	m->shield_count = 0;
+	m->bridge[0] = 0.0f;
+	m->bridge[1] = 0.35f * m->len_m;
+	m->bridge[2] = 0.1f * m->len_m;
+	for (uint32_t c = 0; c < model.component_count; ++c) {
+		const AeronFlightComponent* comp = &model.components[c];
+		const float centre[3] = { comp->center.x, comp->center.y, comp->center.z };
+		if (comp->mesh_type == 8 && m->shield_count < 2) {
+			memcpy(m->shield[m->shield_count++], centre, sizeof centre);
+		} else if (comp->mesh_type == 7) {
+			memcpy(m->bridge, centre, sizeof centre);
+		}
+	}
 	AeronSceneMeshCreateStatus status;
 	m->mesh = AeronScene_MeshCreate(cmd, &model, k_opt[index], &status);
 	Aeron_FlightModelFree(&model);
 	if (!m->mesh) {
 		Aeron_LogWarn("xwa.remaster", "VR intro Hoth: '%s' mesh creation failed (%d)", k_opt[index], (int)status);
+	}
+}
+
+/* Clearance from the Star Destroyers' hulls along every keyed and wheeling
+ * flight, sampled; logged once (XWA_XR_HOTH_CHECK=1). The hull, model
+ * metres: a wedge from the bow (y -1012) to the full beam (473 each side)
+ * at the stern, its deck at z 20 forward, the superstructure and tower up
+ * to z 320 aft of y 200, its keel at z -255. */
+static float hoth_hull_clearance(const float m[3]) {
+	const float y = m[1];
+	const float hx = fmaxf(473.0f * (y + 1012.0f) / 2024.0f, 30.0f);
+	const float z1 = y > 200.0f ? 320.0f : 20.0f;
+	const float dx = fmaxf(fabsf(m[0]) - hx, 0.0f), dy = fmaxf(fabsf(y) - 1012.0f, 0.0f);
+	const float dz = fmaxf(fmaxf(-255.0f - m[2], m[2] - z1), 0.0f);
+	return sqrtf(dx * dx + dy * dy + dz * dz);
+}
+
+static void hoth_check_clearance(void) {
+	const char* names[3] = { "transport", "X-wing 1", "X-wing 2" };
+	for (int c = 0; c < 3 + HOTH_FIGHTERS; ++c) {
+		float worst = 1e9f, worst_t = 0.0f;
+		int worst_isd = 0;
+		for (float t = HOTH_SHIPS_FROM; t < 120.9f; t += 0.05f) {
+			float p[3];
+			if (c == 0) {
+				if (t > HOTH_JUMP) {
+					break;
+				}
+				hoth_path(&s_hoth.transport, t, p);
+			} else if (c < 3) {
+				if (t > XWA_VR_HOTH_CUT) {
+					break;
+				}
+				hoth_path(&s_hoth.xwing[c - 1], t, p);
+			} else {
+				const int f = c - 3;
+				if (t < HOTH_FIGHT_FROM && k_fighters[f].keyed <= 0) {
+					continue;
+				}
+				if (k_fighters[f].dies > 0.0f && t > k_fighters[f].dies) {
+					break;
+				}
+				hoth_fighter_pos(f, t, p);
+			}
+			for (int i = 0; i < 2; ++i) {
+				float m[3];
+				hoth_local_to_model(&s_hoth.isd[i], p, m);
+				const float d = hoth_hull_clearance(m);
+				if (d < worst) {
+					worst = d;
+					worst_t = t;
+					worst_isd = i;
+				}
+			}
+		}
+		char who[32];
+		if (c < 3) {
+			snprintf(who, sizeof who, "%s", names[c]);
+		} else {
+			snprintf(who, sizeof who, "fighter %d", c - 3);
+		}
+		Aeron_LogInfo("xwa.remaster", "VR intro Hoth: %s clears the Star Destroyers' hulls by %.0f m (SD %d, %.2f s)",
+					  who, (double)worst, worst_isd + 1, (double)worst_t);
 	}
 }
 
@@ -425,28 +747,37 @@ int XwaVrIntroHoth_Load(AeronCommandBuffer* cmd) {
 		case 0:
 			hoth_load_planet(cmd);
 			hoth_make_sprites(cmd);
+			hoth_load_boom(cmd);
+			hoth_load_logo(cmd);
 			break;
 		case 1:
 		case 2:
 		case 3:
+		case 4:
 			hoth_load_mesh(cmd, s_hoth.step - 1);
 			break;
 		default:
 			return 1;
 	}
-	if (++s_hoth.step == 4) {
-		Aeron_LogInfo("xwa.remaster", "VR intro Hoth: %s (planet %s, transport %s, X-wing %s, Star Destroyer %s)",
+	if (++s_hoth.step == 1 + HOTH_MESHES) {
+		hoth_build_paths();
+		if (getenv("XWA_XR_HOTH_CHECK")) {
+			hoth_check_clearance();
+		}
+		Aeron_LogInfo("xwa.remaster",
+					  "VR intro Hoth: %s (planet %s, transport %s, X-wing %s, Star Destroyer %s, TIE %s, logo %s)",
 					  XwaVrIntroHoth_Ready() ? "ready" : "not available", s_hoth.planet ? "yes" : "no",
 					  s_hoth.mesh[HOTH_TRANSPORT].mesh ? "yes" : "no", s_hoth.mesh[HOTH_XWING].mesh ? "yes" : "no",
-					  s_hoth.mesh[HOTH_ISD].mesh ? "yes" : "no");
+					  s_hoth.mesh[HOTH_ISD].mesh ? "yes" : "no", s_hoth.mesh[HOTH_TIE].mesh ? "yes" : "no",
+					  s_hoth.logo ? "yes" : "no");
 		return 1;
 	}
 	return 0;
 }
 
 int XwaVrIntroHoth_Ready(void) {
-	return s_hoth.step >= 4 && s_hoth.planet && s_hoth.mesh[HOTH_TRANSPORT].mesh && s_hoth.mesh[HOTH_XWING].mesh &&
-		   s_hoth.mesh[HOTH_ISD].mesh;
+	return s_hoth.step >= 1 + HOTH_MESHES && s_hoth.paths_built && s_hoth.planet &&
+		   s_hoth.mesh[HOTH_TRANSPORT].mesh && s_hoth.mesh[HOTH_XWING].mesh && s_hoth.mesh[HOTH_ISD].mesh;
 }
 
 void XwaVrIntroHoth_Release(void) {
@@ -455,10 +786,15 @@ void XwaVrIntroHoth_Release(void) {
 			AeronScene_MeshDestroy(s_hoth.mesh[i].mesh);
 		}
 	}
-	AeronTexture* tex[3] = { s_hoth.planet, s_hoth.glow, s_hoth.beam };
-	for (int i = 0; i < 3; ++i) {
+	AeronTexture* tex[4] = { s_hoth.planet, s_hoth.glow, s_hoth.beam, s_hoth.logo };
+	for (int i = 0; i < 4; ++i) {
 		if (tex[i]) {
 			Aeron_DestroyTexture(tex[i]);
+		}
+	}
+	for (int i = 0; i < HOTH_BOOM_FRAMES; ++i) {
+		if (s_hoth.boom[i]) {
+			Aeron_DestroyTexture(s_hoth.boom[i]);
 		}
 	}
 	memset(&s_hoth, 0, sizeof s_hoth);
@@ -468,6 +804,9 @@ void XwaVrIntroHoth_Release(void) {
 
 static void hoth_billboard(AeronScene3D* scene, AeronTexture* tex, AeronSceneBillboardStage stage,
 						   AeronSceneBillboardBlend blend, const float c[4][3], const float tint[4]) {
+	if (!tex) {
+		return;
+	}
 	AeronSceneBillboardDesc d;
 	memset(&d, 0, sizeof d);
 	d.texture = tex;
@@ -498,6 +837,79 @@ static void hoth_facing(const float c[3], float half, float out[4][3]) {
 		out[2][k] = c[k] + half * r[k] + half * u[k];
 		out[3][k] = c[k] - half * r[k] + half * u[k];
 	}
+}
+
+/* An additive glow of `size` metres at LOCAL `p`, colour `rgb` (HDR). */
+static void hoth_glow(AeronScene3D* scene, const float p[3], float size, const float rgb[3]) {
+	float w[3], c[4][3];
+	hoth_wpos(p, w);
+	hoth_facing(w, 0.5f * size * s_hoth.k, c);
+	const float tint[4] = { rgb[0], rgb[1], rgb[2], 1.0f };
+	hoth_billboard(scene, s_hoth.glow, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_ADDITIVE, c,
+				   tint);
+}
+
+/* The fighter explosion's frame at `age` seconds (1 s long), `size`
+ * metres at LOCAL `p`. */
+static void hoth_boom(AeronScene3D* scene, const float p[3], float size, float age, float brightness) {
+	if (age < 0.0f || age >= 1.0f) {
+		return;
+	}
+	const int f = (int)(age * (float)HOTH_BOOM_FRAMES);
+	if (!s_hoth.boom[f]) {
+		return;
+	}
+	float w[3], c[4][3];
+	hoth_wpos(p, w);
+	hoth_facing(w, 0.5f * size * s_hoth.k, c);
+	const float b = 2.2f * brightness;
+	const float tint[4] = { b, b, b, 1.0f };
+	hoth_billboard(scene, s_hoth.boom[f], AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c,
+				   tint);
+}
+
+/* A bolt from LOCAL `a` to `b`, `width` metres, facing the viewer. */
+static void hoth_bolt(AeronScene3D* scene, const float a[3], const float b[3], float width, const float rgb[3]) {
+	if (!s_hoth.beam) {
+		return;
+	}
+	float wa[3], wb[3], along[3], mid[3], side[3];
+	hoth_wpos(a, wa);
+	hoth_wpos(b, wb);
+	for (int k = 0; k < 3; ++k) {
+		along[k] = wb[k] - wa[k];
+		mid[k] = 0.5f * (wa[k] + wb[k]) - s_hoth.org[k];
+	}
+	hoth_cross(along, mid, side);
+	if (!hoth_norm(side)) {
+		return;
+	}
+	const float hw = 0.5f * width * s_hoth.k;
+	AeronSceneBillboardDesc d;
+	memset(&d, 0, sizeof d);
+	d.texture = s_hoth.beam;
+	d.blend = AERON_SCENE_BILLBOARD_BLEND_ADDITIVE;
+	d.stage = AERON_SCENE_BILLBOARD_STAGE_OVERLAY;
+	for (int k = 0; k < 3; ++k) {
+		d.corners[0][k] = wa[k] - side[k] * hw;
+		d.corners[1][k] = wb[k] - side[k] * hw;
+		d.corners[2][k] = wb[k] + side[k] * hw;
+		d.corners[3][k] = wa[k] + side[k] * hw;
+	}
+	static const float uv[4][2] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
+	for (int i = 0; i < 4; ++i) {
+		memcpy(d.uv[i], uv[i], sizeof d.uv[i]);
+		d.colors[i][0] = rgb[0];
+		d.colors[i][1] = rgb[1];
+		d.colors[i][2] = rgb[2];
+		d.colors[i][3] = 1.0f;
+	}
+	AeronScene_AddBillboard(scene, &d);
+}
+
+/* Bolts stay visible far off: at least `min_deg` wide in view. */
+static float hoth_bolt_width(const float p[3], float metres, float min_deg) {
+	return fmaxf(metres, hoth_len(p) * min_deg * 0.017453293f);
 }
 
 static void hoth_submit_planet(AeronScene3D* scene, float t) {
@@ -560,7 +972,7 @@ static void hoth_add(AeronScene3D* scene, int mesh, const float m[16], int far) 
 }
 
 /* The engines' glow, seen from behind. */
-static void hoth_glows(AeronScene3D* scene, int mesh, const float m[16]) {
+static void hoth_glows(AeronScene3D* scene, int mesh, const float m[16], float boost) {
 	const HothMesh* hm = &s_hoth.mesh[mesh];
 	if (!s_hoth.glow || !hm->glow_count) {
 		return;
@@ -585,102 +997,164 @@ static void hoth_glows(AeronScene3D* scene, int mesh, const float m[16]) {
 		const float b = 1.8f * w;
 		const float core[4] = { (0.4f + 0.6f * o[4]) * b, (0.15f + 0.85f * o[5]) * b, (0.15f + 0.85f * o[6]) * b,
 								1.0f };
-		hoth_facing(p, o[3] * s_hoth.k, c);
+		hoth_facing(p, o[3] * boost * s_hoth.k, c);
 		hoth_billboard(scene, s_hoth.glow, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_ADDITIVE,
 					   c, core);
 	}
 }
 
-/* A bolt from LOCAL `a` to `b`, `width` metres, facing the viewer. */
-static void hoth_bolt(AeronScene3D* scene, const float a[3], const float b[3], float width, const float rgb[3]) {
-	if (!s_hoth.beam) {
-		return;
-	}
-	float wa[3], wb[3], along[3], mid[3], side[3];
-	hoth_wpos(a, wa);
-	hoth_wpos(b, wb);
-	for (int k = 0; k < 3; ++k) {
-		along[k] = wb[k] - wa[k];
-		mid[k] = 0.5f * (wa[k] + wb[k]) - s_hoth.org[k];
-	}
-	hoth_cross(along, mid, side);
-	if (!hoth_norm(side)) {
-		return;
-	}
-	const float hw = 0.5f * width * s_hoth.k;
-	AeronSceneBillboardDesc d;
-	memset(&d, 0, sizeof d);
-	d.texture = s_hoth.beam;
-	d.blend = AERON_SCENE_BILLBOARD_BLEND_ADDITIVE;
-	d.stage = AERON_SCENE_BILLBOARD_STAGE_OVERLAY;
-	for (int k = 0; k < 3; ++k) {
-		d.corners[0][k] = wa[k] - side[k] * hw;
-		d.corners[1][k] = wb[k] - side[k] * hw;
-		d.corners[2][k] = wb[k] + side[k] * hw;
-		d.corners[3][k] = wa[k] + side[k] * hw;
-	}
-	static const float uv[4][2] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
-	for (int i = 0; i < 4; ++i) {
-		memcpy(d.uv[i], uv[i], sizeof d.uv[i]);
-		d.colors[i][0] = rgb[0];
-		d.colors[i][1] = rgb[1];
-		d.colors[i][2] = rgb[2];
-		d.colors[i][3] = 1.0f;
-	}
-	AeronScene_AddBillboard(scene, &d);
+/* The Star Destroyers: positions, poses (fixed). */
+static void hoth_isd_matrix(int i, float m[16]) {
+	const HothFrame* f = &s_hoth.isd[i];
+	hoth_matrix(f->pos, f->n, f->u, m);
 }
 
-typedef struct HothCraft {
-	const HothKey* keys;
-	int n;
-} HothCraft;
-static const HothCraft k_craft[3] = {
-	{ k_transport, (int)(sizeof k_transport / sizeof k_transport[0]) },
-	{ k_xwing1, (int)(sizeof k_xwing1 / sizeof k_xwing1[0]) },
-	{ k_xwing2, (int)(sizeof k_xwing2 / sizeof k_xwing2[0]) },
-};
+/* The lead Star Destroyer's shield generator that bursts (the film's left
+ * one): the one nearer the viewer, so the tower does not hide its fire;
+ * LOCAL, a little above the dome. */
+static void hoth_left_shield(float out[3]) {
+	const HothMesh* hm = &s_hoth.mesh[HOTH_ISD];
+	if (hm->shield_count < 2) {
+		const float m[3] = { -100.0f, 0.35f * hm->len_m, 0.11f * hm->len_m };
+		hoth_model_to_local(&s_hoth.isd[0], m, out);
+		return;
+	}
+	float a[3], b[3];
+	hoth_model_to_local(&s_hoth.isd[0], hm->shield[0], a);
+	hoth_model_to_local(&s_hoth.isd[0], hm->shield[1], b);
+	memcpy(out, hoth_len(a) < hoth_len(b) ? a : b, 3 * sizeof(float));
+	for (int i = 0; i < 3; ++i) {
+		out[i] += 25.0f * s_hoth.isd[0].u[i];
+	}
+}
 
-/* Turbolasers from the Star Destroyers at the ships (near misses), from
- * 66 s; the X-wings' lasers at the Star Destroyers from 66.9 s. Each bolt
- * is a function of the film's time alone (no state). */
+/* The ion cannon: a glow on Hoth, the bolt across, a blue flash on the
+ * superstructure, the shield generator bursting and burning; ion lightning
+ * over the hull. */
+static void hoth_submit_ion(AeronScene3D* scene, float t) {
+	if (t < HOTH_ION_GLOW) {
+		return;
+	}
+	static const float blue[3] = { 0.45f * 6.0f, 0.65f * 6.0f, 1.0f * 6.0f };
+	float from[3], hit[3];
+	/* From the planet's lit limb, far out (a sky distance for the eyes). */
+	hoth_dir(-34.0f, -4.0f, 30000.0f, from);
+	hoth_model_to_local(&s_hoth.isd[0], s_hoth.mesh[HOTH_ISD].bridge, hit);
+	if (t < HOTH_ION_LAUNCH) {
+		const float g = hoth_smooth((t - HOTH_ION_GLOW) / (HOTH_ION_LAUNCH - HOTH_ION_GLOW));
+		const float rgb[3] = { blue[0] * g, blue[1] * g, blue[2] * g };
+		hoth_glow(scene, from, hoth_bolt_width(from, 900.0f, 3.5f), rgb);
+	} else if (t < HOTH_ION_HIT) {
+		/* Slowing as it comes (the film's bolt crawls the last stretch). */
+		const float s = 1.0f - powf(1.0f - (t - HOTH_ION_LAUNCH) / (HOTH_ION_HIT - HOTH_ION_LAUNCH), 2.2f);
+		for (int i = 0; i < 12; ++i) {
+			const float si = fmaxf(s - 0.008f * (float)i * (1.0f + 3.0f * (1.0f - s)), 0.0f);
+			float p[3];
+			for (int a = 0; a < 3; ++a) {
+				p[a] = from[a] + (hit[a] - from[a]) * si;
+			}
+			const float k = 1.0f - (float)i / 12.0f;
+			const float size = hoth_bolt_width(p, 150.0f, 3.0f) * (0.4f + 0.6f * k);
+			const float rgb[3] = { blue[0] * k, blue[1] * k, blue[2] * k };
+			hoth_glow(scene, p, size, rgb);
+		}
+	} else if (t < HOTH_ION_HIT + 0.7f) {
+		const float g = 1.0f - (t - HOTH_ION_HIT) / 0.7f;
+		const float rgb[3] = { blue[0] * 1.6f * g, blue[1] * 1.6f * g, blue[2] * 1.6f * g };
+		hoth_glow(scene, hit, hoth_bolt_width(hit, 700.0f, 6.0f) * (0.6f + 0.4f * g), rgb);
+	}
+	/* The shield generator: a burst, then fire, until the scene ends. */
+	if (t >= HOTH_SHIELD_BURST) {
+		float dome[3];
+		hoth_left_shield(dome);
+		hoth_boom(scene, dome, 260.0f, (t - HOTH_SHIELD_BURST) / 1.2f, 1.0f);
+		for (int i = 0; i < 64; ++i) {
+			const float t0 = HOTH_SHIELD_BURST + 0.5f + 0.42f * (float)i;
+			if (t0 > t) {
+				break;
+			}
+			const float age = (t - t0) / 1.1f;
+			if (age >= 1.0f) {
+				continue;
+			}
+			float p[3];
+			for (int a = 0; a < 3; ++a) {
+				p[a] = dome[a] + (hoth_hash((uint32_t)i * 5u + (uint32_t)a + 900u) - 0.5f) * 40.0f;
+			}
+			p[1] += 15.0f;
+			hoth_boom(scene, p, 100.0f + 50.0f * hoth_hash((uint32_t)i + 777u), age, 0.85f);
+		}
+	}
+	/* Ion lightning crawling over the hull. */
+	const int arcs_a = t >= HOTH_ARCS_A_FROM && t < HOTH_ARCS_A_TO;
+	const int arcs_b = t >= HOTH_ARCS_B_FROM && t < HOTH_ARCS_B_TO;
+	if (arcs_a || arcs_b) {
+		const uint32_t tick = (uint32_t)(t * 14.0f);
+		const float len = s_hoth.mesh[HOTH_ISD].len_m;
+		for (int i = 0; i < 6; ++i) {
+			const uint32_t s = tick * 31u + (uint32_t)i * 7u;
+			/* On the deck: across its width, along its length, at its height. */
+			const float my = (hoth_hash(s) - 0.65f) * 0.9f * len;
+			const float half_w = 0.23f * len * (0.5f - my / len);
+			float m[3] = { (hoth_hash(s + 1u) - 0.5f) * 2.0f * fmaxf(half_w, 20.0f), my,
+						   my > 0.1f * len ? 120.0f : 10.0f + 0.05f * (my + 0.5f * len) };
+			float prev[3];
+			hoth_model_to_local(&s_hoth.isd[0], m, prev);
+			for (int seg = 0; seg < 4; ++seg) {
+				m[0] += (hoth_hash(s + 10u + (uint32_t)seg) - 0.5f) * 140.0f;
+				m[1] += (hoth_hash(s + 20u + (uint32_t)seg) - 0.5f) * 140.0f;
+				m[2] += (hoth_hash(s + 30u + (uint32_t)seg) - 0.3f) * 25.0f;
+				float p[3];
+				hoth_model_to_local(&s_hoth.isd[0], m, p);
+				hoth_bolt(scene, prev, p, hoth_bolt_width(p, 5.0f, 0.12f), blue);
+				memcpy(prev, p, sizeof prev);
+			}
+		}
+	}
+}
+
+/* Turbolasers from the Star Destroyers at the ships (near misses) from
+ * 66 s; the fighters' lasers in the far fights. Each bolt is a function of
+ * the film's time alone (no state). */
 static void hoth_submit_fire(AeronScene3D* scene, float t) {
 	static const float green[3] = { 0.35f * 4.0f, 1.0f * 4.0f, 0.4f * 4.0f };
 	static const float red[3] = { 1.0f * 4.0f, 0.18f * 4.0f, 0.12f * 4.0f };
-	const float speed_green = 650.0f, speed_red = 900.0f;
-	for (int i = 0; i < 64; ++i) {
+	const float speed_green = 650.0f;
+	/* The turbolasers: at the transport and the X-wings until the cut, then
+	 * at the fights. */
+	for (int i = 0; i < 400; ++i) {
 		const float tf = 66.0f + 0.27f * (float)i;
 		if (tf > t) {
 			break;
 		}
-		const HothCapital* c = &k_isd[i & 1];
-		float from[3], dirc[3];
-		hoth_dir(c->az, c->el, c->dist, from);
-		/* A turret along the hull (+- a third of its length, across). */
-		hoth_dir(c->az + 90.0f, 0.0f, 1.0f, dirc);
-		const float along = (hoth_hash((uint32_t)i * 3u + 1u) - 0.5f) * 0.6f * s_hoth.mesh[HOTH_ISD].len_m;
-		for (int a = 0; a < 3; ++a) {
-			from[a] += dirc[a] * along;
+		if (t - tf > 6.0f) {
+			continue;
 		}
-		from[1] += 60.0f + 80.0f * hoth_hash((uint32_t)i * 3u + 2u);
-		const HothCraft* target = &k_craft[i % 3];
+		const HothFrame* c = &s_hoth.isd[i & 1];
+		float from[3];
+		const float m[3] = { (hoth_hash((uint32_t)i * 3u + 1u) - 0.5f) * 500.0f,
+							 (hoth_hash((uint32_t)i * 3u + 2u) - 0.4f) * 1200.0f, 90.0f };
+		hoth_model_to_local(c, m, from);
 		float aim[3];
-		float dist0 = 0.0f;
-		{
+		if (tf < XWA_VR_HOTH_CUT) {
+			const int target = i % 3;
 			float tp[3];
-			hoth_path(target->keys, target->n, tf + 3.0f, tp);
-			for (int a = 0; a < 3; ++a) {
-				dist0 += (tp[a] - from[a]) * (tp[a] - from[a]);
+			if (target == 0) {
+				hoth_path(&s_hoth.transport, tf + 3.0f, tp);
+			} else {
+				hoth_fighter_pos(target - 1, tf + 3.0f, tp);
 			}
-			dist0 = sqrtf(dist0);
-			const float travel = dist0 / speed_green;
-			hoth_path(target->keys, target->n, tf + travel, aim);
+			memcpy(aim, tp, sizeof aim);
+		} else {
+			/* A rebel in a fight (the X-wings are fighters 0, 1, 7, 8). */
+			static const int rebels[4] = { 0, 1, 7, 8 };
+			hoth_fighter_pos(rebels[i & 3], tf + 2.5f, aim);
 		}
-		/* Near misses: 20-60 m off. */
 		for (int a = 0; a < 3; ++a) {
-			aim[a] += (hoth_hash((uint32_t)i * 7u + (uint32_t)a) - 0.5f) * 80.0f;
+			aim[a] += (hoth_hash((uint32_t)i * 7u + (uint32_t)a) - 0.5f) * 90.0f;
 		}
 		float d[3] = { aim[0] - from[0], aim[1] - from[1], aim[2] - from[2] };
-		const float len = sqrtf(hoth_dot(d, d));
+		const float len = hoth_len(d);
 		if (len < 1.0f) {
 			continue;
 		}
@@ -694,45 +1168,147 @@ static void hoth_submit_fire(AeronScene3D* scene, float t) {
 			a0[a] = from[a] + d[a] * fmaxf(s - 70.0f, 0.0f);
 			a1[a] = from[a] + d[a] * s;
 		}
-		hoth_bolt(scene, a0, a1, 5.0f, green);
+		hoth_bolt(scene, a0, a1, hoth_bolt_width(a1, 5.0f, 0.12f), green);
 	}
-	for (int i = 0; i < 48; ++i) {
-		const float tf = 66.9f + 0.22f * (float)i;
-		if (tf > t) {
-			break;
+	/* The fighters: every 0.5-0.9 s each fires at an enemy of its fight
+	 * (where that one will be when the bolt gets there). */
+	if (t < HOTH_FIGHT_FROM) {
+		return;
+	}
+	for (int f = 0; f < HOTH_FIGHTERS; ++f) {
+		const HothFighter* hf = &k_fighters[f];
+		const float period = 0.5f + 0.4f * hoth_hash((uint32_t)f * 11u + 3u);
+		const float first = fmaxf(HOTH_FIGHT_FROM, hf->keyed > 0 ? XWA_VR_HOTH_CUT + 3.0f : HOTH_FIGHT_FROM) +
+							period * hoth_hash((uint32_t)f * 11u + 4u);
+		for (int k = 0; k < 4; ++k) {
+			const int shot = (int)floorf((t - first) / period) - k;
+			if (shot < 0) {
+				break;
+			}
+			const float tf = first + period * (float)shot;
+			if (hf->dies > 0.0f && tf >= hf->dies) {
+				continue;
+			}
+			/* An enemy in the same fight, still flying. */
+			int target = -1;
+			for (int j = 0, pick = (int)(hoth_hash((uint32_t)(f * 131 + shot)) * 8.0f); j < HOTH_FIGHTERS; ++j) {
+				const int e = (pick + j) % HOTH_FIGHTERS;
+				if (k_fighters[e].fight == hf->fight && k_fighters[e].side != hf->side &&
+					!(k_fighters[e].dies > 0.0f && tf >= k_fighters[e].dies)) {
+					target = e;
+					break;
+				}
+			}
+			if (target < 0) {
+				continue;
+			}
+			float from[3], to[3];
+			hoth_fighter_pos(f, tf, from);
+			hoth_fighter_pos(target, tf + 0.4f, to);
+			float d[3] = { to[0] - from[0], to[1] - from[1], to[2] - from[2] };
+			const float len = hoth_len(d);
+			if (len < 1.0f) {
+				continue;
+			}
+			hoth_norm(d);
+			const float s = (t - tf) * 800.0f;
+			if (s > len * 1.3f) {
+				continue;
+			}
+			float a0[3], a1[3];
+			for (int a = 0; a < 3; ++a) {
+				a0[a] = from[a] + d[a] * fmaxf(s - 60.0f, 0.0f);
+				a1[a] = from[a] + d[a] * s;
+			}
+			hoth_bolt(scene, a0, a1, hoth_bolt_width(a1, 1.2f, 0.15f), hf->side == HOTH_SIDE_REBEL ? red : green);
 		}
-		const HothCraft* shooter = &k_craft[1 + (i & 1)];
-		float pos[3], nose[3], upv[3];
-		hoth_pose(shooter->keys, shooter->n, tf, pos, nose, upv);
-		float side[3];
-		hoth_cross(nose, upv, side);
-		hoth_norm(side);
-		const float tip = ((i >> 1) & 1) ? 5.5f : -5.5f;
-		float to[3];
-		hoth_dir(k_isd[(i >> 2) & 1].az, k_isd[(i >> 2) & 1].el, k_isd[(i >> 2) & 1].dist, to);
-		float d[3];
-		for (int a = 0; a < 3; ++a) {
-			pos[a] += side[a] * tip;
-			d[a] = to[a] - pos[a];
-		}
-		hoth_norm(d);
-		const float s = (t - tf) * speed_red;
-		if (s > 2000.0f) {
-			continue;
-		}
-		float a0[3], a1[3];
-		for (int a = 0; a < 3; ++a) {
-			a0[a] = pos[a] + d[a] * fmaxf(s - 18.0f, 0.0f);
-			a1[a] = pos[a] + d[a] * s;
-		}
-		hoth_bolt(scene, a0, a1, 0.9f, red);
 	}
 }
 
+/* The transport, its engines, the jump: a white flash and a streak where
+ * it goes. */
+static void hoth_submit_transport(AeronScene3D* scene, float t) {
+	float m[16];
+	if (t < HOTH_JUMP) {
+		float pos[3], nose[3], upv[3];
+		hoth_transport_pose(t, pos, nose, upv);
+		hoth_matrix(pos, nose, upv, m);
+		hoth_add(scene, HOTH_TRANSPORT, m, hoth_len(pos) > 400.0f);
+		/* Far off its engines carry it (the film's glowing speck). */
+		hoth_glows(scene, HOTH_TRANSPORT, m, 1.0f + fminf(hoth_len(pos) / 250.0f, 9.0f));
+		return;
+	}
+	const float age = t - HOTH_JUMP;
+	if (age > 0.45f) {
+		return;
+	}
+	float pos[3], nose[3], upv[3];
+	hoth_transport_pose(HOTH_JUMP, pos, nose, upv);
+	const float g = 1.0f - age / 0.45f;
+	const float white[3] = { 3.5f * g, 3.8f * g, 4.5f * g };
+	hoth_glow(scene, pos, hoth_bolt_width(pos, 160.0f, 3.5f) * (0.6f + 0.8f * g), white);
+	float tip[3];
+	for (int a = 0; a < 3; ++a) {
+		tip[a] = pos[a] + nose[a] * (300.0f + 3000.0f * age);
+	}
+	hoth_bolt(scene, pos, tip, hoth_bolt_width(pos, 12.0f, 0.5f), white);
+}
+
+static void hoth_submit_fights(AeronScene3D* scene, float t) {
+	if (t < HOTH_FIGHT_FROM) {
+		return;
+	}
+	for (int f = 0; f < HOTH_FIGHTERS; ++f) {
+		const HothFighter* hf = &k_fighters[f];
+		if (hf->keyed > 0) {
+			continue; /* drawn with the keyed craft */
+		}
+		if (hf->dies > 0.0f && t >= hf->dies) {
+			float p[3];
+			hoth_fighter_pos(f, hf->dies, p);
+			hoth_boom(scene, p, hoth_bolt_width(p, 80.0f, 3.5f), (t - hf->dies) / 1.0f, 1.0f);
+			continue;
+		}
+		const int mesh = hf->side == HOTH_SIDE_EMPIRE ? HOTH_TIE : HOTH_XWING;
+		if (!s_hoth.mesh[mesh].mesh) {
+			continue;
+		}
+		float pos[3], nose[3], upv[3], m[16];
+		hoth_fighter_pose(f, t, pos, nose, upv);
+		hoth_matrix(pos, nose, upv, m);
+		hoth_add(scene, mesh, m, 1);
+		hoth_glows(scene, mesh, m, 9.0f);
+	}
+}
+
+/* The X-Wing Alliance logo on the screen's place while the film shows its
+ * own (screen put away). */
+static void hoth_submit_logo(AeronScene3D* scene, float t, float screen_dist, float screen_w, float lift) {
+	const float a = hoth_smooth((t - XWA_VR_HOTH_LOGO_IN) / 0.33f) *
+					(1.0f - hoth_smooth((t - XWA_VR_HOTH_LOGO_OUT) / XWA_VR_HOTH_LOGO_FADE));
+	if (!s_hoth.logo || a <= 0.0f) {
+		return;
+	}
+	/* The film's logo spans ~88 % of its width. */
+	const float w = 0.88f * screen_w, h = w * s_hoth.logo_aspect;
+	float c[4][3];
+	const float corners[4][3] = {
+		{ -0.5f * w, lift - 0.5f * h, -screen_dist },
+		{ 0.5f * w, lift - 0.5f * h, -screen_dist },
+		{ 0.5f * w, lift + 0.5f * h, -screen_dist },
+		{ -0.5f * w, lift + 0.5f * h, -screen_dist },
+	};
+	for (int i = 0; i < 4; ++i) {
+		hoth_wpos(corners[i], c[i]);
+	}
+	const float tint[4] = { a, a, a, a }; /* premultiplied */
+	hoth_billboard(scene, s_hoth.logo, AERON_SCENE_BILLBOARD_STAGE_OVERLAY, AERON_SCENE_BILLBOARD_BLEND_PMA, c, tint);
+}
+
 void XwaVrIntroHoth_Submit(AeronScene3D* scene, const float org[3], const float right[3], const float up[3],
-						   const float fwd[3], float k, float t) {
+						   const float fwd[3], float k, float t, float screen_dist, float screen_w, float lift) {
 	s_hoth.submitted = 0;
-	if (!scene || !XwaVrIntroHoth_Ready() || t < HOTH_FADE_FROM) {
+	if (!scene || !XwaVrIntroHoth_Ready() || t < HOTH_FADE_FROM || t >= XWA_VR_HOTH_HYPER) {
 		return;
 	}
 	memcpy(s_hoth.org, org, sizeof s_hoth.org);
@@ -742,35 +1318,26 @@ void XwaVrIntroHoth_Submit(AeronScene3D* scene, const float org[3], const float 
 	s_hoth.k = k;
 	s_hoth.submitted = 1;
 	hoth_submit_planet(scene, t);
+	hoth_submit_logo(scene, t, screen_dist, screen_w, lift);
 	if (t < HOTH_SHIPS_FROM) {
 		return;
 	}
 	float m[16];
-	/* The Star Destroyers wait, bows towards the ships coming in. */
 	for (int i = 0; i < 2; ++i) {
-		float pos[3], nose[3];
-		hoth_dir(k_isd[i].az, k_isd[i].el, k_isd[i].dist, pos);
-		/* Bows to the left and a little towards the viewer: long in view. */
-		nose[0] = -1.0f;
-		nose[1] = 0.0f;
-		nose[2] = 0.35f;
-		hoth_norm(nose);
-		/* Rolled ~25 degrees towards the viewer: the decks and the bridge
-		 * towers in view, not an edge-on sliver. */
-		float tilt[3] = { -pos[0], -pos[1], -pos[2] };
-		hoth_norm(tilt);
-		const float roll_up[3] = { 0.47f * tilt[0], 1.0f + 0.47f * tilt[1], 0.47f * tilt[2] };
-		hoth_matrix(pos, nose, roll_up, m);
+		hoth_isd_matrix(i, m);
 		hoth_add(scene, HOTH_ISD, m, 1);
 	}
-	for (int c = 0; c < 3; ++c) {
+	hoth_submit_transport(scene, t);
+	/* The X-wings that flew past, then in their fight. */
+	for (int x = 0; x < 2; ++x) {
 		float pos[3], nose[3], upv[3];
-		hoth_pose(k_craft[c].keys, k_craft[c].n, t, pos, nose, upv);
-		const int mesh = c == 0 ? HOTH_TRANSPORT : HOTH_XWING;
+		hoth_fighter_pose(x, t, pos, nose, upv);
 		hoth_matrix(pos, nose, upv, m);
-		hoth_add(scene, mesh, m, sqrtf(hoth_dot(pos, pos)) > 400.0f);
-		hoth_glows(scene, mesh, m);
+		hoth_add(scene, HOTH_XWING, m, hoth_len(pos) > 400.0f);
+		hoth_glows(scene, HOTH_XWING, m, 1.0f + fminf(hoth_len(pos) / 150.0f, 9.0f));
 	}
+	hoth_submit_fights(scene, t);
+	hoth_submit_ion(scene, t);
 	hoth_submit_fire(scene, t);
 }
 
@@ -781,10 +1348,11 @@ int XwaVrIntroHoth_Lighting(float t, XwaVrEnvLighting* out) {
 	memset(out, 0, sizeof *out);
 	const float l = HOTH_LIGHT_FLOOR +
 					(1.0f - HOTH_LIGHT_FLOOR) * hoth_smooth((t - HOTH_LIGHT_FROM) / (HOTH_LIGHT_TO - HOTH_LIGHT_FROM));
-	/* The sun from the front right, above (the film's craft are lit from
-	 * there); Hoth's cool bounce from the left below; space's ambient. */
+	/* The sun from behind the viewer's right, above (the Star Destroyers'
+	 * faces towards the viewer lit, as the film's are); Hoth's cool bounce
+	 * from the left below; space's ambient. */
 	float key[3], fill[3];
-	hoth_dir(55.0f, 25.0f, 1.0f, key);
+	hoth_dir(130.0f, 35.0f, 1.0f, key);
 	hoth_dir(HOTH_AZ, HOTH_EL, 1.0f, fill);
 	hoth_wdir(key, out->key_dir);
 	hoth_wdir(fill, out->fill_dir);

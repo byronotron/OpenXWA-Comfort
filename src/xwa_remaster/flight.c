@@ -5674,6 +5674,40 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 	AeronScene_SetMotionContext(s.scene, NULL, 0);
 	s.bb_count = 0;
 
+	/* The intro's hyperspace (vr_intro_hoth.h): the game's tunnel round the
+	 * screen, along the way the seated viewer faces, re-aimed per eye. */
+	float hyper_time = 0.0f, hyper_level = 0.0f;
+	float hyper_vp[2][16];
+	XwaRemasterHyperspaceTunnelView hyper_view[2];
+	int intro_hyper = s.hyperspace && XwaVrIntroCrawl_Hyperspace(&hyper_time, &hyper_level);
+	if (intro_hyper) {
+		static XwaSnapshot hyper_snap; /* no flight: the forced tunnel reads only its camera's (zero) state */
+		/* Right, backward and up of the viewer (the tunnel's travel axes). */
+		const float bw[9] = { rows[0], rows[1], rows[2], -rows[6], -rows[7], -rows[8], -rows[3], -rows[4], -rows[5] };
+		float base_rows[9];
+		memcpy(base_rows, s.crows, sizeof base_rows);
+		for (int e = 0; e < 2; e++) {
+			AeronScene_ComputeViewProj(&eyes[e], hyper_vp[e]);
+			fl_quat_to_mat3(eyes[e].ori, s.crows);
+			fl_hyper_build_tunnel_view(&eyes[e], bw, 1, &hyper_view[e]);
+		}
+		memcpy(s.crows, base_rows, sizeof base_rows);
+		XwaFlightHyperspaceTunnelParams faded = s.hyperspace_params;
+		faded.brightness *= hyper_level;
+		faded.highlight_strength *= hyper_level;
+		for (int c = 0; c < 3; ++c) {
+			faded.cap_color[c] *= hyper_level;
+		}
+		XwaRemasterHyperspace_SetParams(s.hyperspace, &faded);
+		intro_hyper = XwaRemasterHyperspace_Prepare(s.hyperspace, cmd, &hyper_snap, hyper_vp[0], s.crows,
+													xr_frame.width, xr_frame.height, 1, hyper_time, &hyper_view[0]);
+		XwaRemasterHyperspace_SetParams(s.hyperspace, &s.hyperspace_params);
+		if (intro_hyper) {
+			s.before_opaque_mode = FL_BEFORE_OPAQUE_HYPERSPACE;
+			AeronScene_SetPassHook(s.scene, AERON_SCENE_HOOK_BEFORE_OPAQUE, fl_draw_before_opaque, NULL);
+		}
+	}
+
 	/* Stars through the open bay. */
 	if (s.sky_mode == 1 && s.sky_stars) {
 		static const float world_to_cube[9] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, -1.0f, 0.0f };
@@ -5810,7 +5844,9 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 						 2.2f);
 	/* Direct output here too; the hands' overlay alpha is then written at
 	 * the end of each eye's forward pass (else by the tonemap pass). */
-	const int direct = fl_xr_direct_output();
+	/* (The tunnel's hook draws scene colour for the tonemap: no direct
+	 * output under it.) */
+	const int direct = fl_xr_direct_output() && !intro_hyper;
 	s_xr_bloom_last = NULL;
 	const float direct_tint[3] = { s_xr_eye_gain, s_xr_eye_gain, s_xr_eye_gain };
 	s_xr_hands_over = hands_over;
@@ -5822,6 +5858,9 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 			ok = AeronScene_SetCamera(s.scene, &eyes[1]);
 			if (!ok) {
 				break;
+			}
+			if (intro_hyper) {
+				XwaRemasterHyperspace_SetEyeView(s.hyperspace, hyper_vp[1], &hyper_view[1]);
 			}
 		}
 		if (direct) {
@@ -5838,6 +5877,10 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 		s_xr_eye_alpha = NULL;
 	}
 	AeronScene_SetDirectOutputHook(s.scene, NULL, NULL);
+	if (intro_hyper) {
+		AeronScene_SetPassHook(s.scene, AERON_SCENE_HOOK_BEFORE_OPAQUE, NULL, NULL);
+		s.before_opaque_mode = FL_BEFORE_OPAQUE_NONE;
+	}
 	s_xr_hook_target = NULL;
 	s_xr_hands_over = 0;
 	s_xr_eye_gain_last = s_xr_eye_gain;

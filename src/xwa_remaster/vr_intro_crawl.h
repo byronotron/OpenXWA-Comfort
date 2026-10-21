@@ -65,6 +65,10 @@ float XwaVrIntroCrawl_StarLevel(void);
 float XwaVrIntroCrawl_Brightness(void);
 /* The Hoth shot's lights while it plays; 0 otherwise. */
 int XwaVrIntroCrawl_Lighting(XwaVrEnvLighting* out);
+/* Nonzero while the scene round the screen is the hyperspace tunnel (the
+ * film's own tunnel, 120.93-148 s): its time in it and its brightness
+ * (fading out with the film's). */
+int XwaVrIntroCrawl_Hyperspace(float* tunnel_seconds, float* level);
 
 #ifdef __cplusplus
 }

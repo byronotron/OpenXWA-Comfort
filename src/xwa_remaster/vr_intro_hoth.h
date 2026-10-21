@@ -13,15 +13,29 @@
  *             45 deg radius in view; RESDATA/PLANET.DAT group 6030).
  *   51 s on   the transport (FAMILYTRANSPORT) and the X-wings come in from
  *             in front of Hoth, unlit against the planet.
- *   63-66 s   the light comes up: the craft lit, and out of the dark ahead
- *             the two Star Destroyers (30 deg right at 1.6 km, 8 deg right
- *             at 2.6 km) as the ships turn towards them.
+ *   62.5-66 s the light comes up: the craft lit, and out of the dark the two
+ *             Star Destroyers (55 deg right at 1.6 km, 33 deg right at
+ *             2.6 km) as the ships turn towards them; far off, X-wings and
+ *             TIE fighters wheel in two fights (upper right, upper left).
  *   65.7 s    the transport crosses 18 m in front, just below eye level;
  *             an X-wing passes overhead at 66.75 s.
- *   from 66 s turbolasers from the Star Destroyers, the X-wings' lasers.
  *   67.93 s   the film's cut to the X-wing cockpit: the screen is back at
- *             once and the scene holds at half brightness round it until
- *             the film ends.
+ *             once and the scene holds at half brightness round it. The two
+ *             X-wings join the upper right fight; three TIEs blow up there
+ *             and in the other (83, 90.5, 95 s).
+ *   75.5 s    the ion cannon: a glow on Hoth, the bolt across, a blue flash
+ *             on the lead Star Destroyer's superstructure (77.1 s), its left
+ *             shield generator bursts (77.7 s) and burns on; ion lightning
+ *             crawls over its hull (77.1-79.5 s, 98-106.3 s).
+ *   98-101 s  the transport crosses the lead Star Destroyer's hull, then
+ *             flies on beyond it and jumps to hyperspace at 109.3 s.
+ *   111.67 s  the film's X-Wing Alliance logo card: the screen is put away
+ *             and the menus' logo (vr/logo.rgba) shows in its place, fading
+ *             as the film's does (in 111.67-112.0 s, out 116.4-118.45 s).
+ *   120.93 s  the film's cut into the hyperspace tunnel: the screen is back
+ *             and the scene round it becomes the game's hyperspace tunnel
+ *             (flight.c), at half brightness, fading out with the film's at
+ *             147-148 s into the startup films' stars until the film ends.
  *
  * Positions are the viewer's LOCAL metres (x right, y up, -z ahead, the
  * screen at 0 degrees).
@@ -39,8 +53,17 @@ extern "C" {
 #define XWA_VR_HOTH_CUT 67.93f
 /* The scene's half brightness after the cut, reached over this. */
 #define XWA_VR_HOTH_DIM_SECONDS 1.0f
+/* The film's logo card: in over 0.33 s, out from LOGO_OUT over LOGO_FADE. */
+#define XWA_VR_HOTH_LOGO_IN 111.67f
+#define XWA_VR_HOTH_LOGO_OUT 116.4f
+#define XWA_VR_HOTH_LOGO_FADE 2.05f
+/* The film's cut into its hyperspace tunnel (frame 1814); its tunnel fades
+ * out over HYPER_FADE..HYPER_END. */
+#define XWA_VR_HOTH_HYPER 120.93f
+#define XWA_VR_HOTH_HYPER_FADE 147.0f
+#define XWA_VR_HOTH_HYPER_END 148.0f
 
-/* Loads one piece per call (planet, glow and beam textures, the three
+/* Loads one piece per call (planet, sprites, logo, explosion, the four
  * models); returns 1 once everything it can have is loaded. */
 int XwaVrIntroHoth_Load(AeronCommandBuffer* cmd);
 /* Nonzero when the scene can play (the models are there). */
@@ -49,9 +72,10 @@ void XwaVrIntroHoth_Release(void);
 
 /* Queues the scene at film time `t`; `org`, `right`, `up`, `fwd` and `k`
  * map the viewer's LOCAL metres to the world (org + k * (x right + y up -
- * z fwd)). */
+ * z fwd)); the virtual screen is `screen_w` wide at `screen_dist` metres,
+ * its centre `lift` up (the logo card takes its place). */
 void XwaVrIntroHoth_Submit(AeronScene3D* scene, const float org[3], const float right[3], const float up[3],
-						   const float fwd[3], float k, float t);
+						   const float fwd[3], float k, float t, float screen_dist, float screen_w, float lift);
 /* The scene's sun, Hoth's bounce and space's ambient at film time `t`, in
  * the world of the last Submit; 0 when nothing was submitted. */
 int XwaVrIntroHoth_Lighting(float t, XwaVrEnvLighting* out);

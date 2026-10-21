@@ -669,7 +669,7 @@ void XwaVrIntroCrawl_Update(AeronCommandBuffer* cmd) {
 	s_crawl.t = hold >= 0.0f ? hold : (float)((double)XwaMovieTask_PositionUs() * 1e-6);
 	/* With the Hoth shot the scene stays (held at half brightness round the
 	 * screen) until the film ends. */
-	if (s_crawl.active && !crawl_hoth() && s_crawl.t >= CRAWL_HANDOVER_TO) {
+	if (s_crawl.active && s_crawl.hoth_loaded && !crawl_hoth() && s_crawl.t >= CRAWL_HANDOVER_TO) {
 		/* The film has the screen again: free the textures. */
 		s_crawl.active = 0;
 		s_crawl.release_in = 3;
@@ -684,7 +684,15 @@ int XwaVrIntroCrawl_Active(void) { return s_crawl.active; }
 /* With the Hoth shot the screen comes back, solid and at once, on the
  * film's cut to the X-wing cockpit. */
 int XwaVrIntroCrawl_ScreenHidden(void) {
-	return s_crawl.active && s_crawl.t < (crawl_hoth() ? XWA_VR_HOTH_CUT : CRAWL_HANDOVER_FROM);
+	if (!s_crawl.active) {
+		return 0;
+	}
+	if (!crawl_hoth()) {
+		return s_crawl.t < CRAWL_HANDOVER_FROM;
+	}
+	/* Put away again for the film's logo card, back with its cut into the
+	 * hyperspace tunnel. */
+	return s_crawl.t < XWA_VR_HOTH_CUT || (s_crawl.t >= XWA_VR_HOTH_LOGO_IN && s_crawl.t < XWA_VR_HOTH_HYPER);
 }
 
 float XwaVrIntroCrawl_ScreenFade(void) { return XwaVrIntroCrawl_ScreenHidden() ? 0.0f : 1.0f; }
@@ -703,7 +711,26 @@ float XwaVrIntroCrawl_Brightness(void) {
 	if (!s_crawl.active || !crawl_hoth()) {
 		return 1.0f;
 	}
-	return 1.0f - 0.5f * crawl_smooth((s_crawl.t - XWA_VR_HOTH_CUT) / XWA_VR_HOTH_DIM_SECONDS);
+	const float t = s_crawl.t;
+	if (t >= XWA_VR_HOTH_LOGO_IN && t < XWA_VR_HOTH_HYPER) {
+		/* The logo card: the screen away, the scene full again. */
+		return 0.5f + 0.5f * crawl_smooth((t - XWA_VR_HOTH_LOGO_IN) / 0.33f);
+	}
+	return 1.0f - 0.5f * crawl_smooth((t - XWA_VR_HOTH_CUT) / XWA_VR_HOTH_DIM_SECONDS);
+}
+
+int XwaVrIntroCrawl_Hyperspace(float* tunnel_seconds, float* level) {
+	if (!s_crawl.active || !crawl_hoth() || s_crawl.t < XWA_VR_HOTH_HYPER || s_crawl.t >= XWA_VR_HOTH_HYPER_END) {
+		return 0;
+	}
+	if (tunnel_seconds) {
+		*tunnel_seconds = s_crawl.t - XWA_VR_HOTH_HYPER;
+	}
+	if (level) {
+		*level = 1.0f - crawl_smooth((s_crawl.t - XWA_VR_HOTH_HYPER_FADE) /
+									 (XWA_VR_HOTH_HYPER_END - XWA_VR_HOTH_HYPER_FADE));
+	}
+	return 1;
 }
 
 int XwaVrIntroCrawl_Lighting(XwaVrEnvLighting* out) {
@@ -716,6 +743,9 @@ static float crawl_film_stars(void) {
 	if (!s_crawl.active || !s_crawl.stars.tex || s_crawl.t < CRAWL_START) {
 		return 0.0f;
 	}
+	if (crawl_hoth() && s_crawl.t >= XWA_VR_HOTH_HYPER) {
+		return 0.0f; /* the tunnel, then the startup films' stars */
+	}
 	return XwaVrIntroCrawl_Level();
 }
 
@@ -725,6 +755,10 @@ float XwaVrIntroCrawl_StarLevel(void) {
 	}
 	if (s_crawl.t < CRAWL_START) {
 		return 0.0f;
+	}
+	if (crawl_hoth() && s_crawl.t >= XWA_VR_HOTH_HYPER) {
+		/* Out of the tunnel with the film (147-148 s): the startup stars. */
+		return crawl_smooth((s_crawl.t - XWA_VR_HOTH_HYPER_FADE) / (XWA_VR_HOTH_HYPER_END - XWA_VR_HOTH_HYPER_FADE));
 	}
 	return s_crawl.stars.tex ? 1.0f - XwaVrIntroCrawl_Level() : 1.0f;
 }
@@ -1149,7 +1183,7 @@ void XwaVrIntroCrawl_Submit(AeronScene3D* scene, const float view_pos[3], const 
 	}
 	crawl_submit_stars(scene, &v);
 	if (crawl_hoth()) {
-		XwaVrIntroHoth_Submit(scene, v.org, v.right, v.up, v.fwd, v.k, s_crawl.t);
+		XwaVrIntroHoth_Submit(scene, v.org, v.right, v.up, v.fwd, v.k, s_crawl.t, v.dist, v.m * CRAWL_FILM_W, v.lift);
 	}
 	crawl_submit_text(scene, &v);
 	crawl_submit_logo(scene, &v);
