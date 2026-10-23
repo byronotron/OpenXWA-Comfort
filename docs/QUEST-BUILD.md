@@ -64,6 +64,29 @@ GitHub:
   using Apktool's baksmali/smali; `build_apk.py` patches the Java source the
   same way.
 
+## Optional X-Wing Revival cockpits
+
+VR Options -> Cockpit Model can show the 3D cockpits from
+[X-Wing Revival](https://www.raptor007.com/x-wing-revival/) by Raptor007
+(Blair Sherman), included with his permission; the models are originally by
+the [X-Wing Alliance Upgrade team](https://xwaupgrade.com/). They are
+optional and off by default (X-Wing Alliance's own cockpits). The models are
+not in this repository and not covered by its GPL. The packaging converts
+them with `packaging/quest/tools/gen_revival_cockpits.py` and the
+`aeron_gltf_cook` tool (`-DXWA_BUILD_TOOLS=ON` host build):
+
+```
+# once: copy what the conversion reads out of the Revival download
+python3 packaging/quest/tools/gen_revival_cockpits.py stage X-Wing_Revival_0_6_1_Alpha.zip revival-data
+# at package time: revival-glb/xwing.glb ywing.glb ... falcon.glb
+python3 packaging/quest/tools/gen_revival_cockpits.py build build-host/aeron_gltf_cook revival-data revival-glb
+```
+
+The GLBs go into the APK as `assets/revival_cockpits/*.glb` (on PC: the
+`revival_cockpits` folder next to `OpenXWA.exe`; `XWA_XR_REVIVAL_COCKPITS`
+points the game at another folder). Without them every craft keeps XWA's
+cockpit. Credits: `THIRD-PARTY-NOTICES.txt` (24).
+
 ## Signing key
 
 Test builds are signed with a key that is **not** in this repository; keep it
