@@ -28,6 +28,7 @@ const (
 )
 
 const (
+	appName        = "OpenXWA" // technical (folder names), not shown to players
 	appPackage     = "org.openxwa.quest"
 	appActivity    = "org.openxwa.quest/org.openxwa.quest.OpenXwaActivity"
 	defaultStorage = "/sdcard"
@@ -70,7 +71,8 @@ func usage() string {
 	return launcherName + ` ` + version + `
 
 Puts ` + productName + ` (based on OpenXWA) and your own X-Wing Alliance
-game files on your VR headset (Meta Quest, Pico, Steam Frame) over a USB cable.
+game files on your VR headset (Meta Quest, Pico, Steam Frame) over a USB
+cable or Wi-Fi.
 
 Usage:
   OpenXWA-VR-Launcher [options] [game folder]
@@ -118,6 +120,9 @@ func parseArgs(args []string) (options, error) {
 }
 
 func main() {
+	if runAskpass() { // started by ssh as SSH_ASKPASS (see sshtunnel.go)
+		return
+	}
 	opts, err := parseArgs(os.Args[1:])
 	if err != nil || opts.help || opts.showVersion {
 		setupConsole() // the Windows build has no console of its own
@@ -212,6 +217,11 @@ type app struct {
 	lepton      string // its serial, e.g. "localhost:5555" or "frame:5555"
 	frameUSB    string // the SteamOS USB serial
 	forwardPort int    // port forwarded over USB (0 = none)
+
+	// Wi-Fi (wifi.go, sshtunnel.go).
+	route   string     // usb, usbwifi or wifi (the connection step's choice)
+	netHost string     // the headset's name or IP address over Wi-Fi
+	tunnel  *sshTunnel // Steam Frame through SSH (nil = none)
 }
 
 func newApp() *app {
