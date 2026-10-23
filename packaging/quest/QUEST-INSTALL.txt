@@ -98,9 +98,15 @@ Other headsets (same APK, from 0.0.17-quest100)
     developer mode appears; turn on USB debugging there. The app is under
     Library -> Unknown sources. Android/data can usually be reached from
     Windows Explorer as well.
-  * Steam Frame: turn on developer mode (Steam settings), start "Lepton
-    Development", connect adb, then install as above and start it from the
-    headset's Android apps. Copy the game files with adb push as in step 3.
+  * Steam Frame: turn on developer mode (Steam settings). Once, before
+    starting "Lepton Development", set its Launch Options (Steam Library ->
+    Lepton Development -> Properties) to  LEPTON_NO_CLEANUP=1 %command%
+    Without this, closing Lepton Development deletes every app installed
+    with adb, with its files; with it they should stay. Then start "Lepton
+    Development", connect adb (adb forward tcp:5555 tcp:5555, then
+    adb connect localhost:5555), install as above and start it from the
+    Android home screen in the Lepton Development window. Copy the game
+    files with adb push as in step 3.
   The game picks its defaults from the GPU (see the log's "device tier"
   line): Quest 2 and Pico 4 render fewer pixels at 72 Hz with stronger
   foveation; Quest 3 is unchanged; Steam Frame gets a larger pixel budget.

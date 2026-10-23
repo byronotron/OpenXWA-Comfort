@@ -15,7 +15,12 @@ func (a *app) doneMenu(withStart bool) {
 	if a.lepton != "" {
 		text = "On the headset, OpenXWA is on the Android home screen in the \"Lepton\n" +
 			"Development\" window. (An OpenXWA installed another way may live in a\n" +
-			"different Lepton instance with its own files; use the one installed here.)"
+			"different Lepton instance with its own files; use the one installed here.)\n\n" +
+			"Closing Lepton Development deletes OpenXWA and the copied game files unless\n" +
+			"its Launch Options (Steam Library > Lepton Development > Properties) are:\n" +
+			"    LEPTON_NO_CLEANUP=1 %command%\n\n" +
+			"With this setting they should stay. If it was not set yet: set it, start\n" +
+			"Lepton Development again and run this launcher again."
 	}
 	if !withStart {
 		title, text = "Logs collected", "Attach the files in the logs folder to your bug report."

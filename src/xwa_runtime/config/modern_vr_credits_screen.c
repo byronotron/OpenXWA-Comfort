@@ -8,7 +8,8 @@
 
 #include <stddef.h>
 
-typedef enum { CREDIT_GAP, CREDIT_HEADING, CREDIT_TEXT, CREDIT_NAME, CREDIT_SMALL } CreditStyle;
+/* CREDIT_FINE: CREDIT_SMALL in 13 px rows (a block of several lines). */
+typedef enum { CREDIT_GAP, CREDIT_HEADING, CREDIT_TEXT, CREDIT_NAME, CREDIT_SMALL, CREDIT_FINE } CreditStyle;
 
 typedef struct {
 	CreditStyle style;
@@ -27,6 +28,13 @@ static const CreditLine k_credits[] = {
 	{ CREDIT_GAP, NULL },
 	{ CREDIT_HEADING, "Radial Menu" },
 	{ CREDIT_TEXT, "Radial menu code borrowed from Team Beef's JK:Academy VR" },
+	{ CREDIT_GAP, NULL },
+	/* Optional, off by default (VR Options, "Cockpit Model"). */
+	{ CREDIT_HEADING, "Optional Cockpits (Off by Default)" },
+	{ CREDIT_FINE, "3D cockpits from X-Wing Revival" },
+	{ CREDIT_FINE, "(https://www.raptor007.com/x-wing-revival/) by Raptor007 (Blair Sherman)," },
+	{ CREDIT_FINE, "included with his permission; the models are originally by the" },
+	{ CREDIT_FINE, "X-Wing Alliance Upgrade team (https://xwaupgrade.com/)." },
 	{ CREDIT_GAP, NULL },
 	{ CREDIT_HEADING, "Disclaimer" },
 	{ CREDIT_TEXT, "VR-specific code was generated using Claude AI." },
@@ -77,9 +85,10 @@ static void draw_lines(XwaModernOptionsMenu* menu, const CreditLine* lines, size
 				menu->y += 20;
 				break;
 			case CREDIT_SMALL:
+			case CREDIT_FINE:
 				FrontendDraw_RectAssign(&rect, 0, menu->y, 639, menu->y + 12);
 				FrontendText_DrawCentered(12, lines[i].text, &rect, g_colorPaleBlue);
-				menu->y += 15;
+				menu->y += lines[i].style == CREDIT_FINE ? 13 : 15;
 				break;
 			default:
 				FrontendDraw_RectAssign(&rect, 0, menu->y, 639, menu->y + 12);
@@ -97,17 +106,19 @@ int XwaModernVrCreditsScreen_Update(int menu_center_x, int* cursor_row) {
 	if (!cursor_row) {
 		return 0;
 	}
-	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 90, cursor_row, 2);
+	/* The credits page is the longer one: it starts at the top, like the
+	 * VR options (the menu is clipped at y 435). */
+	XwaModernOptionsMenu_Begin(&menu, menu_center_x, s_page == 0 ? 38 : 90, cursor_row, 2);
 	if (s_page == 0) {
 		XwaModernOptionsMenu_DrawTitle(&menu, "VR Port Credits");
-		menu.y += 18;
+		menu.y += 1;
 		draw_lines(&menu, k_credits, sizeof k_credits / sizeof k_credits[0]);
 	} else {
 		XwaModernOptionsMenu_DrawTitle(&menu, "Open Source Licenses");
 		menu.y += 12;
 		draw_lines(&menu, k_licenses, sizeof k_licenses / sizeof k_licenses[0]);
 	}
-	menu.y += 14;
+	menu.y += s_page == 0 ? 5 : 14;
 	if (XwaModernOptionsMenu_DrawAction(&menu, s_page == 0 ? "Open Source Licenses" : "VR Port Credits", 78, 0)) {
 		s_page = !s_page;
 		*cursor_row = 0;

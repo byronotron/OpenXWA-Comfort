@@ -32,10 +32,15 @@ After you have allowed USB debugging once, the headset can stay on the desk
 (switched on, cable connected) while the launcher copies: the OpenXWA app
 receives and unpacks the files itself, without starting the game.
 
-Steam Frame: turn on Developer Mode, start "Lepton Development" from your
-Steam Library and keep it running; the launcher then connects to it over
-the USB cable (or Wi-Fi). OpenXWA appears in the Lepton window's Android
-home screen. Not tested on a Steam Frame yet.
+Steam Frame: turn on Developer Mode. Once, before starting "Lepton
+Development": in your Steam Library, open its Properties and set Launch
+Options to
+   LEPTON_NO_CLEANUP=1 %command%
+Without this, closing Lepton Development deletes OpenXWA and the copied
+game files; with it they should stay. Then start "Lepton Development"
+and keep it running; the launcher connects to it over the USB cable (or
+Wi-Fi). OpenXWA appears in the Lepton Development window's Android home
+screen. Not tested on a Steam Frame yet.
 
 Windows may say "Windows protected your PC": the launcher is not
 code-signed yet. Click "More info", then "Run anyway".
@@ -70,6 +75,10 @@ Controls
   mapping; touch a tab (or point and pull the trigger). Touch the map to
   zoom.
   VR settings and help: game menu -> VR Options.
+  VR Options -> Cockpit Model: X-Wing Alliance's own cockpits (the
+  default) or the optional 3D cockpits from X-Wing Revival, for the
+  crafts that have one (X-, Y-, A-, B-wing, TIE Fighter, Interceptor and
+  Bomber, YT-1300 / Falcon). You can move the HUD panels in either.
 
 
 Problems?
@@ -102,5 +111,9 @@ Licence
 OpenXWA and this VR port are free software under the GNU GPL version 3
 (LICENSE.txt). Source: https://github.com/neitey/OpenXWA-Quest
 Third-party components and their licences: THIRD-PARTY-NOTICES.txt.
+3D cockpits from X-Wing Revival (https://www.raptor007.com/x-wing-revival/)
+by Raptor007 (Blair Sherman), included with his permission; the models are
+originally by the X-Wing Alliance Upgrade team (https://xwaupgrade.com/).
+They are optional and off by default (VR Options -> Cockpit Model).
 Star Wars and X-Wing Alliance are trademarks of their owners; this is an
 unofficial fan project and contains no game data.

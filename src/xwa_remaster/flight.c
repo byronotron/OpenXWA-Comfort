@@ -20,6 +20,7 @@
 #include "xwa_remaster/hud.h"
 #include "xwa_remaster/hud_fixed.h"
 #include "xwa_remaster/vr_cockpit_hud.h"
+#include "xwa_remaster/vr_revival_cockpit.h"
 #include "xwa_remaster/vr_hud_occlusion.h"
 #include "xwa_remaster/vr_hand_overlay.h"
 #include "xwa_remaster/vr_env.h"
@@ -3333,6 +3334,29 @@ static void fl_submit_hyperspace_cockpit(AeronCommandBuffer* cmd, XwaRemasterAss
 	if (!snap->cockpit_valid || !cam->cockpit_visible || !anchor_found) {
 		return;
 	}
+	/* The X-Wing Revival cockpit when chosen (VR Options), in the jump too. */
+	AeronSceneMesh* revival_cockpit =
+		fl_xr_stereo_eligible(cam) && snap->cockpit.seat == 0
+			? XwaVrRevivalCockpit_Mesh(cmd, snap->cockpit.model_name, snap->hud.instruments.player_object_type)
+			: NULL;
+	if (revival_cockpit) {
+		AeronSceneMeshInstance inst;
+		memset(&inst, 0, sizeof inst);
+		inst.mesh = revival_cockpit;
+		float xwa_m[16];
+		fl_model_matrix(anchor_bw, s.camera_local, xwa_m);
+		XwaVrRevivalCockpit_Matrix(xwa_m, s.camera_local, inst.transform);
+		memcpy(inst.prev_transform, inst.transform, sizeof inst.transform);
+		inst.base_color_emissive_strength = fl_xr_cockpit_bloom_cap(1);
+		inst.zero_velocity = 1;
+		inst.no_local_lights = 1;
+		/* The GLB -> OPT axis mapping is a reflection, which turns
+		 * the faces' winding around: cull the other side. */
+		inst.cull_mode = AERON_CULL_FRONT;
+		inst.shadow_flags = AERON_SCENE_INSTANCE_NO_CAST_SHADOW;
+		AeronScene_AddMeshInstance(s.scene, &inst);
+		return;
+	}
 	AeronSceneMesh* cockpit_mesh = XwaRemasterShip_MeshForName(snap->cockpit.model_name);
 	if (!cockpit_mesh) {
 		return;
@@ -5273,7 +5297,33 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	 * rotary meshes by the captured aim. */
 	const AeronSceneMark cockpit_begin = AeronScene_Mark(s.scene);
 	XwaVrHudOcclusion_Reset();
-	if (fl_cockpit_drawn(snap, cam) && cockpit_anchor) {
+	XwaVrRevivalCockpit_BeginFrame();
+	/* VR Options "Cockpit Model": an X-Wing Revival cockpit, fixed at the
+	 * eye, in place of the XWA cockpit OPT in the VR eyes (pilot seat, crafts
+	 * that have one; see vr_revival_cockpit.h). */
+	AeronSceneMesh* revival_cockpit =
+		stereo && snap->cockpit.seat == 0 && fl_cockpit_drawn(snap, cam) && cockpit_anchor
+			? XwaVrRevivalCockpit_Mesh(cmd, snap->cockpit.model_name, snap->hud.instruments.player_object_type)
+			: NULL;
+	if (revival_cockpit) {
+		const float units = AERON_OPT_UNITS_PER_METER * fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f);
+		AeronSceneMeshInstance inst;
+		memset(&inst, 0, sizeof inst);
+		inst.mesh = revival_cockpit;
+		float xwa_m[16];
+		fl_cockpit_model_matrix(&snap->cockpit, cockpit_anchor, s.crows, s.camera_local, xwa_m);
+		XwaVrRevivalCockpit_Matrix(xwa_m, s.camera_local, inst.transform);
+		memcpy(inst.prev_transform, inst.transform, sizeof inst.transform);
+		inst.base_color_emissive_strength = fl_xr_cockpit_bloom_cap(stereo);
+		inst.zero_velocity = 1;
+		inst.no_local_lights = 1;
+		/* The GLB -> OPT axis mapping is a reflection, which turns
+		 * the faces' winding around: cull the other side. */
+		inst.cull_mode = AERON_CULL_FRONT;
+		inst.shadow_flags = AERON_SCENE_INSTANCE_NO_CAST_SHADOW | AERON_SCENE_INSTANCE_USE_RECEIVER_LOCAL_SHADOW;
+		AeronScene_AddMeshInstance(s.scene, &inst);
+		XwaVrHudOcclusion_SetCockpit(revival_cockpit, inst.transform, NULL, s.crows, s.camera_local, units);
+	} else if (fl_cockpit_drawn(snap, cam) && cockpit_anchor) {
 		AeronSceneMesh* cockpit_mesh = XwaRemasterShip_MeshForName(snap->cockpit.model_name);
 		if (cockpit_mesh) {
 			float m[16];
@@ -5480,7 +5530,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 			panel_count = s.suppress_hud || out_of_cockpit
 							  ? 0
 							  : XwaVrCockpitHud_Build(g_xr_hud_w, g_xr_hud_h, fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f),
-																 cmd_split, snap->cockpit.model_name, panels,
+																 cmd_split, XwaVrRevivalCockpit_HudName(snap->cockpit.model_name), panels,
 																 AERON_XR_MAX_PANELS);
 			XwaVrCockpitHud_PrepareOverlay(cmd, g_xr_hud_w, g_xr_hud_h);
 			if (panel_count == 0 && !s.suppress_hud && !out_of_cockpit) {
@@ -5919,6 +5969,7 @@ void XwaRemasterFlight_Shutdown(void) {
 		s_xr_present_format = AERON_TEXTURE_FORMAT_UNKNOWN;
 	}
 	XwaVrCockpitHud_Shutdown();
+	XwaVrRevivalCockpit_Shutdown();
 	XwaVrHudOcclusion_Shutdown();
 	XwaVrHandOverlay_Shutdown();
 	if (s_xr_bloom_blit) {
