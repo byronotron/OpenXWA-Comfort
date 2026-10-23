@@ -287,6 +287,7 @@ add_library(xwa_remaster STATIC
     src/xwa_remaster/original_2d.c
     src/xwa_remaster/sky_stars.c
     src/xwa_remaster/vr_cockpit_hud.c
+    src/xwa_remaster/vr_revival_cockpit.c
     src/xwa_remaster/vr_lap_console.c
     src/xwa_remaster/vr_hud_occlusion.c
     src/xwa_remaster/vr_hand_overlay.c

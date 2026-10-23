@@ -37,6 +37,7 @@ enum {
 	VR_HUD_SIZE,
 	VR_DEPTH_BOOST,
 	VR_WORLD_SCALE,
+	VR_COCKPIT_MODEL,
 	VR_POINT_LIGHTS,
 	VR_SHADOWS,
 	VR_CONSOLE,
@@ -107,6 +108,10 @@ static const char* const k_bloom_texts[] = { "Shared (Recommended)", "Per Eye", 
 /* Off is the recommended setting (dynamic lights, cockpit shadows). */
 static const char* const k_off_rec_texts[] = { "Off (Recommended)", "On" };
 static const char* const k_bloom_values[] = { "1", "eye", "0" };
+/* XWA's cockpit OPTs, or the optional X-Wing Revival cockpits for the
+ * crafts that have one (vr_revival_cockpit.h). */
+static const char* const k_cockpit_texts[] = { "X-Wing Alliance", "X-Wing Revival" };
+static const char* const k_cockpit_values[] = { "xwa", "revival" };
 
 /* Page 1 holds what costs or saves GPU time: each night-shift
  * optimization can be switched off there on its own to find a regression. */
@@ -115,6 +120,8 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "XWA_XR_HUD_SCALE", "Helmet HUD Size", k_size_texts, k_size_values, 5, 2, 81, 0 },
 	{ "XWA_XR_DEPTH_BOOST", "Depth Boost", k_boost_texts, k_boost_values, 9, 0, 82, 0 },
 	{ "XWA_XR_WORLD_SCALE", "World Scale", k_scale_texts, k_scale_values, 9, 6, 83, 0 },
+	/* Live: the next frame draws the other cockpit. */
+	{ "XWA_XR_COCKPIT_MODEL", "Cockpit Model", k_cockpit_texts, k_cockpit_values, 2, 0, 63, 0 },
 	{ "XWA_POINT_LIGHTS", "Dynamic Lights", k_off_rec_texts, k_toggle_values, 2, 0, 84, 1 },
 	{ "XWA_XR_SHADOWS", "Cockpit Shadows", k_off_rec_texts, k_toggle_values, 2, 0, 85, 1 },
 	{ "XWA_XR_CONSOLE", "Lap Console", k_toggle_texts, k_toggle_values, 2, 1, 88, 0 },
@@ -174,7 +181,7 @@ static int vr_index_from_env(const VrSetting* setting) {
 	}
 	if (setting->values == k_layout_values || setting->values == k_voice_values || setting->values == k_fov_values ||
 		setting->values == k_env_values || setting->values == k_shading_values || setting->values == k_bloom_values ||
-		setting->values == k_hands_values) {
+		setting->values == k_hands_values || setting->values == k_cockpit_values) {
 		for (int i = 0; i < setting->count; i++) {
 			if (SDL_strcasecmp(env, setting->values[i]) == 0) {
 				return i;
@@ -431,6 +438,7 @@ static const struct {
 	{ "XWA_XR_SIDE_PANEL", "1" },
 	{ "AERON_XR_INVERT_PITCH", "0" },
 	{ "XWA_XR_HANDS", "controllers" },
+	{ "XWA_XR_COCKPIT_MODEL", "xwa" },
 };
 
 /* Hand-placed spots that come with them (LOCAL space, metres; HUD panels
@@ -508,7 +516,7 @@ static void vr_draw_settings(XwaModernOptionsMenu* menu, int page) {
 			 * before quitting, without backing out of this screen. */
 			XwaModernVrOptions_SaveValue(setting->key, setting->values[value]);
 		}
-		menu->y -= 4; /* 16 px rows */
+		menu->y -= page == 0 ? 5 : 4; /* 15 px rows on the long main page, else 16 */
 	}
 }
 
@@ -641,31 +649,31 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 		*cursor_row = 0;
 		return 0;
 	}
-	menu.y -= 4;
+	menu.y -= 5;
 	if (XwaModernOptionsMenu_DrawAction(&menu, "View Voice Commands", 64, 0)) {
 		page = VR_PAGE_VOICE;
 		*cursor_row = 0;
 		return 0;
 	}
-	menu.y -= 4;
+	menu.y -= 5;
 	vr_draw_settings(&menu, 0);
 
 	if (XwaModernOptionsMenu_DrawAction(&menu, "Reset HUD Panel Positions", 93, 0)) {
 		vr_reset_hud_layouts();
 	}
-	menu.y -= 4;
+	menu.y -= 5;
 	if (XwaModernOptionsMenu_DrawAction(&menu, "Reset Lap Console Position", 91, 0)) {
 		SDL_setenv_unsafe("XWA_XR_CONSOLE_POSE", "", 1);
 		XwaModernVrOptions_SaveValue("XWA_XR_CONSOLE_POSE", "");
 		Aeron_LogInfo("xwa.config", "lap console back at its default spot");
 	}
-	menu.y -= 4;
+	menu.y -= 5;
 	if (XwaModernOptionsMenu_DrawAction(&menu, "Performance / GPU...", 71, 0)) {
 		page = VR_PAGE_PERF;
 		*cursor_row = 0;
 		return 0;
 	}
-	menu.y -= 4;
+	menu.y -= 5;
 	back = XwaModernOptionsMenu_DrawAction(&menu, FrontendString_Get(STR_BACK), 87, 0);
 	back |= XwaModernOptionsMenu_TakeEscape(&menu);
 	if (!back) {
