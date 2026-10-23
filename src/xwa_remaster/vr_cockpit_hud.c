@@ -64,6 +64,85 @@ static const CkSpec k_spec[CK_COUNT] = {
 	[CK_MFD_RIGHT] = { "right MFD", 29.0f, -25.0f, 0.62f, 0.17f, 0.13f },
 };
 
+/* Default spots that differ per cockpit (by the name the panel layout is
+ * kept under, upper case): the X-Wing Revival cockpits (VR Options, see
+ * vr_revival_cockpit.h) have their dashboards and screens elsewhere than
+ * XWA's. Each panel sits just in front of the dash or screen it covers, so
+ * it is seen at the same depth as the cockpit around it; it keeps its
+ * default angular size (its box and text scale grow with the distance).
+ * Fitted to the models from the eye with a depth map of each cockpit. */
+typedef struct CkSpot {
+	int panel;
+	float yaw, pitch, distance; /* distance 0 ends the list */
+} CkSpot;
+
+static const struct {
+	const char* cockpit;
+	CkSpot spots[CK_COUNT + 1];
+} k_cockpit_spots[] = {
+	/* Pods below the canopy struts; the targeting computer on the
+	 * intercept screen, the readout row on the target screen above it. */
+	{ "REVIVALXWING",
+	  { { CK_LEFT_POD, -43.0f, -9.0f, 0.53f },
+		{ CK_RIGHT_POD, 43.0f, -9.0f, 0.53f },
+		{ CK_MESSAGES, 0.0f, -4.0f, 0.95f },
+		{ CK_MESSAGES_LOW, 0.0f, -16.0f, 0.65f },
+		{ CK_CMD, 0.0f, -28.0f, 0.60f },
+		{ CK_MFD_LEFT, -29.0f, -25.0f, 0.55f },
+		{ CK_MFD_RIGHT, 29.0f, -25.0f, 0.55f } } },
+	/* The dash is 0.75-0.9 m away. */
+	{ "REVIVALYWING",
+	  { { CK_MESSAGES, 0.0f, -7.0f, 0.93f },
+		{ CK_MESSAGES_LOW, 0.0f, -13.0f, 0.83f },
+		{ CK_CMD, 0.0f, -27.0f, 0.73f },
+		{ CK_MFD_LEFT, -29.0f, -25.0f, 0.72f },
+		{ CK_MFD_RIGHT, 29.0f, -25.0f, 0.72f } } },
+	{ "REVIVALAWING",
+	  { { CK_MESSAGES_LOW, 0.0f, -14.0f, 0.62f },
+		{ CK_CMD, 0.0f, -27.0f, 0.63f },
+		{ CK_MFD_LEFT, -29.0f, -25.0f, 0.59f },
+		{ CK_MFD_RIGHT, 29.0f, -25.0f, 0.59f } } },
+	/* The dash is 1.1 m away: the targeting computer on the round centre
+	 * screen, the MFDs on the two round side screens. */
+	{ "REVIVALBWING",
+	  { { CK_MESSAGES_LOW, 0.0f, -12.0f, 1.07f },
+		{ CK_CMD, 0.0f, -25.0f, 1.07f },
+		{ CK_MFD_LEFT, -18.5f, -19.0f, 1.08f },
+		{ CK_MFD_RIGHT, 18.5f, -19.0f, 1.08f } } },
+	/* TIEs: the pods on the hull wall beside the viewport, the targeting
+	 * computer on the console's centre (above the yoke, which would hide
+	 * its lower edge), the MFDs on the console's side screens; the
+	 * flight-group line above the readout row, in the viewport. */
+	{ "REVIVALTIEFIGHTER",
+	  { { CK_LEFT_POD, -40.0f, 2.0f, 0.78f },
+		{ CK_RIGHT_POD, 40.0f, 2.0f, 0.78f },
+		{ CK_MESSAGES_LOW, 0.0f, -11.0f, 0.95f },
+		{ CK_CMD, 0.0f, -22.0f, 0.63f },
+		{ CK_MFD_LEFT, -21.0f, -23.0f, 0.64f },
+		{ CK_MFD_RIGHT, 21.0f, -23.0f, 0.64f } } },
+	{ "REVIVALTIEINTERCEPTOR",
+	  { { CK_LEFT_POD, -40.0f, 2.0f, 0.78f },
+		{ CK_RIGHT_POD, 40.0f, 2.0f, 0.78f },
+		{ CK_MESSAGES_LOW, 0.0f, -11.0f, 0.95f },
+		{ CK_CMD, 0.0f, -22.0f, 0.63f },
+		{ CK_MFD_LEFT, -21.0f, -23.0f, 0.64f },
+		{ CK_MFD_RIGHT, 21.0f, -23.0f, 0.64f } } },
+	{ "REVIVALTIEBOMBER",
+	  { { CK_LEFT_POD, -40.0f, 2.0f, 0.85f },
+		{ CK_RIGHT_POD, 40.0f, 2.0f, 0.85f },
+		{ CK_MESSAGES_LOW, 0.0f, -12.0f, 0.95f },
+		{ CK_CMD, 0.0f, -24.0f, 0.59f },
+		{ CK_MFD_LEFT, -21.0f, -23.0f, 0.60f },
+		{ CK_MFD_RIGHT, 21.0f, -23.0f, 0.60f } } },
+	/* YT-1300: the console slopes away from 0.7 to 1.1 m. */
+	{ "REVIVALFALCON",
+	  { { CK_LEFT_POD, -40.0f, 2.0f, 0.71f },
+		{ CK_MESSAGES_LOW, 0.0f, -16.0f, 1.11f },
+		{ CK_CMD, 0.0f, -26.0f, 0.68f },
+		{ CK_MFD_LEFT, -29.0f, -25.0f, 0.66f },
+		{ CK_MFD_RIGHT, 29.0f, -25.0f, 0.66f } } },
+};
+
 static const XwaHudWidgetId k_widgets[CK_COUNT][5] = {
 	[CK_LEFT_POD] = { XWA_HUD_WIDGET_FORE_RADAR_FRAME, XWA_HUD_WIDGET_FORE_RADAR_SCOPE, XWA_HUD_WIDGET_LEFT_POWER,
 					  XWA_HUD_WIDGET_SHIELD_HULL, XWA_HUD_WIDGET_COUNT },
@@ -128,6 +207,12 @@ static struct {
 	int outline_ready;
 	int cmd_separate;
 	int initialized;
+	/* This cockpit's panel specs (k_spec with its k_cockpit_spots) and the
+	 * readout row's size factor (the targeting computer's distance over
+	 * its default). */
+	char spec_cockpit[96];
+	CkSpec spec[CK_COUNT];
+	float row_scale;
 } s_ck;
 
 /* Short ids for the saved layout. */
@@ -233,22 +318,24 @@ static void ck_place_row(AeronXrPanel* out, const int* index_of, float world_sca
 	 * row is symmetric, so the wider side decides the scale. */
 	const float cw_px = ic >= 0 ? (float)out[ic].rect[2] : 0.0f;
 	const float side_px = fmaxf(is >= 0 ? (float)out[is].rect[2] : 0.0f, ik >= 0 ? (float)out[ik].rect[2] : 0.0f);
-	const float m_per_px = fminf(CK_ROW_MAX_M_PER_UNIT * 480.0f / (float)target_h,
-								 (CK_ROW_W_M - 2.0f * CK_ROW_GAP_M) / fmaxf(1.0f, cw_px + 2.0f * side_px));
+	const float k = s_ck.row_scale > 0.0f ? s_ck.row_scale : 1.0f;
+	const float gap = CK_ROW_GAP_M * k;
+	const float m_per_px = fminf(k * CK_ROW_MAX_M_PER_UNIT * 480.0f / (float)target_h,
+								 (k * CK_ROW_W_M - 2.0f * gap) / fmaxf(1.0f, cw_px + 2.0f * side_px));
 	AeronXrPanel cmd;
 	memset(&cmd, 0, sizeof cmd);
 	if (index_of[CK_CMD] >= 0) {
 		cmd = out[index_of[CK_CMD]];
 	} else {
-		ck_pose(&k_spec[CK_CMD], world_scale, &cmd);
-		cmd.size[0] = k_spec[CK_CMD].box_w / world_scale;
-		cmd.size[1] = k_spec[CK_CMD].box_h / world_scale;
+		ck_pose(&s_ck.spec[CK_CMD], world_scale, &cmd);
+		cmd.size[0] = s_ck.spec[CK_CMD].box_w / world_scale;
+		cmd.size[1] = s_ck.spec[CK_CMD].box_h / world_scale;
 	}
 	static const float ux[3] = { 1.0f, 0.0f, 0.0f }, uy[3] = { 0.0f, 1.0f, 0.0f };
 	float ax[3], ay[3];
 	ck_rotate(cmd.orientation, ux, ax);
 	ck_rotate(cmd.orientation, uy, ay);
-	const float half_c = 0.5f * cw_px * m_per_px + (ic >= 0 ? CK_ROW_GAP_M : 0.5f * CK_ROW_GAP_M);
+	const float half_c = 0.5f * cw_px * m_per_px + (ic >= 0 ? gap : 0.5f * gap);
 	const int ids[3] = { is, ic, ik };
 	for (int k = 0; k < 3; ++k) {
 		if (ids[k] < 0) {
@@ -258,7 +345,7 @@ static void ck_place_row(AeronXrPanel* out, const int* index_of, float world_sca
 		const float w = (float)panel->rect[2] * m_per_px, h = (float)panel->rect[3] * m_per_px;
 		const float cx = k == 1 ? 0.0f : k == 0 ? -(half_c + 0.5f * w) : half_c + 0.5f * w;
 		const float off_x = cx / world_scale;
-		const float off_y = 0.5f * cmd.size[1] + (CK_ROW_GAP_M * 0.5f + 0.5f * h) / world_scale;
+		const float off_y = 0.5f * cmd.size[1] + (gap * 0.5f + 0.5f * h) / world_scale;
 		for (int a = 0; a < 3; ++a) {
 			panel->position[a] = cmd.position[a] + ax[a] * off_x + ay[a] * off_y;
 		}
@@ -288,6 +375,39 @@ static void ck_qnorm(float q[4]) {
 		q[0] = q[1] = q[2] = 0.0f;
 		q[3] = 1.0f;
 	}
+}
+
+/* The panel specs for `cockpit`: the defaults, with its own spots. */
+static void ck_select_specs(const char* cockpit) {
+	char name[96];
+	size_t n = 0;
+	for (const char* c = cockpit ? cockpit : ""; *c && n + 1 < sizeof name; ++c) {
+		if (isalnum((unsigned char)*c)) {
+			name[n++] = (char)toupper((unsigned char)*c);
+		}
+	}
+	name[n] = '\0';
+	if (s_ck.row_scale > 0.0f && strcmp(name, s_ck.spec_cockpit) == 0) {
+		return;
+	}
+	snprintf(s_ck.spec_cockpit, sizeof s_ck.spec_cockpit, "%s", name);
+	memcpy(s_ck.spec, k_spec, sizeof s_ck.spec);
+	for (size_t i = 0; i < sizeof k_cockpit_spots / sizeof k_cockpit_spots[0]; ++i) {
+		if (strcmp(name, k_cockpit_spots[i].cockpit) != 0) {
+			continue;
+		}
+		for (const CkSpot* spot = k_cockpit_spots[i].spots; spot->distance > 0.0f; ++spot) {
+			CkSpec* spec = &s_ck.spec[spot->panel];
+			const float k = spot->distance / k_spec[spot->panel].distance;
+			spec->yaw = spot->yaw;
+			spec->pitch = spot->pitch;
+			spec->distance = spot->distance;
+			spec->box_w *= k;
+			spec->box_h *= k;
+			spec->m_per_unit *= k;
+		}
+	}
+	s_ck.row_scale = s_ck.spec[CK_CMD].distance / k_spec[CK_CMD].distance;
 }
 
 /* XWA_XR_HUD_POSE_ + the cockpit's name in capitals. */
@@ -502,6 +622,7 @@ int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, int cmd
 	if (s_ck.grab_panel[0] < 0 && s_ck.grab_panel[1] < 0) {
 		ck_read_layout(cockpit);
 	}
+	ck_select_specs(cockpit);
 	memset(s_ck.visible, 0, sizeof s_ck.visible);
 	if (!out || max_out <= 0 || target_w <= 0 || target_h <= 0 || !drawn || !drawn->valid) {
 		return 0;
@@ -674,7 +795,7 @@ int XwaVrCockpitHud_Build(int target_w, int target_h, float world_scale, int cmd
 		panel->rect[2] = (int)w;
 		panel->rect[3] = (int)h;
 		panel->source = p == CK_CMD && cmd_separate ? 1 : 0;
-		const CkSpec* spec = &k_spec[p];
+		const CkSpec* spec = &s_ck.spec[p];
 		float size_w = spec->box_w, size_h = spec->box_w * h / w;
 		if (spec->m_per_unit > 0.0f) {
 			const float m_per_px = spec->m_per_unit * 480.0f / (float)target_h;
