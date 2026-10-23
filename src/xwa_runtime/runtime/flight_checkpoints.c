@@ -14,6 +14,7 @@
 #include "xwa/config/pilot.h"
 #include "xwa/frontend/mission_setup.h"
 #include "xwa/flight/flight_display.h"
+#include "xwa_runtime/runtime/flight_pause_task.h"
 #include "xwa_runtime/runtime/flight_savestate.h"
 #include "xwa_runtime/runtime/flight_task.h"
 #include "xwa_runtime/timing/host_clock.h"
@@ -22,12 +23,16 @@
 #include <string.h>
 
 enum {
-	CP_OFFER_DELAY_US = 1500000,  /* the craft's last moments first */
+	CP_OFFER_DELAY_US = 1500000,   /* the craft's last moments first */
 	CP_OFFER_REPEAT_US = 30000000, /* the line written again now and then (its "ago") */
 	CP_OFFER_HOLD_TICKS = 600,     /* the message pane's timer, kept above this */
 	CP_OFFER_TIMEOUT_US = 45000000,
 	CP_DEATH_MENU_DELAY_US = 2500000, /* the death camera first */
-	CP_DEATH_MENU_OPEN_US = 2000000,  /* the menu did not open by then: the old offer */
+	/* The wreck gone (the mission's end pending, the world stopped): no
+	 * longer than this on the still picture. */
+	CP_DEATH_MENU_ENDED_US = 500000,
+	CP_DEATH_MENU_OPEN_US = 2000000, /* still not open: the mission ends as it would */
+	CP_DEATH_MENU_ARM_US = 600000,   /* presses that came with it are not choices */
 };
 
 static struct {
@@ -38,8 +43,11 @@ static struct {
 	uint64_t offer_start_us;
 	uint64_t offer_shown_us;
 	int offer_answer; /* -1 none, 0 carry on, 1 retry */
-	int death_menu;   /* 0 none, 1 waiting, 2 asked to open, 3 open */
-	uint64_t death_us;
+	/* 0 none, 1 craft lost (death camera), 2 due but not open yet, 3 open */
+	int death_menu;
+	uint64_t death_us; /* the loss; in state 2 the first try to open */
+	uint64_t shown_us; /* when it was first drawn (0: not yet) */
+	int restarting;    /* Restart Mission chosen: the end check waits for it */
 	XwaFlightCheckpointRequest request;
 } s_cp = { .offer_answer = -1 };
 
@@ -70,6 +78,8 @@ void XwaFlightCheckpoints_Reset(void) {
 	s_cp.offering = 0;
 	s_cp.offer_answer = -1;
 	s_cp.death_menu = 0;
+	s_cp.shown_us = 0;
+	s_cp.restarting = 0;
 	g_configDeathMenuActive = 0;
 	s_cp.request = XWA_FLIGHT_CHECKPOINT_REQUEST_NONE;
 	s_cp.seen_destroyed = g_localPlayerDestroyedCount;
@@ -84,6 +94,8 @@ static int cp_restore(FlightSaveState* state, const char* what) {
 	s_cp.offering = 0;
 	s_cp.offer_answer = -1;
 	s_cp.death_menu = 0;
+	s_cp.shown_us = 0;
+	g_configDeathMenuActive = 0;
 	s_cp.seen_destroyed = g_localPlayerDestroyedCount;
 	snprintf(line, sizeof line, "%s (%d:%02d)", what, at / 60, at % 60);
 	cp_note(line);
@@ -108,43 +120,72 @@ void XwaFlightCheckpoints_Request(XwaFlightCheckpointRequest request) {
 
 int XwaFlightCheckpoints_HoldingMissionEnd(void) { return s_cp.offering || s_cp.death_menu; }
 
+int XwaFlightCheckpoints_SkipMissionEndCheck(void) {
+	return XwaFlightCheckpoints_HoldingMissionEnd() || (s_cp.restarting && g_flightExitRequest == 2);
+}
+
+int XwaFlightCheckpoints_DeathMenuWanted(void) { return cp_active() && s_cp.death_menu != 0; }
+
+int XwaFlightCheckpoints_DeathMenuShown(void) {
+	const uint64_t now_us = XwaTime_GetElapsedUs();
+	if (!s_cp.death_menu) {
+		return 1;
+	}
+	if (s_cp.death_menu != 3) {
+		Aeron_LogInfo("xwa.checkpoint", "death menu open (%s)",
+					  s_cp.death_menu == 1 ? "the pilot's menu key" : "due");
+	}
+	s_cp.death_menu = 3;
+	g_configDeathMenuActive = 1;
+	if (!s_cp.shown_us) {
+		s_cp.shown_us = now_us;
+	}
+	return now_us - s_cp.shown_us >= CP_DEATH_MENU_ARM_US;
+}
+
 int XwaFlightCheckpoints_DeathMenuDue(void) {
-	if (s_cp.death_menu != 1 || XwaTime_GetElapsedUs() - s_cp.death_us < CP_DEATH_MENU_DELAY_US ||
+	const uint64_t now_us = XwaTime_GetElapsedUs();
+	if (!cp_active() || g_inHangarReady || XwaFlightPauseTask_IsActive() ||
 		FlightDisplay_IsFrontendModalActive()) {
 		return 0;
 	}
-	s_cp.death_menu = 2;
-	s_cp.death_us = XwaTime_GetElapsedUs();
+	if (s_cp.death_menu == 1) {
+		/* After the death camera; sooner once the wreck is gone and the
+		 * mission's end is pending (the world stands still then). */
+		const uint64_t since = now_us - s_cp.death_us;
+		if (since < CP_DEATH_MENU_DELAY_US &&
+			!(g_flightMissionEndPending && since >= CP_DEATH_MENU_ENDED_US)) {
+			return 0;
+		}
+		s_cp.death_menu = 2;
+		s_cp.death_us = now_us;
+		Aeron_LogInfo("xwa.checkpoint", "craft lost: death menu");
+	} else if (s_cp.death_menu == 2) {
+		if (now_us - s_cp.death_us >= CP_DEATH_MENU_OPEN_US) {
+			Aeron_LogWarn("xwa.checkpoint", "death menu did not open: the mission ends as it would");
+			s_cp.death_menu = 0;
+			g_configDeathMenuActive = 0;
+			return 0;
+		}
+	} else {
+		return 0;
+	}
 	g_configDeathMenuActive = 1;
-	Aeron_LogInfo("xwa.checkpoint", "craft lost: death menu");
 	return 1;
 }
 
 /* The death menu's progress (between two steps, with the menu closed). */
 static void cp_service_death_menu(void) {
-	const uint64_t now_us = XwaTime_GetElapsedUs();
-	const int open = FlightDisplay_IsFrontendModalActive();
 	if (s_cp.death_menu == 1 && FlightSaveState_CanCapture()) {
+		Aeron_LogInfo("xwa.checkpoint", "flying again: no death menu");
 		s_cp.death_menu = 0; /* flying again (another craft of the flight group) */
-	} else if (s_cp.death_menu == 2) {
-		if (open) {
-			s_cp.death_menu = 3;
-		} else if (now_us - s_cp.death_us >= CP_DEATH_MENU_OPEN_US) {
-			/* The menu key did not get through: the message-pane offer. */
-			Aeron_LogWarn("xwa.checkpoint", "death menu did not open");
-			s_cp.death_menu = 0;
-			g_configDeathMenuActive = 0;
-			if (XwaFlightCheckpoints_HasQuickSave()) {
-				s_cp.offering = 1;
-				s_cp.offer_start_us = now_us;
-				s_cp.offer_shown_us = 0;
-				s_cp.offer_answer = -1;
-			}
-		}
-	} else if (s_cp.death_menu == 3 && !open) {
+		g_configDeathMenuActive = 0;
+	} else if (s_cp.death_menu == 3 && !FlightDisplay_IsFrontendModalActive()) {
 		/* Closed: Continue lets the mission end as it would; a restart or
 		 * the quick save is the request handled next. */
+		Aeron_LogInfo("xwa.checkpoint", "death menu closed");
 		s_cp.death_menu = 0;
+		s_cp.shown_us = 0;
 		g_configDeathMenuActive = 0;
 	}
 }
@@ -187,6 +228,8 @@ static void cp_handle_request(void) {
 			g_configDeathMenuActive = 0;
 			if (!g_filmPlaybackMode) {
 				Aeron_LogInfo("xwa.checkpoint", "restart mission");
+				/* Not the end a lost craft's mission would take (its hangar). */
+				s_cp.restarting = 1;
 				g_flightExitRequest = 2;
 				Hud_ClearFlightSurface();
 			}
@@ -281,6 +324,8 @@ void XwaFlightCheckpoints_ServiceFrame(void) {
 	}
 	if (g_inHangarReady) {
 		s_cp.offering = 0;
+		s_cp.death_menu = 0;
+		g_configDeathMenuActive = 0;
 		s_cp.seen_destroyed = g_localPlayerDestroyedCount;
 		return;
 	}
@@ -295,6 +340,8 @@ void XwaFlightCheckpoints_ServiceFrame(void) {
 		if (g_pilotData.missionDirectoryId != MISSION_DIRECTORY_SKIRMISH) {
 			s_cp.death_menu = 1;
 			s_cp.death_us = XwaTime_GetElapsedUs();
+			s_cp.shown_us = 0;
+			Aeron_LogInfo("xwa.checkpoint", "craft lost");
 		}
 	}
 	if (s_cp.offering) {

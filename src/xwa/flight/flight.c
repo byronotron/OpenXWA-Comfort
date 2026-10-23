@@ -10405,6 +10405,24 @@ int Flight_ContinueOptionsModal(void) {
 	return 1;
 }
 
+#ifdef XWA_MODERN
+/* Opens the in-flight options modal for the local pilot directly, as its
+ * Escape does, without going through the flight input: the death menu
+ * (xwa_runtime/runtime/flight_checkpoints.c) opens this way, since once
+ * the lost craft's wreck is gone the mission's end is pending and
+ * Flight_UpdateEntity no longer reads the pilot's keys. Returns 1 when the
+ * modal is up. */
+int Flight_OpenLocalOptionsModal(void) {
+	if (g_localPlayer < 0 || g_localPlayer >= XWA_PLAYER_COUNT) {
+		return 0;
+	}
+	if (!g_flightOptionsModalPending && !FlightDisplay_IsFrontendModalActive()) {
+		(void)Flight_UpdateEntity_OpenOptions((unsigned int)g_localPlayer);
+	}
+	return g_flightOptionsModalPending && FlightDisplay_IsFrontendModalActive();
+}
+#endif
+
 static __inline int Flight_UpdateEntity_HandleLocalHotkeys(unsigned int playerIdx) {
 	if (playerIdx != (unsigned int)g_localPlayer || g_flightSimSideEffectsSuppressed) {
 		return 0;

@@ -924,10 +924,11 @@ static int XwaFlightTask_RunSinglePlayerFrame(void) {
 	}
 	g_inputTimestamp += (int)Time_GetFrameDelta();
 	timing.networkProcessTicks = g_inputTimestamp - timing.preStepTimestamp;
-	/* While a retry from a checkpoint is offered (the craft lost), the
-	 * mission's end waits; the world keeps going around the wreck. */
+	/* While the death menu is due or open (the craft lost), the mission's
+	 * end waits; so does the lost craft's end while a restart chosen there
+	 * is on its way. */
 	missionEndPending =
-		XwaFlightCheckpoints_HoldingMissionEnd() ? 0 : Flight_CheckMissionEndAndExitRequest();
+		XwaFlightCheckpoints_SkipMissionEndCheck() ? 0 : Flight_CheckMissionEndAndExitRequest();
 	if (XwaFlightTask_EnterRequestedHangarReady(XWA_FLIGHT_TASK_HANGAR_CONTINUE_FLIGHT)) {
 		return 1;
 	}

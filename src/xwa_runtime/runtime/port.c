@@ -874,8 +874,10 @@ static void XwaPort_TickBody(int32_t delta_us) {
 
 		XwaPort_SyncVrThrottleLever();
 		if (XwaFlightCheckpoints_DeathMenuDue()) {
-			/* The craft is lost: the in-flight menu as the death menu. */
-			XwaPort_QueueFlightActionKey(KEY_ESCAPE);
+			/* The craft is lost: the in-flight menu as the death menu,
+			 * opened directly (once the wreck is gone the flight no longer
+			 * reads the pilot's keys, a queued Escape would be lost). */
+			(void)Flight_OpenLocalOptionsModal();
 		}
 		XwaFlightTask_Tick();
 		if (wasPaused) {

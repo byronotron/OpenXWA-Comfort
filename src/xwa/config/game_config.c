@@ -214,12 +214,29 @@ static int Config_DeathMenuRow(const char* text, int y, int rowIndex, int button
 }
 
 /* The in-flight menu after the player's craft was lost
- * (xwa_runtime/runtime/flight_checkpoints.c): the mission waits on it. */
+ * (xwa_runtime/runtime/flight_checkpoints.c): the mission waits on it.
+ * Only a chosen row closes it: Escape (the VR controller's B or menu
+ * button) moves to Continue, and for a moment after it shows, presses
+ * still meant for the flight are not choices. */
 static int Config_DeathMenuScreen(void) {
 	enum { ROW_RESTART, ROW_QUICK_LOAD, ROW_HINTS, ROW_CONTINUE, ROW_COUNT };
 	FrontendRect rect;
+	const int armed = XwaFlightCheckpoints_DeathMenuShown();
 	char keyState = (char)Config_GetMenuNavKey();
 	int y = 150;
+	if (!armed) {
+		keyState = 0;
+		Keyboard_FlushCharBuffer();
+		FrontendMouse_ClearClicks();
+	} else if (keyState == CONFIG_KEY_ESCAPE) {
+		FrontendSound_PlayUISound("configsound", 1, 0, 255, 12 * g_gameConfig.sfxDatapadVolume, 63);
+		Keyboard_FlushCharBuffer();
+		g_menuCursorRow = ROW_CONTINUE;
+		keyState = 0;
+	}
+	if (g_menuCursorRow < 0 || g_menuCursorRow >= ROW_COUNT) {
+		g_menuCursorRow = 0;
+	}
 	if (keyState == CONFIG_KEY_VK_UP || keyState == CONFIG_KEY_VK_DOWN) {
 		FrontendSound_PlayUISound("configsound", 1, 0, 255, 12 * g_gameConfig.sfxDatapadVolume, 63);
 		Keyboard_FlushCharBuffer();
@@ -230,19 +247,21 @@ static int Config_DeathMenuScreen(void) {
 	FrontendDraw_RectAssign(&rect, 0, y, 639, y + 15);
 	FrontendText_DrawCentered(20, "Your craft was destroyed", &rect, g_colorLightBlue);
 	y += 45;
-	if (Config_DeathMenuRow("Restart Mission", y, ROW_RESTART, 30, 0, &keyState)) {
+	if (Config_DeathMenuRow("Restart Mission", y, ROW_RESTART, 30, 0, &keyState) && armed) {
 		XwaFlightCheckpoints_Request(XWA_FLIGHT_CHECKPOINT_REQUEST_RESTART);
 		return 1;
 	}
 	y += 30;
 	if (Config_DeathMenuRow("Load Quick Save", y, ROW_QUICK_LOAD, 33, !XwaFlightCheckpoints_HasQuickSave(),
-							&keyState)) {
+							&keyState) &&
+		armed) {
 		XwaFlightCheckpoints_Request(XWA_FLIGHT_CHECKPOINT_REQUEST_QUICK_LOAD);
 		return 1;
 	}
 	y += 30;
 	if (Config_DeathMenuRow("Show Mission Hints", y, ROW_HINTS, 36, !XwaModernMissionHintsScreen_Available(),
-							&keyState)) {
+							&keyState) &&
+		armed) {
 		s_configMissionHintsRow = ROW_HINTS;
 		XwaModernMissionHintsScreen_Reset();
 		g_pendingMenuScreen = 25;
@@ -251,7 +270,7 @@ static int Config_DeathMenuScreen(void) {
 	}
 	y += 30;
 	/* The mission then ends as it would have. */
-	if (Config_DeathMenuRow("Continue", y, ROW_CONTINUE, 24, 0, &keyState) || keyState == CONFIG_KEY_ESCAPE) {
+	if (Config_DeathMenuRow("Continue", y, ROW_CONTINUE, 24, 0, &keyState) && armed) {
 		Keyboard_FlushCharBuffer();
 		return 1;
 	}
@@ -295,7 +314,10 @@ int Config_MainMenuScreen(void) {
 #endif
 
 #ifdef XWA_MODERN
-	if (g_configDeathMenuActive && g_configRestrictedOptionsModalActive) {
+	/* The craft is lost: the death menu, also when the pilot's own menu key
+	 * opened the menu during the death camera. */
+	if ((g_configDeathMenuActive || XwaFlightCheckpoints_DeathMenuWanted()) &&
+		g_configRestrictedOptionsModalActive) {
 		return Config_DeathMenuScreen();
 	}
 	rowCount = g_configRestrictedOptionsModalActive ? 8 : 12;

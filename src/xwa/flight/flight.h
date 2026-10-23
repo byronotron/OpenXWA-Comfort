@@ -452,6 +452,9 @@ void Flight_ModernSaveStateRegions(XwaSaveStateRegionFn add, void* ctx);
 #endif
 /* Complete a pending nonblocking options modal before flight timing resumes. */
 int Flight_ContinueOptionsModal(void);
+#ifdef XWA_MODERN
+int Flight_OpenLocalOptionsModal(void);
+#endif
 #endif
 int Flight_PumpWindowMessages(void);
 int Pause_ProcessInput(void);
