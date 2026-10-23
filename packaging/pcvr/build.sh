@@ -4,6 +4,7 @@
 #
 #   packaging/pcvr/build.sh [--version X.Y.Z] [--out DIR] [--deps DIR]
 #                           [--vr-assets DIR] [--voice-model DIR] [--no-voice]
+#                           [--revival-cockpits DIR] [--no-revival-cockpits]
 #                           [--worktree] [--deps-only]
 #
 # Run from anywhere; the source is the git repository holding this script.
@@ -23,6 +24,14 @@
 # and --voice-model (encoder.onnx, decoder.onnx, joiner.onnx, tokens.txt).
 # Missing ones are reported; the game runs without them (no logo card etc.).
 #
+# The optional X-Wing Revival cockpits (VR Options -> Cockpit Model; by
+# Raptor007, bundled with his permission, see THIRD-PARTY-NOTICES 24) are
+# not in the repository either: --revival-cockpits DIR holds the Revival
+# files staged by packaging/quest/tools/gen_revival_cockpits.py stage (DIR/data)
+# and a host aeron_gltf_cook (DIR/tools/aeron_gltf_cook, or PCVR_REVIVAL_COOK);
+# they are converted into the package's revival_cockpits folder next to
+# OpenXWA.exe. A DIR with only ready GLBs (DIR/glb/*.glb) is copied as is.
+#
 # Output: <out>/OpenXWA-PCVR-<version>-win64.zip
 set -euo pipefail
 
@@ -32,7 +41,9 @@ DEPS=/root/pcvr-deps
 SP_DEFAULT=/tmp/claude-0/-home-claude/d5b75674-cc0b-5e76-88ee-fc1c5ab6c399/scratchpad
 VR_ASSETS=${PCVR_VR_ASSETS:-$SP_DEFAULT/vrassets}
 VOICE_MODEL=${PCVR_VOICE_MODEL:-$SP_DEFAULT/vrassets/voice}
+REVIVAL=${PCVR_REVIVAL_COCKPITS:-$SP_DEFAULT/vrassets/revival}
 WITH_VOICE=1
+WITH_REVIVAL=1
 FROM_WORKTREE=0
 DEPS_ONLY=0
 JOBS=$(nproc)
@@ -45,9 +56,11 @@ while [ $# -gt 0 ]; do
 		--vr-assets) VR_ASSETS=$2; shift 2 ;;
 		--voice-model) VOICE_MODEL=$2; shift 2 ;;
 		--no-voice) WITH_VOICE=0; shift ;;
+		--revival-cockpits) REVIVAL=$2; shift 2 ;;
+		--no-revival-cockpits) WITH_REVIVAL=0; shift ;;
 		--worktree) FROM_WORKTREE=1; shift ;;
 		--deps-only) DEPS_ONLY=1; shift ;;
-		-h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,34p' "$0"; exit 0 ;;
 		*) echo "build.sh: unknown argument $1" >&2; exit 2 ;;
 	esac
 done
@@ -334,6 +347,24 @@ if [ "$WITH_VOICE" = 1 ]; then
 		if [ -f "$VOICE_MODEL/$f" ]; then cp "$VOICE_MODEL/$f" "$PKG/voice/"; else missing="$missing $f"; fi
 	done
 	[ -z "$missing" ] || echo "WARNING: voice model files missing from $VOICE_MODEL:$missing" >&2
+fi
+if [ "$WITH_REVIVAL" = 1 ]; then
+	# The eight Revival cockpit GLBs (xwing ywing awing bwing tiefighter
+	# tieinterceptor tiebomber falcon), converted now when the staged data
+	# is there.
+	if [ -d "$REVIVAL/data" ]; then
+		python3 "$SOURCE/packaging/quest/tools/gen_revival_cockpits.py" build \
+			"${PCVR_REVIVAL_COOK:-$REVIVAL/tools/aeron_gltf_cook}" "$REVIVAL/data" "$PKG/revival_cockpits" \
+			> "$BUILD/revival_cockpits.log" 2>&1 || { tail -20 "$BUILD/revival_cockpits.log" >&2; echo "ERROR: Revival cockpit conversion failed, see $BUILD/revival_cockpits.log" >&2; exit 1; }
+	elif ls "$REVIVAL"/glb/*.glb > /dev/null 2>&1; then
+		mkdir -p "$PKG/revival_cockpits"
+		cp "$REVIVAL"/glb/*.glb "$PKG/revival_cockpits/"
+	fi
+	count=$( (ls "$PKG"/revival_cockpits/*.glb 2>/dev/null || true) | wc -l)
+	if [ "$count" -ne 8 ]; then
+		echo "ERROR: $count of 8 X-Wing Revival cockpits from $REVIVAL (--no-revival-cockpits builds without them; every craft then keeps XWA's cockpit)" >&2
+		exit 1
+	fi
 fi
 missing=""
 for f in $VR_ASSET_FILES; do
