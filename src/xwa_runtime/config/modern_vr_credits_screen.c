@@ -17,8 +17,8 @@ typedef struct {
 } CreditLine;
 
 static const CreditLine k_credits[] = {
-	{ CREDIT_TEXT, "This VR port is based on the open source project" },
-	{ CREDIT_TEXT, "OpenXWA by Adrien Moulin" },
+	{ CREDIT_TEXT, "Neitey's XW: Alliance VR is based on the open source project" },
+	{ CREDIT_TEXT, "OpenXWA by Adrien Moulin (https://github.com/elyosh/OpenXWA)" },
 	{ CREDIT_GAP, NULL },
 	{ CREDIT_HEADING, "AI Assisted Coding" },
 	{ CREDIT_NAME, "Neitey" },

@@ -2,6 +2,9 @@
 
 #include "aeron/aeron.h"
 
+#include <SDL3/SDL_stdinc.h>
+#include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 enum {
@@ -17,6 +20,13 @@ typedef struct XwaControllerMappingState {
 } XwaControllerMappingState;
 
 static XwaControllerMappingState g_controllerMapping;
+
+/* VR flight with the Touch controllers (the thumbstick response curve). */
+static struct {
+	int flight;
+	int stick_held;
+	float stick[3]; /* the grabbed flight stick: x, y, roll (-1..1) */
+} g_xrCurve;
 
 static int ControllerMapping_ProfileEqual(const XwaControllerProfile* lhs, const XwaControllerProfile* rhs) {
 	int i;
@@ -338,6 +348,90 @@ int XwaControllerMapping_ConsumeSelectionChange(void) {
 	return 1;
 }
 
+void XwaControllerMapping_SetXrFlight(int enabled) { g_xrCurve.flight = enabled != 0; }
+
+void XwaControllerMapping_SetXrVirtualStick(int held, float x, float y, float roll) {
+	g_xrCurve.stick_held = held != 0;
+	g_xrCurve.stick[0] = held ? x : 0.0f;
+	g_xrCurve.stick[1] = held ? y : 0.0f;
+	g_xrCurve.stick[2] = held ? roll : 0.0f;
+}
+
+double XwaControllerMapping_XrStickCurveExponent(void) {
+	const char* env = SDL_getenv("XWA_XR_STICK_CURVE");
+	double exponent = env && env[0] ? atof(env) : 2.0;
+
+	if (!(exponent >= 1.0)) {
+		exponent = 1.0;
+	}
+	return exponent > 4.0 ? 4.0 : exponent;
+}
+
+int16_t XwaControllerMapping_XrStickCurve(int16_t value, double deadzone, double exponent) {
+	const double full = value < 0 ? 32768.0 : 32767.0;
+	const double a = (value < 0 ? -(double)value : (double)value) / full;
+	double t;
+	long out;
+
+	if (exponent <= 1.0 || a <= deadzone || deadzone >= 0.99) {
+		return value;
+	}
+	t = (a - deadzone) / (1.0 - deadzone);
+	out = lround((deadzone + (1.0 - deadzone) * pow(t > 1.0 ? 1.0 : t, exponent)) * full);
+	return (int16_t)(value < 0 ? -out : out);
+}
+
+/* Response curve of the Touch thumbsticks in VR flight (XWA_XR_STICK_CURVE,
+ * default 2.0 "Precise"; 1 = linear): small deflections turn gently for fine
+ * aim, full deflection still gives the full turn rate. Pitch, yaw and roll
+ * only (not the throttle), curved beyond the larger of the binding's dead
+ * zone and the game's own (Joystick_PollRawAxes: a twentieth of the X/Y
+ * range, a tenth of R's, i.e. 10 % / 20 % of the deflection), so the craft
+ * answers as soon as the stick leaves it, just gently. The grabbed virtual
+ * flight stick shares the right thumbstick's axes (whichever is pushed
+ * further); an axis it drives stays linear. Mouse, desktop gamepads and
+ * joysticks never come here (only the "openxr:touch" controller). */
+static void ControllerMapping_ApplyXrStickCurve(const AeronControllerSnapshot* controller,
+												XwaControllerLogicalState* state) {
+	static const int k_axes[] = { XWA_CONTROLLER_AXIS_YAW, XWA_CONTROLLER_AXIS_PITCH, XWA_CONTROLLER_AXIS_ROLL };
+	static const double k_game_deadzone[] = { 0.10, 0.10, 0.20 };
+	const XwaControllerProfile* profile;
+	double exponent;
+
+	if (!g_xrCurve.flight || !controller || controller->kind != AERON_CONTROLLER_KIND_GAMEPAD ||
+		strcmp(controller->path, "openxr:touch") != 0) {
+		return;
+	}
+	exponent = XwaControllerMapping_XrStickCurveExponent();
+	if (exponent <= 1.0) {
+		return;
+	}
+	profile = &g_controllerMapping.options.gamepad;
+	for (size_t i = 0; i < sizeof k_axes / sizeof k_axes[0]; ++i) {
+		const XwaControllerAxisBinding* binding = &profile->axes[k_axes[i]];
+		const int16_t value = state->source_axis_values[k_axes[i]];
+		const double deadzone =
+			binding->deadzone > k_game_deadzone[i] ? (double)binding->deadzone : k_game_deadzone[i];
+		float stick = 0.0f;
+
+		if (binding->source < 0 || ControllerMapping_IsTrigger(controller, binding->source)) {
+			continue;
+		}
+		if (binding->source == AERON_GAMEPAD_AXIS_LEFTX) {
+			stick = g_xrCurve.stick[0];
+		} else if (binding->source == AERON_GAMEPAD_AXIS_LEFTY) {
+			stick = g_xrCurve.stick[1];
+		} else if (binding->source == AERON_GAMEPAD_AXIS_RIGHTX) {
+			stick = g_xrCurve.stick[2];
+		}
+		if (g_xrCurve.stick_held && stick != 0.0f && fabsf(stick) * 32767.0f + 64.0f >= (float)abs(value)) {
+			continue; /* the virtual flight stick drives this axis */
+		}
+		state->axes[k_axes[i]] = ControllerMapping_CenteredAxis(
+			XwaControllerMapping_XrStickCurve(value, deadzone, exponent), binding->invert, binding->deadzone);
+	}
+}
+
 int XwaControllerMapping_GetState(XwaControllerLogicalState* state) {
 	const AeronInputSnapshot* input = Aeron_InputSnapshot();
 	const AeronControllerSnapshot* controller = XwaControllerMapping_SelectedController();
@@ -345,6 +439,9 @@ int XwaControllerMapping_GetState(XwaControllerLogicalState* state) {
 	ControllerMapping_MapSnapshot(&g_controllerMapping.options, controller, input && input->has_focus,
 								  g_controllerMapping.digital_axis_buttons,
 								  &g_controllerMapping.digital_axis_buttons, state);
+	if (state && controller && controller->connected && input && input->has_focus) {
+		ControllerMapping_ApplyXrStickCurve(controller, state);
+	}
 	return controller != NULL;
 }
 

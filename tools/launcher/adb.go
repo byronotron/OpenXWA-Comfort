@@ -257,9 +257,9 @@ func (a *app) downloadPlatformTools() (string, error) {
 	ans := ui.Ask(Question{
 		Kind:  "buttons",
 		Title: "Google's adb tool is needed",
-		Text: "OpenXWA needs Google's free \"adb\" tool (Android Platform Tools) to talk\n" +
-			"to the headset. It is not on this computer yet, so it can be downloaded\n" +
-			"now from Google (a few MB).\n\n" +
+		Text: productName + " needs Google's free \"adb\" tool (Android Platform\n" +
+			"Tools) to talk to the headset. It is not on this computer yet, so it can be\n" +
+			"downloaded now from Google (a few MB).\n\n" +
 			"Downloading it means you accept the Android SDK License Agreement:",
 		Link: "https://developer.android.com/studio/terms",
 		Options: []Option{

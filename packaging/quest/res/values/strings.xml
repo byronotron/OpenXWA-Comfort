@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">OpenXWA</string>
+    <!-- The headset library's app label. The release repack takes it into
+         resources.arsc with tools/app_label_arsc.py. -->
+    <string name="app_name">Neitey\'s XW: Alliance VR</string>
 </resources>

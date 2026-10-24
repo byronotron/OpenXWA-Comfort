@@ -74,9 +74,9 @@ func setupConsole() {
 
 // showOpenProblem tells the user the address when no window could be opened.
 func showOpenProblem(url string) {
-	text, _ := syscall.UTF16PtrFromString("The OpenXWA-VR Launcher window did not open.\r\n\r\n" +
+	text, _ := syscall.UTF16PtrFromString("The " + launcherName + " window did not open.\r\n\r\n" +
 		"Please open this address in your web browser:\r\n" + url)
-	title, _ := syscall.UTF16PtrFromString("OpenXWA-VR Launcher")
+	title, _ := syscall.UTF16PtrFromString(launcherName)
 	const mbOK, mbIconInfo, mbSetForeground = 0x0, 0x40, 0x10000
 	procMessageBoxW.Call(0, uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(title)), mbOK|mbIconInfo|mbSetForeground)
 }

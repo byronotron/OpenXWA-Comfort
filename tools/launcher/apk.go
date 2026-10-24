@@ -34,10 +34,10 @@ func (a *app) findAPK() error {
 		}
 	}
 	if best == "" {
-		return fail("%s", "The OpenXWA app (OpenXWA-quest-<version>.apk) was not found next to the\n"+
+		return fail("%s", "The app (OpenXWA-quest-<version>.apk) was not found next to the\n"+
 			"launcher in:\n  "+a.exeDir+"\n"+
-			"Please unzip the whole OpenXWA zip file into a folder first, then start\n"+
-			"OpenXWA-VR-Launcher.exe from that folder.")
+			"Please unzip the whole downloaded zip file (OpenXWA-Quest-<version>.zip)\n"+
+			"into a folder first, then start OpenXWA-VR-Launcher.exe from that folder.")
 	}
 	a.apkPath = filepath.Join(a.exeDir, best)
 	a.apkVersion = bestVer
@@ -73,23 +73,23 @@ func (a *app) installApp() error {
 	downgrade := false
 	switch {
 	case !installed:
-		say("Installing OpenXWA %s...", bundled)
+		say("Installing %s %s...", productName, bundled)
 	case a.apkVersion != "" && inst != "" && compareVersions(inst, a.apkVersion) == 0:
-		say("OpenXWA %s is already installed and up to date.", inst)
+		say("%s %s is already installed and up to date.", productName, inst)
 		return nil
 	case a.apkVersion != "" && inst != "" && compareVersions(inst, a.apkVersion) > 0:
-		say("The headset has OpenXWA %s, which is newer than the one that came with\nthis launcher (%s).", inst, a.apkVersion)
-		if askYesNo("A newer OpenXWA is installed", "Keep the newer one?", true) {
-			say("Keeping OpenXWA %s.", inst)
+		say("The headset has version %s, which is newer than the one that came with\nthis launcher (%s).", inst, a.apkVersion)
+		if askYesNo("A newer version is installed", "Keep the newer one?", true) {
+			say("Keeping version %s.", inst)
 			return nil
 		}
 		downgrade = true
-		say("Installing OpenXWA %s...", bundled)
+		say("Installing %s %s...", productName, bundled)
 	default:
 		if inst == "" {
 			inst = "an older version"
 		}
-		say("Updating OpenXWA from %s to %s...", inst, bundled)
+		say("Updating %s from %s to %s...", productName, inst, bundled)
 	}
 
 	args := []string{"install", "-r"}
@@ -99,28 +99,29 @@ func (a *app) installApp() error {
 	args = append(args, a.apkPath)
 	out, err := a.adb.run(10*time.Minute, args...)
 	if strings.Contains(out, "INSTALL_FAILED_UPDATE_INCOMPATIBLE") {
-		return fail("OpenXWA could not be updated: the copy already on the headset was signed\n" +
+		return fail("The app could not be updated: the copy already on the headset was signed\n" +
 			"differently (it came from another source or build).\n" +
 			"\n" +
-			"To fix this, OpenXWA would have to be uninstalled on the headset first.\n" +
+			"To fix this, the app would have to be uninstalled on the headset first.\n" +
 			"WARNING: uninstalling also deletes the game files and pilots that were\n" +
 			"copied to the headset. The launcher does not do this for you. If you\n" +
-			"want to: on the headset open Settings > Apps, uninstall OpenXWA, then run\n" +
+			"want to: on the headset open Settings > Apps, uninstall the app (named\n" +
+			"\"" + productName + "\" or, before this version, \"OpenXWA\"), then run\n" +
 			"this launcher again.")
 	}
 	if err != nil || !strings.Contains(out, "Success") {
 		reason := failureLine(out)
 		switch {
 		case strings.Contains(out, "INSTALL_FAILED_INSUFFICIENT_STORAGE"):
-			return fail("The headset does not have enough free space to install OpenXWA.\n" +
+			return fail("The headset does not have enough free space to install the app.\n" +
 				"Please free up some space and run the launcher again.")
 		case strings.Contains(out, "INSTALL_FAILED_VERSION_DOWNGRADE"):
-			return fail("The headset has a newer OpenXWA that cannot be replaced by this older one.\n" +
+			return fail("The headset has a newer version of the app that cannot be replaced by this\nolder one. " +
 				"Download the newest launcher instead.")
 		}
-		return fail("Installing OpenXWA failed:\n  %s\nCheck the USB cable and try again.", reason)
+		return fail("Installing the app failed:\n  %s\nCheck the USB cable and try again.", reason)
 	}
-	say("OpenXWA %s is installed.", bundled)
+	say("%s %s is installed.", productName, bundled)
 	return nil
 }
 

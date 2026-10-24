@@ -15,11 +15,11 @@ BEGIN
     BEGIN
         BLOCK "040904B0"
         BEGIN
-            VALUE "FileDescription", "OpenXWA"
+            VALUE "FileDescription", "Neitey's XW: Alliance VR"
             VALUE "FileVersion", "@XWA_VERSION@"
             VALUE "InternalName", "OpenXWA"
             VALUE "OriginalFilename", "OpenXWA.exe"
-            VALUE "ProductName", "OpenXWA"
+            VALUE "ProductName", "Neitey's XW: Alliance VR"
             VALUE "ProductVersion", "@XWA_VERSION@"
         END
     END

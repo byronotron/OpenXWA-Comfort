@@ -7,6 +7,7 @@
 #include "aeron/scene/gltf_mesh.h"
 #include "aeron/scene/mesh.h"
 #include "xwa_remaster/vr_lap_console.h"
+#include "xwa_runtime/input/controller_mapping.h"
 
 #include <SDL3/SDL_stdinc.h>
 #include <SDL3/SDL_timer.h>
@@ -409,6 +410,14 @@ static float st_wrap(float a) {
 }
 
 /* Tilt -> -1..1 with a centre dead zone. */
+/* The stick's deflection to Aeron (it drives the right thumbstick's axes)
+ * and to the controller mapping (the axes it drives skip the thumbstick
+ * response curve: the stick stays linear). */
+static void st_set_virtual_stick(int held, float x, float y, float roll) {
+	Aeron_XrSetVirtualStick(held, x, y, roll);
+	XwaControllerMapping_SetXrVirtualStick(held, x, y, roll);
+}
+
 static float st_axis_value(float angle, float max_rad, float dead_rad) {
 	const float a = fabsf(angle);
 	if (a <= dead_rad) {
@@ -530,8 +539,8 @@ void XwaVrStick_Update(void) {
 		s_st.twist *= k;
 	}
 	const float dead = ST_DEAD_DEG * ST_PI / 180.0f;
-	Aeron_XrSetVirtualStick(s_st.held, st_axis_value(s_st.side, max_rad, dead), st_axis_value(s_st.fwd, max_rad, dead),
-							roll);
+	st_set_virtual_stick(s_st.held, st_axis_value(s_st.side, max_rad, dead), st_axis_value(s_st.fwd, max_rad, dead),
+						 roll);
 	for (int h = 0; h < 2; ++h) {
 		if (s_st.hover[h] || (h == 1 && s_st.held) || (h == 0 && s_st.moving)) {
 			XwaVrConsole_CaptureGrip(h); /* the grip takes the stick, not a game action */
@@ -701,7 +710,7 @@ void XwaVrStick_EndFrame(void) {
 		}
 		s_st.hover[0] = s_st.hover[1] = 0;
 		s_st.fwd = s_st.side = s_st.twist = 0.0f;
-		Aeron_XrSetVirtualStick(0, 0.0f, 0.0f, 0.0f);
+		st_set_virtual_stick(0, 0.0f, 0.0f, 0.0f);
 		s_st.shown = 0;
 	}
 	s_st.updated = 0;
@@ -717,7 +726,7 @@ int XwaVrStick_TakePlacement(char* out, int size) {
 }
 
 void XwaVrStick_Shutdown(void) {
-	Aeron_XrSetVirtualStick(0, 0.0f, 0.0f, 0.0f);
+	st_set_virtual_stick(0, 0.0f, 0.0f, 0.0f);
 	for (int i = 0; i < ST_MESHES; ++i) {
 		if (s_st.meshes[i].mesh) {
 			AeronScene_MeshDestroy(s_st.meshes[i].mesh);

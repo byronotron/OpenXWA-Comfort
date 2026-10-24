@@ -60,7 +60,7 @@ int XwaModernVideoOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 	paper_white = (uint8_t)options.paper_white;
 	changed = 0;
 	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 140, cursor_row, 11);
-	XwaModernOptionsMenu_DrawTitle(&menu, "OpenXWA Video Options");
+	XwaModernOptionsMenu_DrawTitle(&menu, "Enhanced Video Options");
 
 	changed |=
 		XwaModernOptionsMenu_DrawCycleU8(&menu, &window_mode, "Window Mode", window_mode_texts, 2, 60, 0);

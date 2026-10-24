@@ -47,6 +47,7 @@ enum {
 	VR_CONTROLLER_LABELS,
 	VR_FLIGHT_STICK,
 	VR_STICK_TWIST,
+	VR_STICK_CURVE,
 	VR_INVERT_PITCH,
 	VR_HANDED,
 	VR_SWAP_STICKS,
@@ -112,6 +113,10 @@ static const char* const k_bloom_values[] = { "1", "eye", "0" };
  * crafts that have one (vr_revival_cockpit.h). */
 static const char* const k_cockpit_texts[] = { "X-Wing Alliance", "X-Wing Revival" };
 static const char* const k_cockpit_values[] = { "xwa", "revival" };
+/* Thumbstick response in flight (controller_mapping.c): the curve's
+ * exponent, 1 = linear. */
+static const char* const k_curve_texts[] = { "Direct", "Medium", "Precise", "Very Precise" };
+static const char* const k_curve_values[] = { "1.0", "1.5", "2.0", "2.6" };
 
 /* Page 1 holds what costs or saves GPU time: each night-shift
  * optimization can be switched off there on its own to find a regression. */
@@ -135,6 +140,9 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "XWA_XR_CONTROLLER_LABELS", "Controller Button Labels", k_toggle_texts, k_toggle_values, 2, 1, 66, 0 },
 	{ "XWA_XR_FLIGHT_STICK", "Flight Stick", k_toggle_texts, k_toggle_values, 2, 1, 94, 0 },
 	{ "XWA_XR_STICK_TWIST", "Stick Twist Rolls", k_toggle_texts, k_toggle_values, 2, 0, 96, 0 },
+	/* Precise: small thumbstick movements turn gently for fine aim; full
+	 * deflection still turns at full rate. */
+	{ "XWA_XR_STICK_CURVE", "Stick Response", k_curve_texts, k_curve_values, 4, 2, 62, 0 },
 	{ "AERON_XR_INVERT_PITCH", "Invert Thumbstick Pitch", k_toggle_texts, k_toggle_values, 2, 0, 97, 0 },
 	/* Mirrors the controllers' game roles (the flight stick stays right). */
 	{ "AERON_XR_LEFT_HANDED", "Controls", k_hand_texts, k_toggle_values, 2, 0, 75, 0 },
@@ -165,6 +173,9 @@ static const VrSetting k_settings[VR_COUNT] = {
 	/* The shim's per-pass GPU timestamps (the log's "GPU per frame"). */
 	{ "XWA_XR_GPU_TIMING", "GPU Timing in Log (restart)", k_toggle_texts, k_toggle_values, 2, 1, 72, 1 },
 };
+
+/* "Restore VR Defaults" writes every setting in one vr_write_cfg call. */
+_Static_assert(VR_COUNT <= 32, "vr_write_cfg takes at most 32 keys at once");
 
 static struct {
 	int loaded;
@@ -463,6 +474,7 @@ static const struct {
 	{ "XWA_XR_SHIP_3D", "0.5" },
 	{ "XWA_XR_SIDE_PANEL", "1" },
 	{ "AERON_XR_INVERT_PITCH", "0" },
+	{ "XWA_XR_STICK_CURVE", "2.0" },
 	{ "XWA_XR_HANDS", "controllers" },
 	{ "XWA_XR_COCKPIT_MODEL", "xwa" },
 };
@@ -594,6 +606,7 @@ static void vr_draw_help(XwaModernOptionsMenu* menu) {
 	y = vr_help_row(y, "Left menu button", "Pause / game menu");
 	y = vr_help_row(y, "Thumb rest", "Voice command (as set in Voice Commands)");
 	y = vr_help_row(y, "In menus", "Right controller points, trigger selects");
+	y = vr_help_row(y, "Stick Response", "Precise: fine aim; full tilt, full rate");
 	menu->y = y + 12;
 }
 
@@ -668,38 +681,40 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 		}
 		return 0;
 	}
-	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 38, cursor_row, vr_page_rows(0) + 6);
+	/* The longest page: it starts higher and its action rows are 14 px, so
+	 * Back stays above the clip at y 435. */
+	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 28, cursor_row, vr_page_rows(0) + 6);
 	XwaModernOptionsMenu_DrawTitle(&menu, "VR Options");
 	if (XwaModernOptionsMenu_DrawAction(&menu, "Help", 65, 0)) {
 		page = VR_PAGE_HELP;
 		*cursor_row = 0;
 		return 0;
 	}
-	menu.y -= 5;
+	menu.y -= 6;
 	if (XwaModernOptionsMenu_DrawAction(&menu, "View Voice Commands", 64, 0)) {
 		page = VR_PAGE_VOICE;
 		*cursor_row = 0;
 		return 0;
 	}
-	menu.y -= 5;
+	menu.y -= 6;
 	vr_draw_settings(&menu, 0);
 
 	if (XwaModernOptionsMenu_DrawAction(&menu, "Reset HUD Panel Positions", 93, 0)) {
 		vr_reset_hud_layouts();
 	}
-	menu.y -= 5;
+	menu.y -= 6;
 	if (XwaModernOptionsMenu_DrawAction(&menu, "Reset Lap Console Position", 91, 0)) {
 		SDL_setenv_unsafe("XWA_XR_CONSOLE_POSE", "", 1);
 		XwaModernVrOptions_SaveValue("XWA_XR_CONSOLE_POSE", "");
 		Aeron_LogInfo("xwa.config", "lap console back at its default spot");
 	}
-	menu.y -= 5;
+	menu.y -= 6;
 	if (XwaModernOptionsMenu_DrawAction(&menu, "Performance / GPU...", 71, 0)) {
 		page = VR_PAGE_PERF;
 		*cursor_row = 0;
 		return 0;
 	}
-	menu.y -= 5;
+	menu.y -= 6;
 	back = XwaModernOptionsMenu_DrawAction(&menu, FrontendString_Get(STR_BACK), 87, 0);
 	back |= XwaModernOptionsMenu_TakeEscape(&menu);
 	if (!back) {

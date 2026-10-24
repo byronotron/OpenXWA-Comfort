@@ -76,11 +76,11 @@ func (a *app) helperCall(timeout time.Duration, method, arg string) (helperResul
 		msg := strings.TrimSpace(out)
 		switch {
 		case strings.Contains(msg, "Result: null"):
-			msg = "the OpenXWA app refused the request"
+			msg = "the app on the headset refused the request"
 		case msg == "" && err != nil:
 			msg = err.Error()
 		case msg == "":
-			msg = "no answer from the OpenXWA app"
+			msg = "no answer from the app on the headset"
 		}
 		return nil, errors.New(firstLine(msg))
 	}
@@ -132,7 +132,7 @@ func (a *app) removeShellLeftovers() error {
 	if perr != nil || n == 0 {
 		return nil
 	}
-	say("Removing what an earlier launcher copied over USB (%d files and folders):\nOpenXWA cannot read it. It is copied again.", n)
+	say("Removing what an earlier launcher copied over USB (%d files and folders):\nthe game cannot read it. It is copied again.", n)
 	if out, err := a.adb.shell(10*time.Minute, find+" -exec rm -rf {} + 2>&1"); err != nil {
 		if err == errClosed {
 			return err

@@ -1,8 +1,12 @@
-OpenXWA VR @VERSION@ - X-Wing Alliance in standalone VR
-=========================================================
+Neitey's XW: Alliance VR @VERSION@ - X-Wing Alliance in standalone VR
+=====================================================================
 
 Play your own copy of Star Wars: X-Wing Alliance on Meta Quest 3 / 3S.
 Pico and Steam Frame are supported but not tested yet.
+
+Neitey's XW: Alliance VR is based on OpenXWA
+(https://github.com/elyosh/OpenXWA) by Adrien Moulin, the open-source
+reimplementation of X-Wing Alliance.
 
 You need your own installed X-Wing Alliance (Steam, GOG or the original
 CD version) on a Windows PC. No game files are included in this download.
@@ -26,21 +30,22 @@ Install (and update)
    and asks whether to bring your PC pilots along.
    Put on the headset when it asks you to allow USB debugging (tick
    "Always allow from this computer").
-4. Put on the headset: Library -> filter "Unknown sources" -> OpenXWA.
+4. Put on the headset: Library -> filter "Unknown sources" ->
+   Neitey's XW: Alliance VR.
 
 After you have allowed USB debugging once, the headset can stay on the desk
-(switched on, cable connected) while the launcher copies: the OpenXWA app
+(switched on, cable connected) while the launcher copies: the app
 receives and unpacks the files itself, without starting the game.
 
 Steam Frame: turn on Developer Mode. Once, before starting "Lepton
 Development": in your Steam Library, open its Properties and set Launch
 Options to
    LEPTON_NO_CLEANUP=1 %command%
-Without this, closing Lepton Development deletes OpenXWA and the copied
+Without this, closing Lepton Development deletes the app and the copied
 game files; with it they should stay. Then start "Lepton Development"
 and keep it running; the launcher connects to it over the USB cable (or
-Wi-Fi). OpenXWA appears in the Lepton Development window's Android home
-screen. Not tested on a Steam Frame yet.
+Wi-Fi). Neitey's XW: Alliance VR appears in the Lepton Development
+window's Android home screen. Not tested on a Steam Frame yet.
 
 Windows may say "Windows protected your PC": the launcher is not
 code-signed yet. Click "More info", then "Run anyway".
@@ -71,6 +76,9 @@ Controls
   Taking the headset off or opening the Meta menu pauses the game.
   VR Options -> Swap Thumbsticks: the two sticks trade what they do in
   flight (left: pitch / yaw, right: roll, throttle); buttons stay put.
+  VR Options -> Stick Response: Precise (the default) makes small stick
+  movements turn gently for fine aim, full deflection still turns at full
+  rate; Direct is linear, Very Precise even gentler.
   Side panel on your right: tactical map, voice commands and the button
   mapping; touch a tab (or point and pull the trigger). Touch the map to
   zoom.
@@ -108,8 +116,8 @@ zip afterwards.
 
 Licence
 -------
-OpenXWA and this VR port are free software under the GNU GPL version 3
-(LICENSE.txt). Source: https://github.com/neitey/OpenXWA-Quest
+OpenXWA and Neitey's XW: Alliance VR are free software under the GNU GPL
+version 3 (LICENSE.txt). Source: https://github.com/neitey/OpenXWA-Quest
 Third-party components and their licences: THIRD-PARTY-NOTICES.txt.
 3D cockpits from X-Wing Revival (https://www.raptor007.com/x-wing-revival/)
 by Raptor007 (Blair Sherman), included with his permission; the models are

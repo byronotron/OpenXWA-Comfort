@@ -1,4 +1,4 @@
-# OpenXWA for Meta Quest: building
+# Neitey's XW: Alliance VR (based on OpenXWA) for Meta Quest: building
 
 The VR and Quest work lives on the `openxr-frame-loop` branch of this repo
 and of the engine repo [`aeron-quest`](https://github.com/neitey/aeron-quest)

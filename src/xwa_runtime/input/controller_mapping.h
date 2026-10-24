@@ -27,6 +27,19 @@ int XwaControllerMapping_Rumble(uint16_t low_frequency_rumble, uint16_t high_fre
 								uint32_t duration_ms);
 int XwaControllerMapping_ConsumeSelectionChange(void);
 int XwaControllerMapping_GetState(XwaControllerLogicalState* state);
+
+/* VR flight: while enabled (set every frame), GetState puts the Touch
+ * controllers' pitch, yaw and roll through the thumbstick response curve
+ * (XWA_XR_STICK_CURVE, 1.0 direct .. 4.0, default 2.0). */
+void XwaControllerMapping_SetXrFlight(int enabled);
+/* The grabbed VR flight stick's deflection as handed to
+ * Aeron_XrSetVirtualStick: an axis it drives stays linear. */
+void XwaControllerMapping_SetXrVirtualStick(int held, float x, float y, float roll);
+double XwaControllerMapping_XrStickCurveExponent(void);
+/* One axis value (SDL range) through the curve: unchanged up to `deadzone`
+ * (0..1 of full deflection), then deadzone + (1 - deadzone) * t^exponent,
+ * so full deflection stays full. */
+int16_t XwaControllerMapping_XrStickCurve(int16_t value, double deadzone, double exponent);
 void XwaControllerMapping_CopySelectedActions(uint16_t actions[XWA_CONTROLLER_ACTION_COUNT]);
 
 /* Pure conversion entry point used by the runtime facade and unit tests. */
