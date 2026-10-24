@@ -1,11 +1,15 @@
-OpenXWA PCVR @VERSION@ - X-Wing Alliance in PC VR (Windows, OpenXR)
-====================================================================
+Neitey's XW: Alliance VR (PCVR) @VERSION@ - X-Wing Alliance in PC VR
+=====================================================================
 
 Play your own copy of Star Wars: X-Wing Alliance in VR on a Windows PC with
 a PC VR headset: SteamVR headsets (Valve Index, HTC Vive, ...), Meta Quest
 through Quest Link / Air Link (or Virtual Desktop / Steam Link), Windows
 Mixed Reality and other OpenXR headsets. The same program also runs as the
-normal flat-screen game.
+normal flat-screen game (Windows, OpenXR).
+
+Neitey's XW: Alliance VR is based on OpenXWA
+(https://github.com/elyosh/OpenXWA) by Adrien Moulin, the open-source
+reimplementation of X-Wing Alliance.
 
 This is a FIRST PCVR build: it is the same VR mode as the Quest version, but
 it has not been tested on a real PC headset yet. Please report what works and
@@ -72,6 +76,9 @@ Controls (Meta Quest Touch controllers; Index and others below)
   Taking the headset off or opening the runtime's menu pauses the game.
   VR Options -> Swap Thumbsticks: the two sticks trade what they do in
   flight (left: pitch / yaw, right: roll, throttle); buttons stay put.
+  VR Options -> Stick Response: Precise (the default) makes small stick
+  movements turn gently for fine aim, full deflection still turns at full
+  rate; Direct is linear, Very Precise even gentler.
   Side panel on your right: tactical map, voice commands and the button
   mapping; touch a tab (or point and pull the trigger). Touch the map to
   zoom.
@@ -120,8 +127,8 @@ runtime (SteamVR / Quest Link / ...), GPU, what happened.
 
 Licence
 -------
-OpenXWA and this VR port are free software under the GNU GPL version 3
-(LICENSE.txt). Source: https://github.com/neitey/OpenXWA-Quest (branch pcvr)
+OpenXWA and Neitey's XW: Alliance VR are free software under the GNU GPL
+version 3 (LICENSE.txt). Source: https://github.com/neitey/OpenXWA-Quest (branch pcvr)
 Third-party components and their licences: THIRD-PARTY-NOTICES.txt and the
 licenses folder.
 3D cockpits from X-Wing Revival (https://www.raptor007.com/x-wing-revival/)

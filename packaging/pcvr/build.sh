@@ -395,8 +395,8 @@ fi
 sed -e "s/@VERSION@/$VERSION/g" "$REPO/packaging/pcvr/README-PCVR.txt" > "$PKG/README-PCVR.txt"
 # Windows line endings for the text files people open in Notepad.
 for f in "$PKG"/*.txt "$PKG"/licenses/*.txt; do sed -i 's/\r\?$/\r/' "$f"; done
-echo "OpenXWA PCVR $VERSION, built from $DESCRIBE on $(date -u +%Y-%m-%d)" > "$PKG/BUILD-INFO.txt"
-printf '@echo off\r\nrem Starts OpenXWA in VR (OpenXR). Extra arguments are passed on.\r\nstart "" "%%~dp0OpenXWA.exe" --xr %%*\r\n' > "$PKG/OpenXWA VR.bat"
+echo "Neitey's XW: Alliance VR (PCVR) $VERSION, built from $DESCRIBE on $(date -u +%Y-%m-%d)" > "$PKG/BUILD-INFO.txt"
+printf '@echo off\r\nrem Starts Neitey'\''s XW: Alliance VR in VR (OpenXR). Extra arguments are passed on.\r\nstart "" "%%~dp0OpenXWA.exe" --xr %%*\r\n' > "$PKG/OpenXWA VR.bat"
 
 # ---- checks ------------------------------------------------------------------
 log "checks"

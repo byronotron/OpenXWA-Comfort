@@ -459,9 +459,9 @@ static int pc_load_settings(int xr_requested) {
 	if (!xr_requested || (f = fopen(path, "w")) == NULL) {
 		return 0;
 	}
-	fputs("# OpenXWA PCVR settings: KEY=VALUE lines, read at every start. The VR\n"
-		  "# options in the game write their values here; remove a line to go back to\n"
-		  "# the default. A few that have no menu entry:\n"
+	fputs("# Neitey's XW: Alliance VR (PCVR) settings: KEY=VALUE lines, read at every\n"
+		  "# start. The VR options in the game write their values here; remove a line\n"
+		  "# to go back to the default. A few that have no menu entry:\n"
 		  "# 1 = always start in VR (as with --xr), 0 = only with --xr:\n"
 		  "#AERON_XR=1\n"
 		  "# Virtual screen for menus, briefings and films: distance and width in\n"
@@ -479,6 +479,10 @@ static int pc_load_settings(int xr_requested) {
 		  "# 1 = the Quest render profile (no SSAO/FSR/motion blur, MSAA 2x, lite\n"
 		  "# shading) for slower GPUs:\n"
 		  "#XWA_QUEST_PROFILE=0\n"
+		  "# Thumbstick response in flight (VR Options: Stick Response): 1.0 = direct\n"
+		  "# (linear), 1.5 medium, 2.0 = precise (default; small movements turn gently,\n"
+		  "# full deflection still at full rate), 2.6 very precise, up to 4.0:\n"
+		  "#XWA_XR_STICK_CURVE=2.0\n"
 		  "# 0 = keep the game running while the headset is off / the dashboard is open:\n"
 		  "#XWA_XR_AUTO_PAUSE=1\n"
 		  "# Cockpit model: xwa (X-Wing Alliance's own) or revival (the optional\n"
