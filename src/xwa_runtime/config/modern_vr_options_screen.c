@@ -174,8 +174,9 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "XWA_XR_GPU_TIMING", "GPU Timing in Log (restart)", k_toggle_texts, k_toggle_values, 2, 1, 72, 1 },
 };
 
-/* "Restore VR Defaults" writes every setting in one vr_write_cfg call. */
-_Static_assert(VR_COUNT <= 32, "vr_write_cfg takes at most 32 keys at once");
+/* "Restore VR Defaults" writes every setting in one vr_write_cfg call,
+ * which takes at most 32 keys. */
+typedef char vr_count_fits_vr_write_cfg[(VR_COUNT <= 32) ? 1 : -1];
 
 static struct {
 	int loaded;
