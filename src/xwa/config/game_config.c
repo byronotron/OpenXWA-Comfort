@@ -362,7 +362,7 @@ int Config_MainMenuScreen(void) {
 
 	y += 25;
 #ifdef XWA_MODERN
-	FrontendText_Draw(10, "OpenXWA " OPENXWA_VERSION, 35, 420, g_colorPaleBlue);
+	FrontendText_Draw(10, "Neitey's XW: Alliance VR " OPENXWA_VERSION, 35, 420, g_colorPaleBlue);
 #else
 	memcpy(versionText, "2.02", sizeof(versionText));
 	sprintf(g_frontendScratchBuffer, "%s %s", FrontendString_Get(STR_CONFIG_VERSION), versionText);
@@ -4208,7 +4208,7 @@ int Config_VideoOptionsMenu(void) {
 	FrontendDraw_Line(titleX, 195, titleX + (int)titleWidth, 195, g_colorLightBlue);
 
 #ifdef XWA_MODERN
-	text = "OpenXWA Video Options";
+	text = "Enhanced Video Options";
 	titleWidth = FrontendText_MeasureWidth(text, 20);
 	textX = g_configMenuCenterX - (int)(titleWidth >> 1);
 	buttonPressed =

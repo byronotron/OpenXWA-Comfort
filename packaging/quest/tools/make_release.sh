@@ -10,6 +10,8 @@ NAME=OpenXWA-Quest-$VER
 APK=/root/out/OpenXWA-quest-$VER.apk
 EXE=$R/tools/launcher/dist/OpenXWA-VR-Launcher.exe
 test -f "$APK" && test -f "$EXE"
+# The headset library label must be the product name (strings.xml app_name)
+python3 $R/packaging/quest/tools/app_label_arsc.py --check "$APK" $R/packaging/quest/res/values/strings.xml
 rm -rf "$OUT/$NAME" "$OUT/$NAME.zip"
 mkdir -p "$OUT/$NAME"
 cp "$EXE" "$OUT/$NAME/OpenXWA-VR-Launcher.exe"

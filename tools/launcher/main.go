@@ -1,5 +1,6 @@
-// OpenXWA-VR Launcher: puts the OpenXWA VR app and the user's own X-Wing
-// Alliance game files on a standalone VR headset over USB, using adb.
+// The launcher of Neitey's XW: Alliance VR (OpenXWA-VR-Launcher.exe): puts
+// the VR app (based on OpenXWA) and the user's own X-Wing Alliance game
+// files on a standalone VR headset over USB, using adb.
 //
 // The design is recorded in PLAN.md. Standard library only. The user sees
 // either a small web page in an app window (default) or the console
@@ -18,6 +19,13 @@ import (
 
 // version is set at build time: -ldflags "-X main.version=1.0.0".
 var version = "dev"
+
+// The product name players read (window, texts). File names, the package id
+// and the repo keep "OpenXWA".
+const (
+	productName  = "Neitey's XW: Alliance VR"
+	launcherName = productName + " Launcher"
+)
 
 const (
 	appPackage     = "org.openxwa.quest"
@@ -59,10 +67,10 @@ func fail(format string, args ...any) error {
 }
 
 func usage() string {
-	return `OpenXWA-VR Launcher ` + version + `
+	return launcherName + ` ` + version + `
 
-Puts OpenXWA and your own X-Wing Alliance game files on your VR headset
-(Meta Quest, Pico, Steam Frame) over a USB cable.
+Puts ` + productName + ` (based on OpenXWA) and your own X-Wing Alliance
+game files on your VR headset (Meta Quest, Pico, Steam Frame) over a USB cable.
 
 Usage:
   OpenXWA-VR-Launcher [options] [game folder]
@@ -72,7 +80,7 @@ You can also drag your X-Wing Alliance folder onto OpenXWA-VR-Launcher.exe.
 Options:
   --console           use a console window instead of the launcher window
   --no-update-check   do not look for a new launcher version
-  --logs              only collect the OpenXWA logs from the headset
+  --logs              only collect the game's logs from the headset
   --no-window         do not open a window; print the launcher's address
   --version           show the launcher version
   --help              show this help
@@ -124,7 +132,7 @@ func main() {
 		return
 	}
 	if opts.showVersion {
-		fmt.Println("OpenXWA-VR Launcher " + version)
+		fmt.Println(launcherName + " " + version)
 		return
 	}
 
@@ -217,8 +225,8 @@ func (a *app) remotePilots() string { return a.remoteBase() + "/pilot-import" }
 
 // run executes the whole flow and returns the process exit code.
 func (a *app) run(opts options) int {
-	say("OpenXWA-VR Launcher %s", version)
-	say("Puts OpenXWA and your own X-Wing Alliance files on your VR headset.")
+	say("%s %s", launcherName, version)
+	say("Puts %s and your own X-Wing Alliance files on your VR headset.", productName)
 	err := a.flow(opts)
 	a.cleanupLepton()
 	switch {
@@ -256,8 +264,8 @@ func (a *app) flow(opts options) error {
 		}},
 		{"Finding your X-Wing Alliance folder", func() error { return a.chooseGame(opts.gameArg) }},
 		{"Connecting to the headset", a.connect},
-		{"Installing the OpenXWA app", a.installApp},
-		{"Preparing the OpenXWA folder on the headset", a.prepareAppFolder},
+		{"Installing the app", a.installApp},
+		{"Preparing the game folder on the headset", a.prepareAppFolder},
 		{"Pilots", a.copyPilots},
 		{"Copying the game files", a.copyGame},
 		{"Done", func() error { a.doneMenu(true); return nil }},

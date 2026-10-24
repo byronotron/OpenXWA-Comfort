@@ -1,15 +1,16 @@
-# OpenXWA VR
+# Neitey's XW: Alliance VR
 
 *Star Wars: X-Wing Alliance* in virtual reality, standalone on Meta Quest 3 /
 3S: no PC needed while you play. Pico and Steam Frame are supported but
 experimental.
 
-OpenXWA VR is a fork of [OpenXWA](https://github.com/elyosh/OpenXWA), the
-open-source reimplementation of the 1999 game by Adrien Moulin. It runs the
+Neitey's XW: Alliance VR is based on
+[OpenXWA](https://github.com/elyosh/OpenXWA), the open-source
+reimplementation of the 1999 game by Adrien Moulin. It runs the
 original game data with a VR cockpit, motion controllers and a full immersive VR menu
 environment.
 
-[![OpenXWA VR gameplay on Meta Quest 3: click for the video](assets/vr/gameplay.gif)](assets/vr/openxwa-vr-trailer.mp4)
+[![Neitey's XW: Alliance VR gameplay on Meta Quest 3: click for the video](assets/vr/gameplay.gif)](assets/vr/openxwa-vr-trailer.mp4)
 
 *Recorded on a Meta Quest 3. Click the picture for an 80-second video.*
 
@@ -68,7 +69,7 @@ carries data.
    files (about a minute) and checks them. Put the headset on once to allow
    USB debugging ("Always allow from this computer"); after that it can stay
    on the desk.
-4. In the headset: Library -> "Unknown sources" -> OpenXWA.
+4. In the headset: Library -> "Unknown sources" -> Neitey's XW: Alliance VR.
 
 Updating works the same way: run the new launcher; it updates the app and
 copies only what changed. Your pilots and settings stay. `README.txt` in the

@@ -200,7 +200,7 @@ char File_GetCdDriveLetter(void) { return g_cdDriveLetter; }
 void File_PrintFatalMessageAndExit(char* message, int exitCode) {
 	Aeron_LogInfo("xwa.file", "%s", message != NULL ? message : "");
 #ifdef XWA_MODERN
-	Aeron_FatalError("OpenXWA", message != NULL ? message : "");
+	Aeron_FatalError("Neitey's XW: Alliance VR", message != NULL ? message : "");
 #else
 	Aeron_FatalError("X-Wing Alliance", message != NULL ? message : "");
 #endif

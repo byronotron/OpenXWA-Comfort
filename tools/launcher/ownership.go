@@ -142,10 +142,10 @@ func (a *app) prepareAppFolder() error {
 		if !a.remoteHasEntry(base, "XWA") {
 			if a.helper {
 				if err := a.helperMkdirs("XWA"); err != nil {
-					return fail("OpenXWA could not create its game folder on the headset:\n  %v", err)
+					return fail("The app could not create its game folder on the headset:\n  %v", err)
 				}
 				if !a.remoteHasEntry(base, "XWA") {
-					return fail("OpenXWA created its game folder, but the launcher cannot see it.\n" +
+					return fail("The app created its game folder, but the launcher cannot see it.\n" +
 						"Please collect the logs and report this, naming your headset model.")
 				}
 				continue
@@ -161,8 +161,8 @@ func (a *app) prepareAppFolder() error {
 		o, known := owners[game]
 		if known && foreignOwner(o, uid) {
 			if fixed {
-				return fail("The OpenXWA folder on the headset was made again, but it still belongs to\n"+
-					"%s instead of the OpenXWA app. Please collect the logs and report this,\n"+
+				return fail("The game folder on the headset was made again, but it still belongs to\n"+
+					"%s instead of the app. Please collect the logs and report this,\n"+
 					"naming your headset model.", o)
 			}
 			if err := a.fixForeignFolder(o, owners); err != nil {
@@ -188,7 +188,7 @@ func (a *app) prepareAppFolder() error {
 	} else if err := a.probeCopyOwnership(); err != nil {
 		return err
 	}
-	say("The OpenXWA folder on the headset is ready.")
+	say("The game folder on the headset is ready.")
 	return nil
 }
 
@@ -198,10 +198,10 @@ func (a *app) fixForeignFolder(o owner, owners map[string]owner) error {
 	ans := ui.Ask(Question{
 		Kind:  "buttons",
 		Title: "The game folder on the headset cannot be used",
-		Text: "The XWA folder on the headset was created over USB before OpenXWA ever\n" +
+		Text: "The XWA folder on the headset was created over USB before the app ever\n" +
 			"started, so the game cannot read it (it belongs to " + o.name + ").\n\n" +
-			"It will be removed and made again by OpenXWA, then the game files are\n" +
-			"copied again. Your pilots and settings in OpenXWA are not touched.",
+			"It will be removed and made again by the app, then the game files are\n" +
+			"copied again. Your pilots and settings in the game are not touched.",
 		Options: []Option{
 			{ID: "yes", Label: "Remove and make it again", Key: "y", Style: "primary"},
 			{ID: "no", Label: "Cancel", Key: "n"},
@@ -213,7 +213,7 @@ func (a *app) fixForeignFolder(o owner, owners map[string]owner) error {
 		return errClosed
 	}
 	if ans.ID != "yes" {
-		return fail("The XWA folder on the headset cannot be read by OpenXWA, so the game\n" +
+		return fail("The XWA folder on the headset cannot be read by the app, so the game\n" +
 			"files cannot be used. Try again and choose \"Remove and make it again\".")
 	}
 	say("Removing the unusable game folder from the headset...")
@@ -233,13 +233,13 @@ func (a *app) fixForeignFolder(o owner, owners map[string]owner) error {
 // has made its XWA folder. Horizon OS only really starts the app while the
 // headset is worn, so the user is asked to put it on.
 func (a *app) waitForAppFolder() error {
-	say("OpenXWA has to start once on the headset to create its own folder.\n" +
-		"Put the headset on now; OpenXWA starts by itself.")
+	say("%s has to start once on the headset to create its own\n"+
+		"folder. Put the headset on now; it starts by itself.", productName)
 	q := Question{
 		Kind:  "buttons",
 		Title: "Put the headset on",
-		Text: "OpenXWA has to start once on the headset to create its own folder.\n" +
-			"Put the headset on; OpenXWA starts by itself. If it does not, open it from\n" +
+		Text: productName + " has to start once on the headset to create its own\n" +
+			"folder. Put the headset on; it starts by itself. If it does not, open it from\n" +
 			"Library -> Unknown sources. The launcher continues as soon as it has started.",
 		Options: []Option{
 			{ID: "again", Label: "Try again", Style: "primary"},
@@ -248,7 +248,7 @@ func (a *app) waitForAppFolder() error {
 	}
 	if a.lepton != "" {
 		q.Title = "Keep Lepton Development running"
-		q.Text = "OpenXWA has to start once to create its own folder. It starts in the\n" +
+		q.Text = "The game has to start once to create its own folder. It starts in the\n" +
 			"\"Lepton Development\" window on the headset; keep that window open (put the\n" +
 			"headset on if needed). The launcher continues as soon as it has started."
 	}
@@ -260,7 +260,7 @@ func (a *app) waitForAppFolder() error {
 		if time.Since(lastStart) >= 15*time.Second {
 			if !lastStart.IsZero() {
 				if _, console := ui.(*consoleUI); console {
-					say("Still waiting for OpenXWA to start on the headset (put it on; Ctrl+C to stop)...")
+					say("Still waiting for the game to start on the headset (put it on; Ctrl+C to stop)...")
 				}
 			}
 			a.adb.shell(30*time.Second, "am start -n "+appActivity)
@@ -269,7 +269,7 @@ func (a *app) waitForAppFolder() error {
 		select {
 		case ans := <-offer:
 			if ans.ID == "cancel" {
-				return fail("OpenXWA has not started on the headset yet, so its folder does not exist.\n" +
+				return fail("The game has not started on the headset yet, so its folder does not exist.\n" +
 					"Put the headset on, then choose Try again.")
 			}
 			lastStart = time.Time{} // start it again right now
@@ -285,7 +285,7 @@ func (a *app) waitForAppFolder() error {
 	logf("the app created its folder after %.0f s", time.Since(started).Seconds())
 	sleepCtx(2 * time.Second) // let it finish starting before it is stopped
 	a.adb.shell(30*time.Second, "am force-stop "+appPackage)
-	say("OpenXWA created its folder. It was closed again so the files can be copied;\n" +
+	say("The game created its folder. It was closed again so the files can be copied;\n" +
 		"you can take the headset off.")
 	return nil
 }
@@ -327,7 +327,7 @@ func (a *app) cleanupUnreadableCopies() {
 		copies = fmt.Sprintf("%d old copies", len(dirs))
 	}
 	if !askYesNo("Old unreadable copies found",
-		fmt.Sprintf("The headset has %s of the game folder that OpenXWA could not read%s.\nDelete to free the space?",
+		fmt.Sprintf("The headset has %s of the game folder that the game could not read%s.\nDelete to free the space?",
 			copies, size), true) {
 		return
 	}
@@ -373,7 +373,7 @@ func (a *app) probeCopyOwnership() error {
 	}
 	if !pushOK {
 		return fail("This headset gives files copied over USB to the wrong owner (%s), so\n"+
-			"OpenXWA could not read them. Nothing was copied. Please collect the logs and\n"+
+			"the game could not read them. Nothing was copied. Please collect the logs and\n"+
 			"report this, naming your headset model.", f)
 	}
 	return nil
@@ -445,11 +445,11 @@ func (a *app) finalOwnershipCheck(files []gameFile) (bad []string, xwaBad bool, 
 		if len(msgs) > 10 {
 			msgs = append(msgs[:10], "...")
 		}
-		e := &userError{retryStep: 5, msg: fmt.Sprintf("The game files were copied, but OpenXWA cannot read them because they do\n"+
+		e := &userError{retryStep: 5, msg: fmt.Sprintf("The game files were copied, but the game cannot read them because they do\n"+
 			"not belong to the app:\n  %s\n\nTry again: the launcher removes the unusable folder and copies the files\n"+
 			"again. If this keeps happening, please collect the logs and report it.", strings.Join(msgs, "\n  "))}
 		return bad, xwaBad, e
 	}
-	say("Checked: the game files belong to OpenXWA, so the game can read them.")
+	say("Checked: the game files belong to the app, so the game can read them.")
 	return nil, false, nil
 }

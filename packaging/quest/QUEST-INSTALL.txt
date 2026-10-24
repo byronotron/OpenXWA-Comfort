@@ -1,5 +1,7 @@
-OpenXWA for Meta Quest 3 (standalone) - 1.0.0
-=============================================
+Neitey's XW: Alliance VR for Meta Quest 3 (standalone) - 1.0.0
+==============================================================
+
+Neitey's XW: Alliance VR is based on OpenXWA (https://github.com/elyosh/OpenXWA).
 
 If something goes wrong, the log file (step 6) is what's needed to fix it.
 
@@ -31,14 +33,14 @@ What you need
        adb push xwa.zip /sdcard/Android/obb/org.openxwa.quest/openxwa-import.zip
        adb shell content call --uri content://org.openxwa.quest.setup --method unzip --arg XWA
      The last command prints the number of files unpacked.
-   The OpenXWA-VR Launcher does all of this for you.
+   The launcher (OpenXWA-VR-Launcher.exe) does all of this for you.
 
 3. Check
      adb shell ls /sdcard/Android/data/org.openxwa.quest/files/XWA
    should list RESDATA.TXT and the game folders.
 
 4. Play
-   In the headset: Library -> filter "Unknown sources" -> OpenXWA. On first start the game asks for a pilot
+   In the headset: Library -> filter "Unknown sources" -> Neitey's XW: Alliance VR. On first start the game asks for a pilot
    name: a keyboard appears on the virtual screen, type with the laser
    pointer and press Enter. Controls are the same as the PC VR build:
      right stick = pitch/yaw, left stick X = roll, left stick Y = throttle lever,

@@ -9,14 +9,14 @@ import (
 
 // doneMenu is the last step. Its Close button doubles as the final "Press
 // Enter to close", so main does not ask again. withStart adds "Start
-// OpenXWA" (not in --logs mode).
+// the game" (not in --logs mode).
 func (a *app) doneMenu(withStart bool) {
-	title, text := "All done", "Put on the headset and open OpenXWA (Library -> Unknown sources)."
+	title, text := "All done", "Put on the headset and open "+productName+" (Library -> Unknown sources)."
 	if a.lepton != "" {
-		text = "On the headset, OpenXWA is on the Android home screen in the \"Lepton\n" +
-			"Development\" window. (An OpenXWA installed another way may live in a\n" +
+		text = "On the headset, " + productName + " is on the Android home screen in the\n" +
+			"\"Lepton Development\" window. (A copy installed another way may live in a\n" +
 			"different Lepton instance with its own files; use the one installed here.)\n\n" +
-			"Closing Lepton Development deletes OpenXWA and the copied game files unless\n" +
+			"Closing Lepton Development deletes the app and the copied game files unless\n" +
 			"its Launch Options (Steam Library > Lepton Development > Properties) are:\n" +
 			"    LEPTON_NO_CLEANUP=1 %command%\n\n" +
 			"With this setting they should stay. If it was not set yet: set it, start\n" +
@@ -28,7 +28,7 @@ func (a *app) doneMenu(withStart bool) {
 	for {
 		var opts []Option
 		if withStart {
-			opts = append(opts, Option{ID: "start", Label: "Start OpenXWA on the headset", Key: "s", Style: "primary"})
+			opts = append(opts, Option{ID: "start", Label: "Start the game on the headset", Key: "s", Style: "primary"})
 		}
 		opts = append(opts, Option{ID: "logs", Label: "Collect logs", Key: "l"})
 		if a.logsDir != "" {
@@ -40,9 +40,9 @@ func (a *app) doneMenu(withStart bool) {
 		case "start":
 			out, err := a.adb.shell(30*time.Second, "am start -n "+appActivity)
 			if err != nil || strings.Contains(out, "Error") {
-				say("Could not start OpenXWA: %s", strings.TrimSpace(out))
+				say("Could not start the game: %s", strings.TrimSpace(out))
 			} else {
-				say("OpenXWA is starting on the headset. Put it on!")
+				say("%s is starting on the headset. Put it on!", productName)
 			}
 		case "logs":
 			a.collectLogs()
@@ -83,7 +83,7 @@ func (a *app) collectLogs() {
 			}
 		}
 		if got == 0 {
-			say("OpenXWA has not written a log on the headset yet (start it once first).")
+			say("The game has not written a log on the headset yet (start it once first).")
 		}
 	} else {
 		say("No headset is connected, so only the launcher's own log is saved.")

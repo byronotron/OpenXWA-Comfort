@@ -71,11 +71,11 @@ func (a *app) connectLepton(usb string) error {
 		ans := ui.Ask(Question{
 			Kind:  "buttons",
 			Title: "Steam Frame found",
-			Text: "OpenXWA runs in the Steam Frame's Android layer (Lepton).\n\n" +
+			Text: productName + " runs in the Steam Frame's Android layer (Lepton).\n\n" +
 				"Once, before starting it: in the Steam Library, open the Properties of\n" +
 				"\"Lepton Development\" and set its Launch Options to:\n" +
 				"    LEPTON_NO_CLEANUP=1 %command%\n\n" +
-				"Without this, closing Lepton Development deletes OpenXWA and the copied\n" +
+				"Without this, closing Lepton Development deletes the app and the copied\n" +
 				"game files; with it they should stay. (If it is running already, close it\n" +
 				"first so the setting applies.)\n\n" +
 				"Then start \"Lepton Development\" on the headset (keep it running) and\n" +
@@ -99,8 +99,8 @@ func (a *app) connectLepton(usb string) error {
 		var err error
 		switch ans.ID {
 		case "cancel":
-			return fail("OpenXWA needs the Steam Frame's Android layer. Start \"Lepton Development\"\n" +
-				"on the headset and try again.")
+			return fail("%s needs the Steam Frame's Android layer. Start \"Lepton\n"+
+				"Development\" on the headset and try again.", productName)
 		case "wifi":
 			err = a.leptonViaWiFi()
 		default:

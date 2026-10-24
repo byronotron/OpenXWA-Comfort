@@ -1,10 +1,10 @@
-OpenXWA for VR headsets - third-party notices
+Neitey's XW: Alliance VR - third-party notices
 ==============================================
 
-OpenXWA (https://github.com/elyosh/OpenXWA) and this VR port
-(https://github.com/neitey/OpenXWA-Quest) are free software under the
-GNU General Public License version 3. X-Wing Alliance game data is not
-included and remains the property of its owners.
+Neitey's XW: Alliance VR (https://github.com/neitey/OpenXWA-Quest) is
+based on OpenXWA (https://github.com/elyosh/OpenXWA). Both are free
+software under the GNU General Public License version 3. X-Wing Alliance
+game data is not included and remains the property of its owners.
 
 This app includes the following third-party software:
 

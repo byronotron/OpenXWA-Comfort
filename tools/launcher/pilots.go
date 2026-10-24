@@ -64,8 +64,8 @@ func (a *app) copyPilots() error {
 		Kind:  "buttons",
 		Title: "Copy your pilots?",
 		Text: "Pilots found in your game folder: " + strings.Join(pilotNames(files), ", ") + ".\n" +
-			"OpenXWA keeps its own pilots. Copying brings your PC pilots over; they are\n" +
-			"imported the next time OpenXWA starts.",
+			"The VR game keeps its own pilots. Copying brings your PC pilots over; they\n" +
+			"are imported the next time the game starts on the headset.",
 		Options: []Option{
 			{ID: "yes", Label: "Copy pilots", Key: "y"},
 			{ID: "no", Label: "Don't copy", Key: "n", Style: "primary"},
@@ -128,10 +128,10 @@ func (a *app) pilotsDone() error {
 	if o, ok := m[a.remotePilots()]; ok && foreignOwner(o, a.appUID()) {
 		logf("pilot-import belongs to %v; removing it", o)
 		a.adb.shell(60*time.Second, "rm -rf "+shQuote(a.remotePilots()))
-		say("WARNING: the pilots could not be copied in a way OpenXWA can read on this\n" +
+		say("WARNING: the pilots could not be copied in a way the game can read on this\n" +
 			"headset, so they were removed again. The game files are copied anyway.")
 		return nil
 	}
-	say("Pilots copied. OpenXWA brings them in the next time it starts.")
+	say("Pilots copied. The game brings them in the next time it starts.")
 	return nil
 }

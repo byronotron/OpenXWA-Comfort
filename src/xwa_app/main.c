@@ -131,8 +131,8 @@ static int show_first_launch_prompt(int* cancelled, char* error, size_t error_si
 	};
 	const AeronMessageBoxOptions options = {
 		.kind = AERON_MESSAGE_BOX_INFORMATION,
-		.title = "Set up OpenXWA",
-		.message = "OpenXWA requires data files from an original X-Wing Alliance installation.\n\n"
+		.title = "Set up Neitey's XW: Alliance VR",
+		.message = "Neitey's XW: Alliance VR requires data files from an original X-Wing Alliance installation.\n\n"
 				   "Select an installed game folder (for example a GOG or Steam install) containing:\n\n"
 				   "    FLIGHTMODELS\n"
 				   "    FRONTRES\n"
@@ -304,7 +304,7 @@ static int resolve_game_data(const XwaLaunchOptions* launch, const XwaHostConfig
 				snprintf(error, error_size,
 						 "%d of the X-Wing Alliance files copied from your PC are missing on the headset:\n\n"
 						 "%s\n"
-						 "Connect the headset to the PC and run the OpenXWA Launcher again:\n"
+						 "Connect the headset to the PC and run the launcher (OpenXWA-VR-Launcher.exe) again:\n"
 						 "it copies only the missing files. Then choose Try Again.",
 						 missing, list);
 				return 0;
@@ -313,9 +313,9 @@ static int resolve_game_data(const XwaLaunchOptions* launch, const XwaHostConfig
 		if (!ok && use_ingame_setup() && access(launch->game_data_path, R_OK | X_OK) != 0) {
 			/* (android_default_game_data could not move it aside) */
 			snprintf(error, error_size,
-					 "OpenXWA cannot read its game folder on the headset:\n%s\n\n"
-					 "It was created over USB before OpenXWA had started once.\n"
-					 "Run the OpenXWA Launcher on your PC again with the headset on your head:\n"
+					 "Neitey's XW: Alliance VR cannot read its game folder on the headset:\n%s\n\n"
+					 "It was created over USB before the game had started once.\n"
+					 "Run the launcher (OpenXWA-VR-Launcher.exe) on your PC again with the headset on:\n"
 					 "it repairs the folder and copies the game files again. Then choose Try Again.",
 					 launch->game_data_path);
 			return 0;
@@ -326,7 +326,7 @@ static int resolve_game_data(const XwaLaunchOptions* launch, const XwaHostConfig
 			/* The install guide, in the headset: the first thing a new player
 			 * sees (packaging/quest/QUEST-INSTALL.txt step 3 says the same). */
 			snprintf(error, error_size,
-					 "OpenXWA needs the files of your own X-Wing Alliance (GOG or Steam, about 1 GB).\n"
+					 "Neitey's XW: Alliance VR needs your own X-Wing Alliance files (GOG or Steam, about 1 GB).\n"
 					 "Copy everything inside your installed game folder into this folder on the headset:\n"
 					 "%s\n\n"
 					 "1. On the PC, find the game folder: the one with RESDATA.TXT, FLIGHTMODELS and MISSIONS,\n"
@@ -441,7 +441,7 @@ static void android_load_settings(void) {
 		f = fopen(path, "w");
 		s_android_fresh_settings = f != NULL;
 		if (f) {
-			fputs("# OpenXWA Quest settings. Remove the leading '#' to change a value.\n"
+			fputs("# Neitey's XW: Alliance VR settings. Remove the leading '#' to change a value.\n"
 				  "# Headset class, picked from the GPU (low: Quest 2, Pico 4; mid: Quest 3,\n"
 				  "# Pico 4 Ultra; high: Steam Frame); it sets the defaults of the eye\n"
 				  "# pixel budget, refresh rate and foveation below. Force it with:\n"
@@ -974,7 +974,7 @@ int main(int argc, char** argv) {
 	config.resource_root = launch.resource_root[0] ? launch.resource_root : NULL;
 	config.resource_path = "resources";
 	config.shader_path = "shaders";
-	config.window_title = "OpenXWA";
+	config.window_title = "Neitey's XW: Alliance VR";
 	config.window_icon_bmp = xwa_window_icon_bmp;
 	config.window_icon_bmp_size = sizeof(xwa_window_icon_bmp);
 	/* Windowed size auto-fits the primary display. The logical frame starts
@@ -1010,7 +1010,7 @@ int main(int argc, char** argv) {
 		snprintf(message, sizeof message, "%s\nConfiguration path: %s/config.yaml", config_error,
 				 Aeron_UserPath());
 		Aeron_LogError("xwa.config", "%s", message);
-		Aeron_FatalError("OpenXWA", message);
+		Aeron_FatalError("Neitey's XW: Alliance VR", message);
 		Aeron_Shutdown();
 		return 1;
 	}
@@ -1032,7 +1032,7 @@ int main(int argc, char** argv) {
 		}
 		if (!setup_cancelled) {
 			Aeron_LogError("xwa.config", "%s", config_error);
-			Aeron_FatalError("OpenXWA", config_error);
+			Aeron_FatalError("Neitey's XW: Alliance VR", config_error);
 		}
 		Aeron_Shutdown();
 		return setup_cancelled ? 0 : 1;
@@ -1041,7 +1041,7 @@ int main(int argc, char** argv) {
 		!XwaHostConfig_SaveGameDataPath(Aeron_GetVfs(), selected_game_data, config_error,
 										sizeof config_error)) {
 		Aeron_LogError("xwa.config", "%s", config_error);
-		Aeron_FatalError("OpenXWA", config_error);
+		Aeron_FatalError("Neitey's XW: Alliance VR", config_error);
 		Aeron_Shutdown();
 		return 1;
 	}
@@ -1075,7 +1075,7 @@ int main(int argc, char** argv) {
 		.video_options_override_mask = host_config.video_options_override_mask,
 	};
 	if (!XwaRemaster_Init(&remaster_options)) {
-		Aeron_FatalError("OpenXWA",
+		Aeron_FatalError("Neitey's XW: Alliance VR",
 						 "Required remaster resources could not be loaded. See the log for details.");
 		XwaRemaster_Shutdown();
 		Aeron_Shutdown();
