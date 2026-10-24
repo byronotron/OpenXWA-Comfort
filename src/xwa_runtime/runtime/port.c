@@ -313,6 +313,8 @@ static void XwaPort_UpdateVrFlightButtons(int enabled) {
 	int           shifted;
 	int           hyper = 0;
 	enabled = enabled && Aeron_XrIsPresenting();
+	/* The thumbstick response curve (Stick Response) applies in flight. */
+	XwaControllerMapping_SetXrFlight(enabled);
 	if (enabled != g_xwaPortVrFlightButtons) {
 		g_xwaPortVrFlightButtons = enabled;
 		Aeron_XrSetFlightButtons(enabled);

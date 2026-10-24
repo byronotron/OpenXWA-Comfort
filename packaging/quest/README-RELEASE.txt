@@ -76,6 +76,9 @@ Controls
   Taking the headset off or opening the Meta menu pauses the game.
   VR Options -> Swap Thumbsticks: the two sticks trade what they do in
   flight (left: pitch / yaw, right: roll, throttle); buttons stay put.
+  VR Options -> Stick Response: Precise (the default) makes small stick
+  movements turn gently for fine aim, full deflection still turns at full
+  rate; Direct is linear, Very Precise even gentler.
   Side panel on your right: tactical map, voice commands and the button
   mapping; touch a tab (or point and pull the trigger). Touch the map to
   zoom.
