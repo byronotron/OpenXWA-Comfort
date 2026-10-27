@@ -11,7 +11,7 @@ typedef char MaskUniformSize[sizeof(MaskUniform) == 128 ? 1 : -1];
 static struct {
 	XwaVrMaskMotion motion;
 	int enabled, ready, cached, failed_logged;
-	float strength, opacity, fov[2][4], axes[2][9];
+	float strength, opacity, cached_aperture, fov[2][4], axes[2][9];
 	uint64_t log_us;
 	AeronShader *vs, *fs;
 	AeronSampler* sampler;
@@ -34,11 +34,11 @@ void XwaVrPeripheralMask_Update(const float ship_q[4], uint32_t stamp, uint64_t 
 		XwaVrPeripheralMask_Reset();
 		return;
 	}
-	s_mask.strength = XwaVrMask_Parse(getenv("XWA_COMFORT_MASK_STRENGTH"),0.65f,0,1);
+	s_mask.strength = XwaVrMask_Parse(getenv("XWA_COMFORT_MASK_STRENGTH"),1,0,1.5f);
 	float sensitivity = XwaVrMask_Parse(getenv("XWA_COMFORT_MASK_SENSITIVITY"),1,0.25f,3);
 	s_mask.enabled = s_mask.strength > 0;
 	XwaVrMask_UpdateMotion(&s_mask.motion,ship_q,stamp,now,identity,s_mask.enabled,sensitivity);
-	s_mask.opacity = s_mask.strength * s_mask.motion.activation;
+	s_mask.opacity = fminf(s_mask.strength,1.0f) * s_mask.motion.activation;
 	if(now > s_mask.log_us + 5000000) {
 		Aeron_LogInfo("xwa.comfort","mask: ship %.1f deg/s, sensitivity %.2f, strength %.2f, opacity %.3f",
 			s_mask.motion.speed_dps,sensitivity,s_mask.strength,s_mask.opacity);
@@ -84,7 +84,8 @@ void XwaVrPeripheralMask_Prepare(AeronCommandBuffer* cmd, const AeronXrView view
 	if(!s_mask.enabled || !cmd || !views) return;
 	float axes[2][9];
 	XwaVrMask_EyeAxes(views[0].orientation,views[1].orientation,axes);
-	int same=s_mask.cached;
+	float aperture=fmaxf(s_mask.strength,1.0f);
+	int same=s_mask.cached && fabsf(aperture-s_mask.cached_aperture)<0.00001f;
 	for(int e=0;e<2;e++) {
 		for(int i=0;i<4;i++) same &= fabsf(views[e].fov[i]-s_mask.fov[e][i]) < 0.00001f;
 		for(int i=0;i<9;i++) same &= fabsf(axes[e][i]-s_mask.axes[e][i]) < 0.0005f;
@@ -106,7 +107,7 @@ void XwaVrPeripheralMask_Prepare(AeronCommandBuffer* cmd, const AeronXrView view
 				float ty=u+(d-u)*((float)y+0.5f)/MASK_SIZE;
 				uint8_t* p=&s_mask.pixels[4*(y*MASK_SIZE+x)];
 				p[0]=p[1]=p[2]=0;
-				p[3]=(uint8_t)(255*XwaVrMask_AngularAlpha(tx,ty,axes[e])+0.5f);
+				p[3]=(uint8_t)(255*XwaVrMask_AngularAlpha(tx,ty,axes[e],s_mask.strength)+0.5f);
 			}
 			if(!Aeron_UploadTextureDataCmd(cmd,&(AeronTextureUploadDesc){
 				.texture=s_mask.tex[e], .width=MASK_SIZE, .height=MASK_SIZE,
@@ -115,6 +116,7 @@ void XwaVrPeripheralMask_Prepare(AeronCommandBuffer* cmd, const AeronXrView view
 			memcpy(s_mask.fov[e],views[e].fov,sizeof s_mask.fov[e]);
 			memcpy(s_mask.axes[e],axes[e],sizeof axes[e]);
 		}
+		s_mask.cached_aperture=aperture;
 		s_mask.cached=1;
 	}
 	s_mask.ready=1;

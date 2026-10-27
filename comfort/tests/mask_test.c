@@ -136,15 +136,27 @@ static void test_head_and_stereo(void) {
 		/* Same 27.5-degree head-space ray mapped into each canted eye. */
 		float ray=tanf(27.5f*0.01745329252f);
 		float x=axes[e][0]*ray-axes[e][6], y=axes[e][1]*ray-axes[e][7], z=axes[e][2]*ray-axes[e][8];
-		alpha[e]=XwaVrMask_AngularAlpha(x/-z,y/-z,axes[e]);
+		alpha[e]=XwaVrMask_AngularAlpha(x/-z,y/-z,axes[e],1);
 	}
 	near_value(alpha[0],alpha[1],0.00001f);
 	near_value(alpha[0],0.5f,0.00001f);
 	float identity[9]={1,0,0,0,1,0,0,0,1};
-	assert(XwaVrMask_AngularAlpha(0,0,identity)==0);
-	assert(XwaVrMask_AngularAlpha(tanf(0.25f),0,identity)==0);
-	assert(XwaVrMask_AngularAlpha(tanf(0.62f),0,identity)==1);
-	assert(XwaVrMask_AngularAlpha(tanf(1.1f),0,identity)==1);
+	assert(XwaVrMask_AngularAlpha(0,0,identity,1)==0);
+	assert(XwaVrMask_AngularAlpha(tanf(0.25f),0,identity,1)==0);
+	assert(XwaVrMask_AngularAlpha(tanf(0.62f),0,identity,1)==1);
+	assert(XwaVrMask_AngularAlpha(tanf(1.1f),0,identity,1)==1);
+	/* Medium is exactly the old High: identical 20..35-degree profile.
+	 * New High must increase coverage while retaining a clear center. */
+	for(int degrees=0;degrees<=80;degrees++) {
+		float angle=degrees*0.01745329252f;
+		float old=XwaVrMask_Clamp((angle-0.3490658504f)/0.2617993878f,0,1);
+		old=old*old*(3-2*old);
+		float medium=XwaVrMask_AngularAlpha(tanf(angle),0,identity,1);
+		near_value(medium,old,0.00001f);
+		assert(XwaVrMask_AngularAlpha(tanf(angle),0,identity,1.5f)>=medium-0.00001f);
+	}
+	assert(XwaVrMask_AngularAlpha(0,0,identity,1.5f)==0);
+	assert(XwaVrMask_AngularAlpha(tanf(24*0.01745329252f),0,identity,1.5f)==1);
 }
 
 static void test_gpu_contract(void) {
@@ -183,14 +195,32 @@ static void test_gpu_contract(void) {
 	assert(uploads==2); /* activation does not regenerate/upload mask textures */
 	assert(XwaVrPeripheralMask_Render(cmd,eyes,1848,1936));
 	assert(passes==2 && draws==2 && drawn_alpha>0.5f && drawn_alpha<=0.65f);
+	uint8_t wide[2][MASK_SIZE*MASK_SIZE*4];
+	memcpy(wide,uploaded,sizeof wide);
+	_putenv_s("XWA_COMFORT_MASK_STRENGTH","1"); /* new Medium = old High */
+	XwaVrPeripheralMask_Update(q,2020,3020000,1,1);
+	XwaVrPeripheralMask_Prepare(cmd,views,AERON_TEXTURE_FORMAT_RGBA8_UNORM);
+	assert(uploads==2); /* only opacity changed */
+	assert(XwaVrPeripheralMask_Render(cmd,eyes,1848,1936)); assert(drawn_alpha>0.9f && drawn_alpha<=1);
+	_putenv_s("XWA_COMFORT_MASK_STRENGTH","1.5");
+	XwaVrPeripheralMask_Update(q,2030,3030000,1,1);
+	XwaVrPeripheralMask_Prepare(cmd,views,AERON_TEXTURE_FORMAT_RGBA8_UNORM);
+	assert(uploads==4); /* narrower mask invalidates both cached eye textures */
+	for(int e=0;e<2;e++) for(int i=3;i<MASK_SIZE*MASK_SIZE*4;i+=4) assert(uploaded[e][i]>=wide[e][i]);
+	assert(XwaVrPeripheralMask_Render(cmd,eyes,1848,1936)); assert(drawn_alpha<=1);
+	_putenv_s("XWA_COMFORT_MASK_STRENGTH","1");
+	XwaVrPeripheralMask_Update(q,2040,3040000,1,1);
+	XwaVrPeripheralMask_Prepare(cmd,views,AERON_TEXTURE_FORMAT_RGBA8_UNORM);
+	assert(uploads==6 && memcmp(wide,uploaded,sizeof wide)==0);
+	int prior_draws=draws;
 	views[0].fov[0]-=0.01f;
 	fail_upload_at=uploads+2;
 	XwaVrPeripheralMask_Prepare(cmd,views,AERON_TEXTURE_FORMAT_RGBA8_UNORM);
-	assert(XwaVrPeripheralMask_Render(cmd,eyes,1848,1936)); assert(draws==2); /* both eyes skip on failure */
+	assert(XwaVrPeripheralMask_Render(cmd,eyes,1848,1936)); assert(draws==prior_draws); /* both eyes skip on failure */
 	_putenv_s("XWA_COMFORT_MASK","0");
-	XwaVrPeripheralMask_Update(q,2020,3020000,1,1);
+	XwaVrPeripheralMask_Update(q,2050,3050000,1,1);
 	XwaVrPeripheralMask_Prepare(cmd,views,AERON_TEXTURE_FORMAT_RGBA8_UNORM);
-	assert(XwaVrPeripheralMask_Render(cmd,eyes,1848,1936)); assert(draws==2 && s_mask.opacity==0);
+	assert(XwaVrPeripheralMask_Render(cmd,eyes,1848,1936)); assert(draws==prior_draws && s_mask.opacity==0);
 	XwaVrPeripheralMask_Shutdown();
 }
 

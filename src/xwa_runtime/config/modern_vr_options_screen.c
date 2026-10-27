@@ -105,7 +105,7 @@ static const char* const k_bloom_values[] = { "1", "eye", "0" };
 static const char* const k_shake_texts[] = { "Off", "Reduced (25%)", "Original" };
 static const char* const k_shake_values[] = { "0", "0.25", "1" };
 static const char* const k_mask_strength_texts[] = { "Low", "Medium", "High" };
-static const char* const k_mask_strength_values[] = { "0.35", "0.65", "1" };
+static const char* const k_mask_strength_values[] = { "0.65", "1", "1.5" };
 static const char* const k_mask_sensitivity_values[] = { "0.65", "1", "1.5" };
 
 /* Page 1 holds what costs or saves GPU time: each night-shift
@@ -431,7 +431,7 @@ static const struct {
 	{ "XWA_XR_HANDS", "controllers" },
 	{ "XWA_COMFORT_IMPACT_SHAKE", "1" },
 	{ "XWA_COMFORT_MASK", "0" },
-	{ "XWA_COMFORT_MASK_STRENGTH", "0.65" },
+	{ "XWA_COMFORT_MASK_STRENGTH", "1" },
 	{ "XWA_COMFORT_MASK_SENSITIVITY", "1" },
 };
 

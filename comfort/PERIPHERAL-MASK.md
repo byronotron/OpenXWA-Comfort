@@ -1,4 +1,4 @@
-# Adaptive peripheral mask: 0.2.4
+# Adaptive peripheral mask: 0.2.5
 
 In **VR Options → Comfort**, Peripheral Mask defaults to **Off**. Switch it On
 to adjust Mask Strength and Mask Sensitivity independently. Changes save through
@@ -7,12 +7,16 @@ Camera Shake still defaults to Original.
 
 | Control | Low | Medium (initial value) | High |
 | --- | --- | --- | --- |
-| Strength: maximum black blend (linear RGB) | 35% | 65% | 100% |
+| Strength: maximum black blend (linear RGB) | 65% | 100% | 100% |
+| Clear central cone (total angle) | 40° | 40° | 26.7° |
+| Feather reaches full coverage (angle from center) | 35° | 35° | 23.3° |
 | Sensitivity: rotation-rate multiplier | 0.65 | 1.0 | 1.5 |
 
-Strength controls opacity, not aperture size. The center remains clear within
-20 degrees of head-forward (a 40-degree cone); a smooth feather reaches full
-mask coverage at 35 degrees. At Medium sensitivity, activation begins at
+Low is the previous Medium; Medium is exactly the previous High. High increases
+coverage by narrowing the aperture 1.5×, while keeping opacity capped at 100%.
+At Low/Medium the center remains clear within 20 degrees of head-forward; at
+High it remains clear within 13.3 degrees. The mask feathers smoothly outward.
+At Medium sensitivity, activation begins at
 5 degrees/second and reaches full at 55 degrees/second. Higher sensitivity
 responds to slower ship turns. Opacity follows an exponential fade with a
 0.12-second attack and 0.45-second release time constant.
@@ -30,7 +34,7 @@ external views, film, map, hangar and hyperspace do not activate it.
 Both eyes use the same opacity and angular bounds, accounting for asymmetric
 eye FOV and relative eye cant. Head rotation cancels from the mask alignment.
 Two cached 128×128 alpha textures are regenerated only when those view
-parameters change. The final resolved eye images receive one RGB-only LOAD
+parameters or the selected aperture change. The final resolved eye images receive one RGB-only LOAD
 pass each when opacity is visible. Destination alpha is preserved, including
 the existing hand-overlay coverage. HUD, console and control compositor layers
 remain visible. The first implementation can also dim cockpit edges and hands;
@@ -53,7 +57,7 @@ failure skips both eyes. The existing camera suite also passes (567 eye poses,
 Build with the existing instructions, selecting `--profile adaptive-mask` for
 `comfort/build_native.py`, then package with `comfort/build_baseline.py` and
 validate with `comfort/verify_native.py`. The APK is
-`build/artifacts/OpenXWA-Comfort-0.2.4-mask-visibility.apk` (versionCode 9).
+`build/artifacts/OpenXWA-Comfort-0.2.5-mask-strength.apk` (versionCode 10).
 Native validation checks ARM64 ABI, 16 KiB alignment and strong symbol resolution;
 packaging checks signature, package isolation and 124 unchanged upstream payloads.
 These tests do not establish visual alignment, frame cost or comfort in flight.
@@ -83,4 +87,12 @@ reaches full activation at about 37 degrees/second, matching ordinary turns
 observed in the flight logs. Strength values and Off default remain unchanged.
 A regression test checks sustained 40-degree/second turns at every sensitivity.
 Temporary GPU test/capture code is removed from this build. Visual acceptance
-of the retuned mask remains pending user testing.
+of 0.2.4 was confirmed by the user: the mask is visible and fades away at rest.
+
+The user requested that its High become Medium and the new High be stronger.
+0.2.5 uses strength values 0.65 / 1 / 1.5 (initial Medium = 1). Existing saved
+value 1 therefore becomes Medium without changing its effect. High changes the
+angular profile, not sensitivity or fade timing. Tests compare Medium with the
+previous angular profile, check increased coverage at High, verify opacity never
+exceeds one, and check both texture-cache transitions. Visual acceptance of the
+new High remains pending user testing.

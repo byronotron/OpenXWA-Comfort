@@ -1,7 +1,7 @@
 # OpenXWA Comfort: first baseline
 
 The baseline history below is retained for comparison. The current test build is
-**0.2.4-mask-visibility**, documented in [PERIPHERAL-MASK.md](PERIPHERAL-MASK.md).
+**0.2.5-mask-strength**, documented in [PERIPHERAL-MASK.md](PERIPHERAL-MASK.md).
 It adds an Off-by-default peripheral mask driven by ship rotation, with separate
 strength and sensitivity controls. Impact shake remains Original by default;
 see [CAMERA-AUDIT.md](CAMERA-AUDIT.md). Headset flight and subjective comfort

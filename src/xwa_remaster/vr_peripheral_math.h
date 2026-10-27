@@ -108,11 +108,14 @@ static inline void XwaVrMask_EyeAxes(const float left[4], const float right[4], 
 	}
 }
 
-static inline float XwaVrMask_AngularAlpha(float tx, float ty, const float eye_to_head[9]) {
+static inline float XwaVrMask_AngularAlpha(float tx, float ty, const float eye_to_head[9], float strength) {
 	float x=eye_to_head[0]*tx+eye_to_head[1]*ty-eye_to_head[2];
 	float y=eye_to_head[3]*tx+eye_to_head[4]*ty-eye_to_head[5];
 	float z=eye_to_head[6]*tx+eye_to_head[7]*ty-eye_to_head[8];
 	float angle=atan2f(sqrtf(x*x+y*y),-z);
+	/* Medium (1) preserves the previous High exactly. Above 1, narrow the
+	 * aperture rather than trying to increase opacity beyond fully black. */
+	angle *= fmaxf(strength,1.0f);
 	/* Clear central 40-degree cone; feather to full coverage at 35 degrees.
 	 * The old 35..55 degree band only dimmed the extreme edges in dark space. */
 	float a=XwaVrMask_Clamp((angle-0.3490658504f)/0.2617993878f,0,1);
