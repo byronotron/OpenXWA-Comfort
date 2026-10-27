@@ -65,6 +65,8 @@ enum {
 	VR_MASK,
 	VR_MASK_STRENGTH,
 	VR_MASK_SENSITIVITY,
+	VR_PILOT_CENTER,
+	VR_PILOT_INERTIA,
 	VR_COUNT
 };
 
@@ -107,6 +109,8 @@ static const char* const k_shake_values[] = { "0", "0.25", "1" };
 static const char* const k_mask_strength_texts[] = { "Low", "Medium", "High" };
 static const char* const k_mask_strength_values[] = { "0.65", "1", "1.5" };
 static const char* const k_mask_sensitivity_values[] = { "0.65", "1", "1.5" };
+static const char* const k_inertia_texts[] = { "Off", "Low (1 cm)", "Medium (2 cm)", "High (3.5 cm)" };
+static const char* const k_inertia_values[] = { "0", "0.01", "0.02", "0.035" };
 
 /* Page 1 holds what costs or saves GPU time: each night-shift
  * optimization can be switched off there on its own to find a regression. */
@@ -155,6 +159,8 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "XWA_COMFORT_MASK", "Peripheral Mask", k_toggle_texts, k_toggle_values, 2, 0, 102, 2 },
 	{ "XWA_COMFORT_MASK_STRENGTH", "Mask Strength", k_mask_strength_texts, k_mask_strength_values, 3, 1, 103, 2 },
 	{ "XWA_COMFORT_MASK_SENSITIVITY", "Mask Sensitivity", k_mask_strength_texts, k_mask_sensitivity_values, 3, 1, 104, 2 },
+	{ "XWA_COMFORT_PILOT_CENTER", "Pilot-Centered Rotation (experimental)", k_toggle_texts, k_toggle_values, 2, 0, 105, 2 },
+	{ "XWA_COMFORT_PILOT_INERTIA", "Pilot Inertia (experimental)", k_inertia_texts, k_inertia_values, 4, 0, 106, 2 },
 };
 
 static struct {
@@ -433,6 +439,8 @@ static const struct {
 	{ "XWA_COMFORT_MASK", "0" },
 	{ "XWA_COMFORT_MASK_STRENGTH", "1" },
 	{ "XWA_COMFORT_MASK_SENSITIVITY", "1" },
+	{ "XWA_COMFORT_PILOT_CENTER", "0" },
+	{ "XWA_COMFORT_PILOT_INERTIA", "0" },
 };
 
 /* Hand-placed spots that come with them (LOCAL space, metres; HUD panels

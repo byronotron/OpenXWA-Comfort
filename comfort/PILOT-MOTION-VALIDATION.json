@@ -1,0 +1,81 @@
+{
+  "version": "0.3.1-pilot-motion",
+  "package": "org.openxwa.comfort",
+  "apk_sha256": "7038d40cee586be51b4cc0fbeccac88b44233e96976cfd74a67eb106f079707c",
+  "source_changes": {
+    "src/xwa_remaster/flight.c": "a32bb0ad8d10dfdc075b2088c78aa109d2e6784d0dea1ebf13ddb56826e2baf8",
+    "src/xwa_remaster/vr_comfort.h": "315b1b3a9b8909a2f6be2984a6ce994b52e6aca23507d3da910a0ba59a80e01b",
+    "src/xwa_remaster/vr_peripheral_mask.c": "b3a8df1ee8ee29f9b9e559e096b2f79576c9d3eb62c21d0f7f2e939ce3de37b4",
+    "src/xwa_remaster/vr_peripheral_mask.h": "46dd072c06f389d2f259b95e4525bd5fb4ac43fccc64b8c5f8082301c46ff113",
+    "src/xwa_remaster/vr_peripheral_math.h": "d5460faf6616e871e517826fb4730878f7960539c5bf86c0bed44f66e5ce5ee0",
+    "src/xwa_remaster/vr_pilot_motion.h": "6135ece655e87f5d7afe757a0473878545200fdb07e4ccdb7ca8c8de70afefb2",
+    "src/xwa_runtime/config/modern_vr_options_screen.c": "e298a5e61f503c6b828dc09c44c32dd20410555159ec75cdfe3bcb6180c4b23f",
+    "src/xwa_runtime/snapshot/snapshot.c": "38b0addb2417800a1ee9af11bc819e0517ba153f991a8b6c9cfc1cc41304f195",
+    "src/xwa_runtime/snapshot/snapshot.h": "097d08928b3110a802f0b2563aecd02abeccb9f2c02f5c0cd827551da091b567"
+  },
+  "defaults": {
+    "pilot_center": false,
+    "pilot_inertia_m": 0,
+    "peripheral_mask": false,
+    "impact_shake": 1
+  },
+  "tests": {
+    "policy": "passed: all axes, long-seat pivot cancellation, large coordinates, immutable inputs, acceleration sign, total-vector cap, pause/reset/teleport, quantization stability, 30 Hz held snapshots displayed at 72 Hz",
+    "production_camera_integration": "passed: Off byte identity, 75 cockpit/turret configurations, 150 tracked-eye poses, no changes to tracking inputs/orientation, runtime settings and excluded-view gates; exact integer seat contribution excludes impact shake",
+    "camera_regression": "passed: 567 eye poses, 24 cockpit/turret poses, Original matches upstream",
+    "mask_regression": "passed: including accepted strength mapping and stereo cache transitions",
+    "projection_matrix_in_host_integration": "recording stub; real visual projection acceptance pending"
+  },
+  "native_checks": {
+    "libmain.so": {
+      "abi": "arm64-v8a",
+      "elf_alignment": 16384,
+      "dependencies": [
+        "libdl.so",
+        "libavformat.so",
+        "libavcodec.so",
+        "libavutil.so",
+        "libswresample.so",
+        "libswscale.so",
+        "libSDL3.so",
+        "libm.so",
+        "libzstd.so",
+        "libc++_shared.so",
+        "libc.so"
+      ],
+      "unresolved_strong_symbols": []
+    },
+    "libopenxwa_vkshim.so": {
+      "abi": "arm64-v8a",
+      "elf_alignment": 16384,
+      "dependencies": [
+        "libdl.so",
+        "libm.so",
+        "libc.so"
+      ],
+      "unresolved_strong_symbols": []
+    }
+  },
+  "packaging": {
+    "signature": "verified",
+    "payloads": "byte-identical",
+    "package": "org.openxwa.comfort",
+    "provider": "org.openxwa.comfort.setup",
+    "headset_runtime": "not yet tested"
+  },
+  "retained_upstream_payloads": 124,
+  "installation": {
+    "version_code": 12,
+    "adb_result": "Success",
+    "activity": "launch requested; headset asleep, visual startup pending",
+    "comfort_settings": "Original impact shake; mask On, High strength, High sensitivity preserved; pilot keys absent, default Off",
+    "settings_file_sha256_after_launch": "e5d2b2dfeba04a3c6d0e54b42e7b169a60de8d2f9e111b972f9cac730e5f5259",
+    "original_openxwa_apk_sha256_preserved": "156405af2b99b3f676e39fc427fe14471f6d6c21c5f9b778402f8040f7cdadb6"
+  },
+  "headset_flight_and_comfort": "pending user: centering alone first, then Low inertia separately",
+  "limitations": [
+    "Render-only pivot approximation; flight physics and weapon origins unchanged; close-range aiming/parallax requires validation",
+    "Inertia offsets exterior viewpoint while retaining a stable cockpit/controller reference; no pilot body animation or relative eye-to-cockpit displacement",
+    "No claimed comfort improvement before individual headset testing"
+  ]
+}

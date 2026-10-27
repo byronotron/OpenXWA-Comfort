@@ -2,6 +2,7 @@
 
 #include "xwa_remaster/flight.h"
 #include "xwa_remaster/vr_comfort.h"
+#include "xwa_remaster/vr_pilot_motion.h"
 #include "xwa_remaster/vr_peripheral_mask.h"
 
 #include "aeron/aeron.h"
@@ -1547,6 +1548,7 @@ static float fl_comfort_shake_scale(const XwaFlightCamera* cam) {
 }
 
 static void fl_comfort_ship_quaternion(const XwaFlightObject* anchor, float q[4]);
+static XwaVrPilotMotion s_pilot_motion;
 
 static int fl_build_view_at_origin(const XwaFlightCamera* cam, const int32_t origin_world[3], int target_w,
 								   int target_h, XwaRemasterFlightView* out) {
@@ -2105,7 +2107,11 @@ static void fl_submit_view_quad_ex(AeronSceneBillboardStage stage, const float c
 	for (int v = 0; v < 4; v++) {
 		/* local = camera_local + crows^T * view */
 		for (int j = 0; j < 3; j++) {
-			d.corners[v][j] = s.camera_local[j] + s.crows[0 * 3 + j] * corners[v][0] +
+			/* Overlay sprites were derived from the original simulation camera.
+			 * Keep their world positions when the comfort viewpoint is translated. */
+			float source = s.camera_local[j] - (stage == AERON_SCENE_BILLBOARD_STAGE_OVERLAY ?
+				s_pilot_motion.offset_world[j] : 0);
+			d.corners[v][j] = source + s.crows[0 * 3 + j] * corners[v][0] +
 							  s.crows[1 * 3 + j] * corners[v][1] + s.crows[2 * 3 + j] * corners[v][2];
 		}
 		d.uv[v][0] = ref->u0 + uvs[v][0] * du;
@@ -4625,6 +4631,46 @@ static void fl_point_lights_env_refresh(void) {
 	}
 }
 
+static void fl_pilot_motion_apply_view(XwaRemasterFlightView* view) {
+	const float* d=s_pilot_motion.offset_world;
+	if(d[0]==0 && d[1]==0 && d[2]==0) return; /* Off preserves the original camera exactly. */
+	for(int a=0;a<3;a++) view->camera.pos[a]+=d[a];
+	AeronScene_ComputeViewProj(&view->camera,view->view_proj);
+}
+
+static void fl_pilot_motion_update(const XwaSnapshot* snap, int stereo, uint64_t now) {
+	const XwaFlightCamera* cam=&snap->flight_camera;
+	const XwaFlightObject* anchor=fl_cockpit_anchor(snap,cam);
+	const char* pivot=getenv("XWA_COMFORT_PILOT_CENTER");
+	const char* inertia=getenv("XWA_COMFORT_PILOT_INERTIA");
+	char* end=NULL;
+	float cap=inertia ? strtof(inertia,&end) : 0;
+	if(!inertia || end==inertia || *end || !isfinite(cap) || cap<0) cap=0;
+	if(cap>0.035f) cap=0.035f;
+	const int centered=pivot && strcmp(pivot,"1")==0;
+	const int eligible=stereo && snap->cockpit_valid && anchor && fl_cockpit_drawn(snap,cam) &&
+		XwaVrComfort_InternalFlight(cam) && !s.hyperspace_preview && !Aeron_XrIsUnfocused();
+	uint64_t identity=anchor ? (((uint64_t)anchor->signature<<32) | ((uint64_t)anchor->slot<<16) |
+		anchor->object_type) ^ ((uint64_t)snap->cockpit.seat<<60) ^ ((uint64_t)cam->region<<56) : 0;
+	const float units=AERON_OPT_UNITS_PER_METER*fl_xr_env("XWA_XR_WORLD_SCALE",1);
+	const int32_t zero[3]={0};
+	float seat_world[3]={0};
+	if(anchor) for(int a=0;a<3;a++) {
+		/* Use the exact integer camera contribution, excluding impact pan.
+		 * Subtracting the float hardpoint would retain rounding jitter on turns. */
+		seat_world[a]=(float)((double)cam->world_pos[a]-(double)anchor->world_pos[a]-cam->impact_pan_world[a]);
+	}
+	XwaVrPilotMotion_Update(&s_pilot_motion,anchor ? anchor->world_pos : zero,
+		seat_world,(uint32_t)snap->game_time_ms,now,identity,eligible,centered,cap,units);
+	static uint64_t log_us;
+	if(s_pilot_motion.have && now>log_us+5000000) {
+		Aeron_LogInfo("xwa.comfort","pilot motion: center %d, inertia cap %.1f cm; pivot correction %.3f %.3f %.3f m; inertia %.2f %.2f %.2f cm",
+			centered,cap*100,s_pilot_motion.pivot[0]/units,s_pilot_motion.pivot[1]/units,s_pilot_motion.pivot[2]/units,
+			s_pilot_motion.inertia_m[0]*100,s_pilot_motion.inertia_m[1]*100,s_pilot_motion.inertia_m[2]*100);
+		log_us=now;
+	}
+}
+
 AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapshot* snap,
 									   XwaRemasterAssets* assets, int target_w, int target_h,
 									   int direct_present) {
@@ -4632,6 +4678,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		return NULL;
 	}
 	fl_prof_start();
+	const uint64_t host_time_us = XwaTime_GetElapsedUs();
 	const XwaFlightCamera* cam = &snap->flight_camera;
 	if (!XwaVrComfort_InternalFlight(cam)) XwaVrPeripheralMask_Reset();
 	if (!fl_ensure(target_w, target_h)) {
@@ -4650,6 +4697,9 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		AeronXrStereoFrame probe;
 		const int stereo_probe = fl_xr_stereo_eligible(cam) && Aeron_XrStereoBegin(&probe) &&
 								 probe.width == s.rt_w && probe.height == s.rt_h;
+		fl_pilot_motion_update(snap,stereo_probe,host_time_us);
+		fl_pilot_motion_apply_view(&flight_view);
+		memcpy(s.camera_local,flight_view.camera.pos,sizeof s.camera_local);
 		XwaRemasterHud_SetWorldSplit(stereo_probe && fl_xr_hud_head_locked());
 		/* Cockpit panels: the targeting computer overlaps the MFDs on the
 		 * flat HUD at the eye's aspect, so it is drawn to its own target. */
@@ -4668,12 +4718,12 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		if (!XwaRemasterFlight_BuildView(cam, g_xr_hud_w, g_xr_hud_h, &hud_view)) {
 			return NULL;
 		}
+		fl_pilot_motion_apply_view(&hud_view);
 		XwaRemasterHud_PrepareFrame(cmd, snap, assets, &hud_view, g_xr_hud_w, g_xr_hud_h);
 	} else {
 		XwaRemasterHud_PrepareFrame(cmd, snap, assets, &flight_view, s.rt_w, s.rt_h);
 	}
 	fl_quat_to_mat3(flight_view.camera.ori, s.crows);
-	const uint64_t host_time_us = XwaTime_GetElapsedUs();
 	if (cam->map_mode) {
 		s.suppress_hud = 0;
 		return fl_render_map(cmd, snap, assets, &flight_view, host_time_us, direct_present);
@@ -5677,6 +5727,7 @@ static float fl_vr_env_dim_step(int dimmed) {
 }
 
 int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
+	XwaVrPilotMotion_Reset(&s_pilot_motion);
 	XwaVrPeripheralMask_Reset();
 	const float film_dim = fl_vr_env_dim_step(dimmed);
 	AeronXrStereoFrame xr_frame;
@@ -5903,6 +5954,7 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 void XwaRemasterFlight_ReleaseVrEnvironment(void) { XwaVrEnv_Release(); }
 
 void XwaRemasterFlight_Shutdown(void) {
+	XwaVrPilotMotion_Reset(&s_pilot_motion);
 	XwaVrPeripheralMask_Shutdown();
 	XwaVrEnv_Release();
 	XwaVrMenuBeam_Shutdown();

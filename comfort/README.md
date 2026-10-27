@@ -1,8 +1,10 @@
 # OpenXWA Comfort: first baseline
 
 The baseline history below is retained for comparison. The current test build is
-**0.2.5-mask-strength**, documented in [PERIPHERAL-MASK.md](PERIPHERAL-MASK.md).
-It adds an Off-by-default peripheral mask driven by ship rotation, with separate
+**0.3.1-pilot-motion**, documented in [PILOT-MOTION.md](PILOT-MOTION.md), adds
+Off-by-default experimental exterior-view pilot centering and inertia. Headset
+acceptance of these experiments is pending. It retains the accepted
+Off-by-default peripheral mask driven by ship rotation, with separate
 strength and sensitivity controls. Impact shake remains Original by default;
 see [CAMERA-AUDIT.md](CAMERA-AUDIT.md). The Quest 3 user accepted the mask presets
 after flight testing and reported improved tolerance during play; see the

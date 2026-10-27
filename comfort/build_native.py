@@ -51,7 +51,7 @@ def main():
     parser.add_argument("--zig", type=Path, required=True, help="Portable Zig 0.13.0 executable for the Windows host tool")
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--base-apk", type=Path)
-    parser.add_argument("--profile", choices=("baseline", "comfort-shake", "adaptive-mask"), default="baseline")
+    parser.add_argument("--profile", choices=("baseline", "comfort-shake", "adaptive-mask", "pilot-motion"), default="baseline")
     args = parser.parse_args()
     lock = json.loads((ROOT / "comfort/lock.json").read_text())
     for source, commit, patterns in (
@@ -224,6 +224,12 @@ endif()
         provenance.update({"kind": "comfort-adaptive-mask-test", "app_version": "0.2.5-mask-strength",
                            "app_version_code": 10, "app_label": "OpenXWA Comfort", "default_impact_shake": 1.0,
                            "default_peripheral_mask": False,
+                           "build_definition_sha256": hashlib.sha256((ROOT / "CMakeLists.txt").read_bytes()).hexdigest()})
+    if args.profile == "pilot-motion":
+        provenance.update({"kind": "comfort-pilot-motion-test", "app_version": "0.3.1-pilot-motion",
+                           "app_version_code": 12, "app_label": "OpenXWA Comfort", "default_impact_shake": 1.0,
+                           "default_peripheral_mask": False, "default_pilot_center": False,
+                           "default_pilot_inertia_m": 0,
                            "build_definition_sha256": hashlib.sha256((ROOT / "CMakeLists.txt").read_bytes()).hexdigest()})
     write(packaged / "native-build.json", json.dumps(provenance, indent=2))
     print(f"Native libraries rebuilt: {build}")
