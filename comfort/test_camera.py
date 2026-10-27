@@ -41,7 +41,7 @@ def main():
 #include "aeron/xr.h"
 #include "aeron/asset/opt_model.h"
 #include "xwa_remaster/vr_comfort.h"
-static const char* test_shake = "0.25";
+static const char* test_shake = "1";
 static const char* test_getenv(const char* key) {
     return strcmp(key, "XWA_COMFORT_IMPACT_SHAKE") == 0 ? test_shake : NULL;
 }

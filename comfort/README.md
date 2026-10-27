@@ -1,7 +1,7 @@
 # OpenXWA Comfort: first baseline
 
 The baseline history below is retained for comparison. The current test build is
-**0.1.1-shake-audit**, documented in [CAMERA-AUDIT.md](CAMERA-AUDIT.md). It adds
+**0.1.2-original-default**, documented in [CAMERA-AUDIT.md](CAMERA-AUDIT.md). It adds
 impact shake reduction and a Comfort menu, while preserving the existing camera
 pivot and direct headset tracking. Subjective comfort and impact flight tests
 remain pending.

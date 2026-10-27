@@ -8,12 +8,12 @@
 
 static inline float XwaVrComfort_ParseShake(const char* value) {
 	if (!value || !value[0]) {
-		return 0.25f;
+		return 1.0f;
 	}
 	char* end;
 	const float scale = strtof(value, &end);
 	if (end == value || *end || !isfinite(scale)) {
-		return 0.25f;
+		return 1.0f;
 	}
 	return scale < 0.0f ? 0.0f : (scale > 1.0f ? 1.0f : scale);
 }

@@ -218,8 +218,8 @@ endif()
                   "comfort_changes": args.profile != "baseline", "source_changes": source_changes,
                   "runtime_validation": "pending headset"}
     if args.profile == "comfort-shake":
-        provenance.update({"kind": "comfort-camera-shake-test", "app_version": "0.1.1-shake-audit",
-                           "app_version_code": 3, "app_label": "OpenXWA Comfort", "default_impact_shake": 0.25})
+        provenance.update({"kind": "comfort-camera-shake-test", "app_version": "0.1.2-original-default",
+                           "app_version_code": 4, "app_label": "OpenXWA Comfort", "default_impact_shake": 1.0})
     write(packaged / "native-build.json", json.dumps(provenance, indent=2))
     print(f"Native libraries rebuilt: {build}")
 

@@ -19,11 +19,13 @@ static XwaFlightCamera camera(void) {
 }
 
 static void test_policy(void) {
-	close_float(XwaVrComfort_ParseShake(NULL), 0.25f);
-	close_float(XwaVrComfort_ParseShake("garbage"), 0.25f);
-	close_float(XwaVrComfort_ParseShake("nan"), 0.25f);
-	close_float(XwaVrComfort_ParseShake("inf"), 0.25f);
-	close_float(XwaVrComfort_ParseShake("0.25junk"), 0.25f);
+	close_float(XwaVrComfort_ParseShake(NULL), 1.0f);
+	close_float(XwaVrComfort_ParseShake(""), 1.0f);
+	close_float(XwaVrComfort_ParseShake("garbage"), 1.0f);
+	close_float(XwaVrComfort_ParseShake("nan"), 1.0f);
+	close_float(XwaVrComfort_ParseShake("inf"), 1.0f);
+	close_float(XwaVrComfort_ParseShake("0.25junk"), 1.0f);
+	close_float(XwaVrComfort_ParseShake("0.25"), 0.25f);
 	close_float(XwaVrComfort_ParseShake("-2"), 0.0f);
 	close_float(XwaVrComfort_ParseShake("2"), 1.0f);
 	XwaFlightCamera cam = camera();

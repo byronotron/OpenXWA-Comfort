@@ -1,4 +1,4 @@
-# Camera audit and impact shake: 0.1.1 test build
+# Camera audit and impact shake: 0.1.2 test build
 
 ## Available option
 
@@ -7,8 +7,13 @@ Open **VR Options → Comfort → Impact Camera Shake**:
 | Value | Rendered impact pan |
 | --- | --- |
 | Off | Removes the captured artificial translation |
-| Reduced (25%) | One quarter of the original strength; initial default |
-| Original | Full upstream strength |
+| Reduced (25%) | One quarter of the original strength |
+| Original | Full upstream strength; default |
+
+Version 0.1.2 makes Original the default for an unset/invalid setting, a fresh
+installation and Restore VR Defaults. Existing saved choices remain selected.
+The initial 0.1.1 test build used Reduced as its default; user feedback favored
+keeping the original experience as the starting point.
 
 Changes apply immediately and save through the existing VR settings mechanism.
 They apply to an active stereo VR session, internal view of the player's own
@@ -108,7 +113,7 @@ Build/package/verify (native prerequisites are described in `README.md`):
 ```powershell
 python comfort/build_native.py --profile comfort-shake --ndk "$env:LOCALAPPDATA/OpenXWA-Comfort/toolchains/android-ndk-r27c" --zig "$env:LOCALAPPDATA/OpenXWA-Comfort/toolchains/zig-windows-x86_64-0.13.0/zig.exe"
 python comfort/build_baseline.py --base-apk ../OpenXWA-Quest-1.0.1/OpenXWA-quest-1.0.1.apk --native-build build/comfort-native/packaged
-python comfort/verify_native.py --apk build/artifacts/OpenXWA-Comfort-0.1.1-shake-audit.apk --ndk "$env:LOCALAPPDATA/OpenXWA-Comfort/toolchains/android-ndk-r27c"
+python comfort/verify_native.py --apk build/artifacts/OpenXWA-Comfort-0.1.2-original-default.apk --ndk "$env:LOCALAPPDATA/OpenXWA-Comfort/toolchains/android-ndk-r27c"
 ```
 
 The baseline profile still rejects modified source. The `comfort-shake` profile

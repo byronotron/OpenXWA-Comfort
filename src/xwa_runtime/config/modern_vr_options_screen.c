@@ -145,7 +145,7 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "XWA_XR_ASTC", "Compressed Textures (restart)", k_toggle_texts, k_toggle_values, 2, 1, 73, 1 },
 	/* The shim's per-pass GPU timestamps (the log's "GPU per frame"). */
 	{ "XWA_XR_GPU_TIMING", "GPU Timing in Log (restart)", k_toggle_texts, k_toggle_values, 2, 1, 72, 1 },
-	{ "XWA_COMFORT_IMPACT_SHAKE", "Impact Camera Shake", k_shake_texts, k_shake_values, 3, 1, 100, 2 },
+	{ "XWA_COMFORT_IMPACT_SHAKE", "Impact Camera Shake", k_shake_texts, k_shake_values, 3, 2, 100, 2 },
 };
 
 static struct {
@@ -420,7 +420,7 @@ static const struct {
 	{ "XWA_XR_SIDE_PANEL", "1" },
 	{ "AERON_XR_INVERT_PITCH", "0" },
 	{ "XWA_XR_HANDS", "controllers" },
-	{ "XWA_COMFORT_IMPACT_SHAKE", "0.25" },
+	{ "XWA_COMFORT_IMPACT_SHAKE", "1" },
 };
 
 /* Hand-placed spots that come with them (LOCAL space, metres; HUD panels
