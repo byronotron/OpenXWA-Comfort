@@ -81,10 +81,16 @@
     "original_openxwa_apk_hash_preserved": true,
     "original_openxwa_apk_sha256": "156405af2b99b3f676e39fc427fe14471f6d6c21c5f9b778402f8040f7cdadb6"
   },
-  "startup": "0.2.5 installed, Activity launch requested; new High visual acceptance pending",
-  "headset_visual_and_flight_validation": "User confirmed 0.2.4 visible and fades away at rest; requested its High become Medium. New High in 0.2.5 pending user acceptance.",
+  "startup": "0.2.5 installed and gameplay confirmed by user",
+  "headset_visual_and_flight_validation": "Accepted by Quest 3 user on 2026-10-27: mask visible, fades at rest, High strong enough, Medium matches previous High.",
   "enabled_gpu_frame_cost": "unmeasured",
-  "subjective_comfort": "unmeasured",
+  "subjective_comfort": {
+    "status": "positive individual user report; no objective measurement",
+    "date": "2026-10-27",
+    "feedback": "Able to actually play without feeling instantly sick, and scored several kills.",
+    "session_duration": "not recorded",
+    "presets": "User requested keeping 0.2.5 settings as accepted baseline"
+  },
   "known_scope": "Mask can dim cockpit edges/hands; HUD and console compositor layers remain above it.",
   "visibility_correction": {
     "old_user_result": "controls visible; mask not perceived even at High/High",

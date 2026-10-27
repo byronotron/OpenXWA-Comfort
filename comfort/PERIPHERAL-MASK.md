@@ -94,5 +94,11 @@ The user requested that its High become Medium and the new High be stronger.
 value 1 therefore becomes Medium without changing its effect. High changes the
 angular profile, not sensitivity or fade timing. Tests compare Medium with the
 previous angular profile, check increased coverage at High, verify opacity never
-exceeds one, and check both texture-cache transitions. Visual acceptance of the
-new High remains pending user testing.
+exceeds one, and check both texture-cache transitions.
+
+On 2026-10-27 the Quest 3 user confirmed that High is strong enough and Medium
+feels like the previous High, and asked to retain these presets. They reported
+being able to play and score several kills without feeling instantly sick.
+This is encouraging individual playtest feedback; duration and objective
+comfort measurements were not recorded. The 0.2.5 presets are the accepted
+baseline for subsequent comfort work. Off remains the default.

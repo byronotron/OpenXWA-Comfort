@@ -4,8 +4,9 @@ The baseline history below is retained for comparison. The current test build is
 **0.2.5-mask-strength**, documented in [PERIPHERAL-MASK.md](PERIPHERAL-MASK.md).
 It adds an Off-by-default peripheral mask driven by ship rotation, with separate
 strength and sensitivity controls. Impact shake remains Original by default;
-see [CAMERA-AUDIT.md](CAMERA-AUDIT.md). Headset flight and subjective comfort
-validation of the mask remain pending.
+see [CAMERA-AUDIT.md](CAMERA-AUDIT.md). The Quest 3 user accepted the mask presets
+after flight testing and reported improved tolerance during play; see the
+individual playtest notes in [PERIPHERAL-MASK.md](PERIPHERAL-MASK.md).
 
 This branch starts from OpenXWA Quest **v1.0.1**, commit
 `22c3fd3373c4b1a45bffb2072b131e242dd322d2`, with Aeron pinned to
