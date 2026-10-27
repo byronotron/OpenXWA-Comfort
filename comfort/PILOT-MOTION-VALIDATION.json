@@ -72,10 +72,21 @@
     "settings_file_sha256_after_launch": "e5d2b2dfeba04a3c6d0e54b42e7b169a60de8d2f9e111b972f9cac730e5f5259",
     "original_openxwa_apk_sha256_preserved": "156405af2b99b3f676e39fc427fe14471f6d6c21c5f9b778402f8040f7cdadb6"
   },
-  "headset_flight_and_comfort": "pending user: centering alone first, then Low inertia separately",
+  "headset_flight_and_comfort": "2026-10-27 user tried both and could not tell the difference. Activation confirmed in headset logs; perceptual/comfort benefit not established.",
   "limitations": [
     "Render-only pivot approximation; flight physics and weapon origins unchanged; close-range aiming/parallax requires validation",
     "Inertia offsets exterior viewpoint while retaining a stable cockpit/controller reference; no pilot body animation or relative eye-to-cockpit displacement",
     "No claimed comfort improvement before individual headset testing"
-  ]
+  ],
+  "individual_playtest": {
+    "date": "2026-10-27",
+    "user_report": "I tried both. I'll be honest, I can't really tell the difference with either on.",
+    "telemetry": {
+      "centering": "On; corrections of several meters logged during turns",
+      "inertia": "Low, 1 cm cap; near-cap nonzero displacement logged",
+      "observed_sequence": "centering alone, followed by Low inertia with centering still On",
+      "mask": "saved Off at time of report"
+    },
+    "interpretation": "Functional activation confirmed; neither subjective effect nor comfort improvement established. Exterior-only inertia lacks relative cockpit/body displacement."
+  }
 }

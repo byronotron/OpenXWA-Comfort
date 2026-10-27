@@ -98,3 +98,19 @@ and compare gentle turns in a long ship. Check targeting and close geometry.
 Then test **only Low inertia**, using throttle changes and gentle turns. Test
 the combination only after each option behaves acceptably on its own. Comfort
 and mission coverage remain pending individual headset testing.
+
+## First individual playtest: 2026-10-27
+
+The user tried both options and reported being unable to tell the difference.
+Logs confirmed centering On with several-meter corrections during turns, then
+Low inertia (1 cm) reaching near its displacement cap with centering still On.
+The mask was saved Off at the time of the report. This establishes activation,
+but no perceptible effect or comfort improvement for this user.
+
+Exterior-only displacements have limited visual leverage against distant space
+scenery. In particular, the current inertia prototype does not supply relative
+eye-to-cockpit movement. A more faithful experiment would need to separate the
+seat rig and simulated eye translation, with corresponding compositor HUD,
+control, hand-overlay and interaction alignment work. Increasing the exterior
+offset alone is not a validated substitute. Both options remain experimental
+and Off by default.
