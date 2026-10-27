@@ -1,8 +1,9 @@
 # OpenXWA Comfort
 
-Comfort Edition development starts from the pinned Quest 1.0.1 release. The first
-native baseline has a separate package and signing identity; headset validation
-and comfort/performance changes are still pending. See [build, install and validation status](comfort/README.md).
+Comfort Edition starts from the pinned Quest 1.0.1 release, with a separate
+package and signing identity. Test build 0.1.1 adds **VR Options → Comfort →
+Impact Camera Shake** (Off / Reduced / Original). See the [camera audit and test
+scope](comfort/CAMERA-AUDIT.md) and [build instructions](comfort/README.md).
 
 ## Upstream OpenXWA VR
 

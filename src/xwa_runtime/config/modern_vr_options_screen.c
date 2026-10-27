@@ -61,6 +61,7 @@ enum {
 	VR_BLOOM,
 	VR_ASTC,
 	VR_GPU_TIMING,
+	VR_IMPACT_SHAKE,
 	VR_COUNT
 };
 
@@ -98,6 +99,8 @@ static const char* const k_bloom_texts[] = { "Shared (Recommended)", "Per Eye", 
 /* Off is the recommended setting (dynamic lights, cockpit shadows). */
 static const char* const k_off_rec_texts[] = { "Off (Recommended)", "On" };
 static const char* const k_bloom_values[] = { "1", "eye", "0" };
+static const char* const k_shake_texts[] = { "Off", "Reduced (25%)", "Original" };
+static const char* const k_shake_values[] = { "0", "0.25", "1" };
 
 /* Page 1 holds what costs or saves GPU time: each night-shift
  * optimization can be switched off there on its own to find a regression. */
@@ -142,6 +145,7 @@ static const VrSetting k_settings[VR_COUNT] = {
 	{ "XWA_XR_ASTC", "Compressed Textures (restart)", k_toggle_texts, k_toggle_values, 2, 1, 73, 1 },
 	/* The shim's per-pass GPU timestamps (the log's "GPU per frame"). */
 	{ "XWA_XR_GPU_TIMING", "GPU Timing in Log (restart)", k_toggle_texts, k_toggle_values, 2, 1, 72, 1 },
+	{ "XWA_COMFORT_IMPACT_SHAKE", "Impact Camera Shake", k_shake_texts, k_shake_values, 3, 1, 100, 2 },
 };
 
 static struct {
@@ -416,6 +420,7 @@ static const struct {
 	{ "XWA_XR_SIDE_PANEL", "1" },
 	{ "AERON_XR_INVERT_PITCH", "0" },
 	{ "XWA_XR_HANDS", "controllers" },
+	{ "XWA_COMFORT_IMPACT_SHAKE", "0.25" },
 };
 
 /* Hand-placed spots that come with them (LOCAL space, metres; HUD panels
@@ -577,7 +582,7 @@ static void vr_draw_voice(XwaModernOptionsMenu* menu) {
 	menu->y = bottom + 30;
 }
 
-enum { VR_PAGE_MAIN, VR_PAGE_PERF, VR_PAGE_HELP, VR_PAGE_VOICE };
+enum { VR_PAGE_MAIN, VR_PAGE_PERF, VR_PAGE_HELP, VR_PAGE_VOICE, VR_PAGE_COMFORT };
 
 int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 	static int page;
@@ -604,6 +609,18 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 		}
 		return 0;
 	}
+	if (page == VR_PAGE_COMFORT) {
+		XwaModernOptionsMenu_Begin(&menu, menu_center_x, 80, cursor_row, vr_page_rows(2) + 1);
+		XwaModernOptionsMenu_DrawTitle(&menu, "VR Comfort");
+		vr_draw_settings(&menu, 2);
+		back = XwaModernOptionsMenu_DrawAction(&menu, FrontendString_Get(STR_BACK), 87, 0);
+		back |= XwaModernOptionsMenu_TakeEscape(&menu);
+		if (back) {
+			page = VR_PAGE_MAIN;
+			*cursor_row = 2 + vr_page_rows(0) + 2;
+		}
+		return 0;
+	}
 	if (page == VR_PAGE_PERF) {
 		/* Performance / GPU: every optimization on its own switch. */
 		XwaModernOptionsMenu_Begin(&menu, menu_center_x, 38, cursor_row, vr_page_rows(1) + 1);
@@ -613,11 +630,11 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 		back |= XwaModernOptionsMenu_TakeEscape(&menu);
 		if (back) {
 			page = VR_PAGE_MAIN;
-			*cursor_row = 2 + vr_page_rows(0) + 2; /* on "Performance / GPU..." */
+			*cursor_row = 2 + vr_page_rows(0) + 3; /* on "Performance / GPU..." */
 		}
 		return 0;
 	}
-	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 38, cursor_row, vr_page_rows(0) + 6);
+	XwaModernOptionsMenu_Begin(&menu, menu_center_x, 38, cursor_row, vr_page_rows(0) + 7);
 	XwaModernOptionsMenu_DrawTitle(&menu, "VR Options");
 	if (XwaModernOptionsMenu_DrawAction(&menu, "Help", 65, 0)) {
 		page = VR_PAGE_HELP;
@@ -641,6 +658,12 @@ int XwaModernVrOptionsScreen_Update(int menu_center_x, int* cursor_row) {
 		SDL_setenv_unsafe("XWA_XR_CONSOLE_POSE", "", 1);
 		XwaModernVrOptions_SaveValue("XWA_XR_CONSOLE_POSE", "");
 		Aeron_LogInfo("xwa.config", "lap console back at its default spot");
+	}
+	menu.y -= 4;
+	if (XwaModernOptionsMenu_DrawAction(&menu, "Comfort...", 101, 0)) {
+		page = VR_PAGE_COMFORT;
+		*cursor_row = 0;
+		return 0;
 	}
 	menu.y -= 4;
 	if (XwaModernOptionsMenu_DrawAction(&menu, "Performance / GPU...", 71, 0)) {

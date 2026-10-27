@@ -1394,6 +1394,9 @@ void XwaSnapshot_CaptureFlight(void) {
 	c->world_pos[0] = vs->savedTargetX;
 	c->world_pos[1] = vs->savedTargetY;
 	c->world_pos[2] = vs->savedTargetZ;
+	c->impact_pan_world[0] = (float)(vs->cameraPanDeltaX >> 4);
+	c->impact_pan_world[1] = (float)(vs->cameraPanDeltaY >> 4);
+	c->impact_pan_world[2] = (float)(vs->cameraPanDeltaZ >> 4);
 	FVIEW_CopyRenderCameraRows(c->rows);
 	c->view_pitch = vs->viewPitch;
 	c->view_yaw = vs->viewYaw;

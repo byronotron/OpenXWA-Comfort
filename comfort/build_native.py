@@ -51,10 +51,11 @@ def main():
     parser.add_argument("--zig", type=Path, required=True, help="Portable Zig 0.13.0 executable for the Windows host tool")
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--base-apk", type=Path)
+    parser.add_argument("--profile", choices=("baseline", "comfort-shake"), default="baseline")
     args = parser.parse_args()
     lock = json.loads((ROOT / "comfort/lock.json").read_text())
     for source, commit, patterns in (
-        (ROOT, lock["upstream_commit"], ["src", "shaders", "third_party"]),
+        (ROOT, lock["upstream_commit"], ["src", "shaders", "third_party"] if args.profile == "baseline" else ["shaders", "third_party"]),
         (ROOT / "aeron", lock["aeron_commit"], ["src", "include", "shaders", "tools", "third_party"]),
     ):
         changed = subprocess.check_output(["git", "diff", commit, "--", *patterns], cwd=source)
@@ -69,6 +70,9 @@ def main():
     if subprocess.check_output(["git", "diff", "HEAD", "--", "include"], cwd=sdl):
         raise SystemExit("SDL headers have local modifications")
     runtime = ROOT / "build/upstream-apk/lib/arm64-v8a"
+    changed_names = subprocess.check_output(["git", "diff", "--name-only", lock["upstream_commit"], "--", "src"], cwd=ROOT, text=True).splitlines()
+    changed_names += subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard", "--", "src"], cwd=ROOT, text=True).splitlines()
+    source_changes = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in sorted(set(changed_names))}
     shader_dir = ROOT / "build/upstream-apk/assets/shaders"
     base_apk = args.base_apk or ROOT.parent / "OpenXWA-Quest-1.0.1/OpenXWA-quest-1.0.1.apk"
     if not base_apk.exists():
@@ -211,7 +215,11 @@ endif()
     provenance = {"source": lock, "kind": "native-source-baseline-with-upstream-dependencies",
                   "native_libraries": libraries, "shader_inputs": "pinned upstream source; unmodified cached SPIR-V",
                   "ndk": "27.2.12479018", "compiler": "NDK Clang", "video": True, "openxr": True,
-                  "comfort_changes": False, "runtime_validation": "pending headset"}
+                  "comfort_changes": args.profile != "baseline", "source_changes": source_changes,
+                  "runtime_validation": "pending headset"}
+    if args.profile == "comfort-shake":
+        provenance.update({"kind": "comfort-camera-shake-test", "app_version": "0.1.1-shake-audit",
+                           "app_version_code": 3, "app_label": "OpenXWA Comfort", "default_impact_shake": 0.25})
     write(packaged / "native-build.json", json.dumps(provenance, indent=2))
     print(f"Native libraries rebuilt: {build}")
 

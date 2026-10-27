@@ -451,6 +451,7 @@ typedef struct XwaFlightMapState {
  * render camera's world->eye basis rows in R0, R1, R2 storage order. */
 typedef struct XwaFlightCamera {
 	int32_t world_pos[3]; /* viewState.savedTarget* (camera anchor) */
+	float impact_pan_world[3]; /* exact cameraPanDelta* >> 4; render-only comfort input */
 	float rows[9];
 	uint16_t view_pitch, view_yaw, view_roll, view_angle_d;
 	int32_t focus_obj_idx;

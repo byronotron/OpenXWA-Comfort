@@ -1,5 +1,11 @@
 # OpenXWA Comfort: first baseline
 
+The baseline history below is retained for comparison. The current test build is
+**0.1.1-shake-audit**, documented in [CAMERA-AUDIT.md](CAMERA-AUDIT.md). It adds
+impact shake reduction and a Comfort menu, while preserving the existing camera
+pivot and direct headset tracking. Subjective comfort and impact flight tests
+remain pending.
+
 This branch starts from OpenXWA Quest **v1.0.1**, commit
 `22c3fd3373c4b1a45bffb2072b131e242dd322d2`, with Aeron pinned to
 `2e813e81c3384422792a7637c81516e6506cdb05`. See `lock.json`.

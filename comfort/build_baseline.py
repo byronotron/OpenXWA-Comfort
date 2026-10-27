@@ -50,6 +50,10 @@ def main():
         version = "0.1.0-native-baseline"
         label = "OpenXWA Comfort (Native baseline)"
         kind = "native-source-baseline-with-upstream-dependencies"
+        if native.get("comfort_changes"):
+            version = native["app_version"]
+            label = native["app_label"]
+            kind = native["kind"]
     if args.out is None:
         args.out = ROOT / f"build/artifacts/OpenXWA-Comfort-{version}.apk"
     lock = json.loads((ROOT / "comfort/lock.json").read_text())
@@ -93,7 +97,8 @@ def main():
         (resources / "values/strings.xml").write_text(
             '<resources><string name="app_name">' + escape(label) + '</string></resources>', encoding="utf-8")
         manifest = (ROOT / "packaging/quest/AndroidManifest.xml").read_text(encoding="utf-8")
-        manifest = manifest.replace("@PACKAGE@", PACKAGE).replace("@VERSION_NAME@", version).replace("@VERSION_CODE@", "2" if native else "1")
+        version_code = str(native.get("app_version_code", 2)) if native else "1"
+        manifest = manifest.replace("@PACKAGE@", PACKAGE).replace("@VERSION_NAME@", version).replace("@VERSION_CODE@", version_code)
         (work / "AndroidManifest.xml").write_text(manifest, encoding="utf-8")
         run([aapt, "compile", "--dir", resources, "-o", work / "res.zip"])
         run([aapt, "link", "-o", work / "base.apk", "--manifest", work / "AndroidManifest.xml",

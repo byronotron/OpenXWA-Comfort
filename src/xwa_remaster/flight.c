@@ -1,6 +1,7 @@
 /* Flight-scene HD driver — see xwa_remaster/flight.h. */
 
 #include "xwa_remaster/flight.h"
+#include "xwa_remaster/vr_comfort.h"
 
 #include "aeron/aeron.h"
 #include "aeron/config_file.h"
@@ -1539,6 +1540,11 @@ static void fl_quat_to_mat3(const float q[4], float m[9]) {
 	m[8] = 1.0f - 2.0f * (xx + yy);
 }
 
+static float fl_comfort_shake_scale(const XwaFlightCamera* cam) {
+	return XwaVrComfort_ShakeScale(cam, Aeron_XrIsPresenting(), getenv("XWA_XR_STEREO"),
+								   getenv("XWA_COMFORT_IMPACT_SHAKE"));
+}
+
 static int fl_build_view_at_origin(const XwaFlightCamera* cam, const int32_t origin_world[3], int target_w,
 								   int target_h, XwaRemasterFlightView* out) {
 	if (!cam || !out || target_w <= 0 || target_h <= 0) {
@@ -1562,6 +1568,7 @@ static int fl_build_view_at_origin(const XwaFlightCamera* cam, const int32_t ori
 
 	memcpy(out->origin_world, origin_world, sizeof out->origin_world);
 	AeronWorld_LocalI32(origin_world, cam->world_pos, scene_camera->pos);
+	XwaVrComfort_ApplyCameraPan(cam, fl_comfort_shake_scale(cam), scene_camera->pos);
 	scene_camera->v_half_rad = atanf(hh / ps);
 	const float aspect = (float)target_w / (float)target_h;
 	scene_camera->h_half_rad = atanf(tanf(scene_camera->v_half_rad) * aspect);
@@ -1919,6 +1926,42 @@ static int fl_cockpit_drawn(const XwaSnapshot* snap, const XwaFlightCamera* cam)
 		   (snap->cockpit.seat == 0 ? snap->cockpit.look_available : snap->cockpit.toggle_available);
 }
 
+/* One audit record per craft/seat/setting. Optional continuous sampling is
+ * useful while pitching/rolling each cockpit; this never corrects the pivot. */
+static void fl_comfort_pivot_audit(const XwaSnapshot* snap, const XwaFlightObject* anchor) {
+	const XwaFlightCamera* cam = &snap->flight_camera;
+	if (!Aeron_XrIsPresenting() || !snap->cockpit_valid || !anchor || !XwaVrComfort_InternalFlight(cam)) {
+		return;
+	}
+	static char last_model[40];
+	static int last_seat = -1;
+	static float last_scale = -1.0f;
+	static uint64_t last_time;
+	const float scale = fl_comfort_shake_scale(cam);
+	const uint64_t now = SDL_GetTicksNS();
+	const char* continuous = getenv("XWA_COMFORT_PIVOT_AUDIT");
+	const int changed = strcmp(last_model, snap->cockpit.model_name) != 0 ||
+		last_seat != snap->cockpit.seat || last_scale != scale;
+	if (!changed && (!(continuous && continuous[0] == '1') || now - last_time < 2000000000ULL)) {
+		return;
+	}
+	float residual[3];
+	for (int a = 0; a < 3; a++) {
+		/* Subtract world integers in double before conversion (large missions). */
+		residual[a] = (float)((double)cam->world_pos[a] - (double)anchor->world_pos[a] -
+			snap->cockpit.hardpoint_world[a] - cam->impact_pan_world[a]);
+	}
+	Aeron_LogInfo("xwa.comfort", "pivot craft=%s seat=%u shake=%.2f pilot residual=(%.3f %.3f %.3f) "
+		"pan=(%.2f %.2f %.2f); tracked eye pose unchanged",
+		snap->cockpit.model_name, (unsigned)snap->cockpit.seat, scale,
+		residual[0], residual[1], residual[2], cam->impact_pan_world[0],
+		cam->impact_pan_world[1], cam->impact_pan_world[2]);
+	snprintf(last_model, sizeof last_model, "%s", snap->cockpit.model_name);
+	last_seat = snap->cockpit.seat;
+	last_scale = scale;
+	last_time = now;
+}
+
 /* If view/turret state changes between snapshots whose simulation time is
  * equal, the velocity buffer must still advance. Otherwise motion blur keeps
  * sampling the last simulated velocity while FSR receives a current pose
@@ -1946,6 +1989,7 @@ static int fl_temporal_pose_changed(const XwaSnapshot* current, const XwaSnapsho
 }
 
 static int fl_cockpit_model_matrix(const XwaCockpit* cockpit, const XwaFlightObject* anchor,
+								   const XwaFlightCamera* cam,
 								   const float camera_rows[9], const float camera_local[3], float out[16]) {
 	if (!cockpit || !anchor || !camera_rows || !camera_local || !out) {
 		return 0;
@@ -1960,8 +2004,9 @@ static int fl_cockpit_model_matrix(const XwaCockpit* cockpit, const XwaFlightObj
 	fl_object_world(cur, basis);
 
 	float eye_offset[3];
+	const float shake = fl_comfort_shake_scale(cam);
 	for (int axis = 0; axis < 3; ++axis) {
-		eye_offset[axis] = -(cockpit->hardpoint_world[axis] + cockpit->camera_pan[axis] * 0.0625f);
+		eye_offset[axis] = -(cockpit->hardpoint_world[axis] + shake * cockpit->camera_pan[axis] * 0.0625f);
 	}
 	float delta[3];
 	fl_world_to_view(camera_rows, eye_offset[0], eye_offset[1], eye_offset[2], delta);
@@ -4661,6 +4706,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	AeronScene_SetPassHook(s.scene, AERON_SCENE_HOOK_BEFORE_OPAQUE, NULL, NULL);
 	s.before_opaque_mode = FL_BEFORE_OPAQUE_NONE;
 	const XwaFlightObject* cockpit_anchor = fl_cockpit_anchor(snap, cam);
+	fl_comfort_pivot_audit(snap, cockpit_anchor);
 
 	/* ---- Motion-blur frame context (the TIE model) --------------------
 	 * Velocity derives from the prev/curr SNAPSHOT pair (one sim advance
@@ -5249,7 +5295,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		AeronSceneMesh* cockpit_mesh = XwaRemasterShip_MeshForName(snap->cockpit.model_name);
 		if (cockpit_mesh) {
 			float m[16];
-			fl_cockpit_model_matrix(&snap->cockpit, cockpit_anchor, s.crows, s.camera_local, m);
+			fl_cockpit_model_matrix(&snap->cockpit, cockpit_anchor, cam, s.crows, s.camera_local, m);
 			fl_xr_seat_shift(snap, m);
 			fl_xr_cockpit_scale(snap, s.camera_local, m);
 			AeronSceneMeshInstance inst;
@@ -5261,7 +5307,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 			memcpy(inst.prev_transform, m, sizeof m);
 			inst.no_local_lights = 1;
 			if (cockpit_history_valid &&
-				fl_cockpit_model_matrix(&prev->cockpit, previous_cockpit_anchor, previous_crows,
+				fl_cockpit_model_matrix(&prev->cockpit, previous_cockpit_anchor, &prev->flight_camera, previous_crows,
 										previous_flight_view.camera.pos, inst.prev_transform)) {
 				fl_xr_seat_shift(prev, inst.prev_transform);
 				fl_xr_cockpit_scale(prev, previous_flight_view.camera.pos, inst.prev_transform);

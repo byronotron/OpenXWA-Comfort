@@ -1,0 +1,58 @@
+{
+  "version": "0.1.1-shake-audit",
+  "package": "org.openxwa.comfort",
+  "apk_sha256": "94b744419ab6a43299c1474b6a0e5228d1bfe1d6c9f4a34ccebd30c30dc180ea",
+  "kind": "comfort-camera-shake-test",
+  "source_changes": {
+    "src/xwa_remaster/flight.c": "767961ab93b589a4be47231d3afa9ab3b1f57c30ed9139135864ae3ccf69bae1",
+    "src/xwa_remaster/vr_comfort.h": "153d77c0fd808642ef81b8732c47224cb56db127202f9eba7e1fe16daf534c5b",
+    "src/xwa_runtime/config/modern_vr_options_screen.c": "2028c01843a7c7de3c3873c9d0724d7da74784984633405a87e664cea094966c",
+    "src/xwa_runtime/snapshot/snapshot.c": "38b0addb2417800a1ee9af11bc819e0517ba153f991a8b6c9cfc1cc41304f195",
+    "src/xwa_runtime/snapshot/snapshot.h": "097d08928b3110a802f0b2563aecd02abeccb9f2c02f5c0cd827551da091b567"
+  },
+  "default_impact_shake": 0.25,
+  "automated_camera_tests": {
+    "eye_poses": 567,
+    "cockpit_and_turret_poses": 24,
+    "original_transform_matches_upstream": true,
+    "input_structs_unchanged": true,
+    "tracking_function_bodies_unchanged": true
+  },
+  "native_checks": {
+    "libmain.so": {
+      "abi": "arm64-v8a",
+      "elf_alignment": 16384,
+      "dependencies": [
+        "libdl.so",
+        "libavformat.so",
+        "libavcodec.so",
+        "libavutil.so",
+        "libswresample.so",
+        "libswscale.so",
+        "libSDL3.so",
+        "libm.so",
+        "libzstd.so",
+        "libc++_shared.so",
+        "libc.so"
+      ],
+      "unresolved_strong_symbols": []
+    },
+    "libopenxwa_vkshim.so": {
+      "abi": "arm64-v8a",
+      "elf_alignment": 16384,
+      "dependencies": [
+        "libdl.so",
+        "libm.so",
+        "libc.so"
+      ],
+      "unresolved_strong_symbols": []
+    }
+  },
+  "installation": {
+    "version_code": 3,
+    "settings_hash_preserved": true,
+    "original_openxwa_apk_hash_preserved": true
+  },
+  "headset_menu_and_flight_validation": "pending user confirmation",
+  "subjective_comfort": "unmeasured"
+}
