@@ -1,4 +1,4 @@
-# Adaptive peripheral mask: 0.2.0
+# Adaptive peripheral mask: 0.2.4
 
 In **VR Options → Comfort**, Peripheral Mask defaults to **Off**. Switch it On
 to adjust Mask Strength and Mask Sensitivity independently. Changes save through
@@ -7,13 +7,13 @@ Camera Shake still defaults to Original.
 
 | Control | Low | Medium (initial value) | High |
 | --- | --- | --- | --- |
-| Strength: maximum outer-edge darkness | 35% | 65% | 100% |
+| Strength: maximum black blend (linear RGB) | 35% | 65% | 100% |
 | Sensitivity: rotation-rate multiplier | 0.65 | 1.0 | 1.5 |
 
 Strength controls opacity, not aperture size. The center remains clear within
-35 degrees of head-forward (a 70-degree cone); a smooth feather reaches full
-mask coverage at 55 degrees. At Medium sensitivity, activation begins at
-35 degrees/second and reaches full at 100 degrees/second. Higher sensitivity
+20 degrees of head-forward (a 40-degree cone); a smooth feather reaches full
+mask coverage at 35 degrees. At Medium sensitivity, activation begins at
+5 degrees/second and reaches full at 55 degrees/second. Higher sensitivity
 responds to slower ship turns. Opacity follows an exponential fade with a
 0.12-second attack and 0.45-second release time constant.
 
@@ -53,7 +53,7 @@ failure skips both eyes. The existing camera suite also passes (567 eye poses,
 Build with the existing instructions, selecting `--profile adaptive-mask` for
 `comfort/build_native.py`, then package with `comfort/build_baseline.py` and
 validate with `comfort/verify_native.py`. The APK is
-`build/artifacts/OpenXWA-Comfort-0.2.0-adaptive-mask.apk` (versionCode 5).
+`build/artifacts/OpenXWA-Comfort-0.2.4-mask-visibility.apk` (versionCode 9).
 Native validation checks ARM64 ABI, 16 KiB alignment and strong symbol resolution;
 packaging checks signature, package isolation and 124 unchanged upstream payloads.
 These tests do not establish visual alignment, frame cost or comfort in flight.
@@ -64,3 +64,23 @@ Verify a smooth fade on ship turns, a clear center, matching eyes, readable HUD,
 release at rest, and no mask in menus or other excluded views. Compare all
 strength/sensitivity levels and verify Off immediately removes it. Stop the
 test if uncomfortable. Results are pending; see `MASK-VALIDATION.json`.
+
+## Visibility correction after headset testing
+
+The user could see the controls but could not perceive the 0.2.0 mask, even at
+High strength and sensitivity. Diagnostic builds 0.2.1–0.2.3 established that
+settings reached the renderer, ship turns produced activation, textures were
+ready, and draw calls executed. A real Quest GPU test at 80% blend read back
+darkened outer pixels in both eyes (124/139 RGB versus 255 at the center), with
+destination alpha preserved at 64. A captured flight frame showed 1,268,480
+changed pixels and a maximum summed RGB difference of 170 across the mask pass.
+The before/after captures showed that the old wide 35–55-degree feather mostly
+dimmed the far periphery and was barely apparent in dark space.
+
+0.2.4 moves the feather inward to 20–35 degrees and lowers the response band
+from 35–100 to 5–55 degrees/second at Medium sensitivity. High sensitivity now
+reaches full activation at about 37 degrees/second, matching ordinary turns
+observed in the flight logs. Strength values and Off default remain unchanged.
+A regression test checks sustained 40-degree/second turns at every sensitivity.
+Temporary GPU test/capture code is removed from this build. Visual acceptance
+of the retuned mask remains pending user testing.

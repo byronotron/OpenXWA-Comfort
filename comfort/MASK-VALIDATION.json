@@ -1,13 +1,13 @@
 {
-  "version": "0.2.0-adaptive-mask",
+  "version": "0.2.4-mask-visibility",
   "package": "org.openxwa.comfort",
-  "apk_sha256": "c2597fd792c94fb375ed37f2165800fa52ab9e44ab94c0cdf6a68e6c2eb72073",
+  "apk_sha256": "983250e9fe5aad5eedd66a7762f120cbce3409aa7c24cb467333a52f76b03c25",
   "source_changes": {
-    "src/xwa_remaster/flight.c": "8d12d26fbf3d72572a0f81e12e26bab8ff14fb6faa70bfdad6531808c10cad8d",
+    "src/xwa_remaster/flight.c": "a4271659e6e7f247ba6bcbb094b9ce79b1378ef337eb0502fb4c3b7f88aea847",
     "src/xwa_remaster/vr_comfort.h": "315b1b3a9b8909a2f6be2984a6ce994b52e6aca23507d3da910a0ba59a80e01b",
     "src/xwa_remaster/vr_peripheral_mask.c": "667bf6bae1ce8065472d4b64d1c3c21909511b8260d9c894c6fbcb3014a5c959",
     "src/xwa_remaster/vr_peripheral_mask.h": "46dd072c06f389d2f259b95e4525bd5fb4ac43fccc64b8c5f8082301c46ff113",
-    "src/xwa_remaster/vr_peripheral_math.h": "6ac08b571022f45316cc26b9cda481b76325f8560f58d814c624cc87441da7c9",
+    "src/xwa_remaster/vr_peripheral_math.h": "b64d8458420782681ba2f9e6a259eb5c2399215bc03787cbdf2a079f9940b6a8",
     "src/xwa_runtime/config/modern_vr_options_screen.c": "d017d6152571ac8443155c4a02b7be17921291dfdf45b1aa7c9c8e62231f0b87",
     "src/xwa_runtime/snapshot/snapshot.c": "38b0addb2417800a1ee9af11bc819e0517ba153f991a8b6c9cfc1cc41304f195",
     "src/xwa_runtime/snapshot/snapshot.h": "097d08928b3110a802f0b2563aecd02abeccb9f2c02f5c0cd827551da091b567"
@@ -73,17 +73,44 @@
   },
   "unchanged_upstream_payload_count": 124,
   "installation": {
-    "version_code": 5,
+    "version_code": 9,
     "adb_result": "Success",
     "settings_hash_preserved": true,
-    "settings_sha256_before_and_after": "04f5b05bf40c7928c203c02bfc0cea02a3e90629dbad3befd116d50ea5bdbdf5",
-    "mask_keys_in_existing_settings": "absent: runtime/UI fallback Off",
+    "settings_sha256_before_and_after": "1f1b8700c6860dbe3cfd95e6e4767c5df127a96ccb254fa0b66035fffa41842a",
+    "mask_keys_in_existing_settings": "user saved On, High strength, High sensitivity; preserved",
     "original_openxwa_apk_hash_preserved": true,
     "original_openxwa_apk_sha256": "156405af2b99b3f676e39fc427fe14471f6d6c21c5f9b778402f8040f7cdadb6"
   },
-  "startup": "Activity launched; process running and native initialization logged; full menu/flight pending",
-  "headset_visual_and_flight_validation": "pending user",
+  "startup": "0.2.4 installed and Activity launch requested; awaiting user flight acceptance",
+  "headset_visual_and_flight_validation": "0.2.4 pending user; prior flight and GPU diagnostics completed",
   "enabled_gpu_frame_cost": "unmeasured",
   "subjective_comfort": "unmeasured",
-  "known_scope": "Mask can dim cockpit edges/hands; HUD and console compositor layers remain above it."
+  "known_scope": "Mask can dim cockpit edges/hands; HUD and console compositor layers remain above it.",
+  "visibility_correction": {
+    "old_user_result": "controls visible; mask not perceived even at High/High",
+    "gpu_selftest": {
+      "outer_rgb": [
+        124,
+        139
+      ],
+      "center_rgb": [
+        255,
+        255
+      ],
+      "alpha_preserved": 64,
+      "blend": 0.8
+    },
+    "flight_gpu_probe": {
+      "changed_pixels": 1268480,
+      "max_summed_rgb_delta": 170,
+      "capture": "before/after actual eye target; artifacts retained locally in ignored build directory"
+    },
+    "finding": "Draw changes flight pixels but the 35..55 degree band is barely apparent in dark space",
+    "new_clear_half_angle_degrees": 20,
+    "new_full_half_angle_degrees": 35,
+    "medium_response_onset_dps": 5,
+    "medium_full_response_dps": 55,
+    "regression": "40 deg/s sustained turns checked for all three sensitivities",
+    "temporary_gpu_probe_code": "removed"
+  }
 }

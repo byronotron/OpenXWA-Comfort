@@ -221,8 +221,8 @@ endif()
         provenance.update({"kind": "comfort-camera-shake-test", "app_version": "0.1.2-original-default",
                            "app_version_code": 4, "app_label": "OpenXWA Comfort", "default_impact_shake": 1.0})
     if args.profile == "adaptive-mask":
-        provenance.update({"kind": "comfort-adaptive-mask-test", "app_version": "0.2.0-adaptive-mask",
-                           "app_version_code": 5, "app_label": "OpenXWA Comfort", "default_impact_shake": 1.0,
+        provenance.update({"kind": "comfort-adaptive-mask-test", "app_version": "0.2.4-mask-visibility",
+                           "app_version_code": 9, "app_label": "OpenXWA Comfort", "default_impact_shake": 1.0,
                            "default_peripheral_mask": False,
                            "build_definition_sha256": hashlib.sha256((ROOT / "CMakeLists.txt").read_bytes()).hexdigest()})
     write(packaged / "native-build.json", json.dumps(provenance, indent=2))

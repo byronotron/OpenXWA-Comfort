@@ -69,8 +69,18 @@ static void test_motion(void) {
 		XwaVrMask_UpdateMotion(&m,q,5010,now+5010000,8,1,1); assert(m.activation==0);
 		XwaVrMask_UpdateMotion(&m,q,5020,now+5020000,8,0,1); assert(!m.have);
 	}
-	assert(XwaVrMask_Response(60,0.65f)<XwaVrMask_Response(60,1));
-	assert(XwaVrMask_Response(60,1)<XwaVrMask_Response(60,1.5f));
+	assert(XwaVrMask_Response(30,0.65f)<XwaVrMask_Response(30,1));
+	assert(XwaVrMask_Response(30,1)<XwaVrMask_Response(30,1.5f));
+	/* Regression: the observed 40 deg/s turns must produce a visible mask. */
+	for(int level=0;level<3;level++) {
+		XwaVrMaskMotion turn={0}; float q[4];
+		float sensitivity[3]={0.65f,1,1.5f};
+		for(int i=0;i<=200;i++) {
+			pose(q,i*0.4f,1);
+			XwaVrMask_UpdateMotion(&turn,q,i*10,1000000+i*10000,1,1,sensitivity[level]);
+		}
+		assert(turn.activation>(level==2 ? 0.99f : level==1 ? 0.78f : 0.38f));
+	}
 	assert(XwaVrMask_Response(0,3)==0);
 	near_value(XwaVrMask_Parse("nan",0.65f,0,1),0.65f,0.00001f);
 	near_value(XwaVrMask_Parse("999",1,0.25f,3),3,0.00001f);
@@ -123,15 +133,17 @@ static void test_head_and_stereo(void) {
 	XwaVrMask_EyeAxes(left,right,axes);
 	float alpha[2];
 	for(int e=0;e<2;e++) {
-		/* Same 45-degree head-space ray mapped into each canted eye. */
-		float x=axes[e][0]-axes[e][6], y=axes[e][1]-axes[e][7], z=axes[e][2]-axes[e][8];
+		/* Same 27.5-degree head-space ray mapped into each canted eye. */
+		float ray=tanf(27.5f*0.01745329252f);
+		float x=axes[e][0]*ray-axes[e][6], y=axes[e][1]*ray-axes[e][7], z=axes[e][2]*ray-axes[e][8];
 		alpha[e]=XwaVrMask_AngularAlpha(x/-z,y/-z,axes[e]);
 	}
 	near_value(alpha[0],alpha[1],0.00001f);
 	near_value(alpha[0],0.5f,0.00001f);
 	float identity[9]={1,0,0,0,1,0,0,0,1};
 	assert(XwaVrMask_AngularAlpha(0,0,identity)==0);
-	assert(XwaVrMask_AngularAlpha(tanf(0.5f),0,identity)==0);
+	assert(XwaVrMask_AngularAlpha(tanf(0.25f),0,identity)==0);
+	assert(XwaVrMask_AngularAlpha(tanf(0.62f),0,identity)==1);
 	assert(XwaVrMask_AngularAlpha(tanf(1.1f),0,identity)==1);
 }
 

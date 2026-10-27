@@ -26,8 +26,8 @@ static inline float XwaVrMask_Parse(const char* text, float fallback, float lo, 
 }
 
 static inline float XwaVrMask_Response(float speed, float sensitivity) {
-	/* Equal treatment of yaw, pitch and roll; smooth onset at 35 degrees/s. */
-	float x = XwaVrMask_Clamp((speed * sensitivity - 35.0f) / 65.0f, 0.0f, 1.0f);
+	/* Normal flight turns must activate the mask, not only hard maneuvers. */
+	float x = XwaVrMask_Clamp((speed * sensitivity - 5.0f) / 50.0f, 0.0f, 1.0f);
 	return x * x * (3.0f - 2.0f * x);
 }
 
@@ -113,8 +113,9 @@ static inline float XwaVrMask_AngularAlpha(float tx, float ty, const float eye_t
 	float y=eye_to_head[3]*tx+eye_to_head[4]*ty-eye_to_head[5];
 	float z=eye_to_head[6]*tx+eye_to_head[7]*ty-eye_to_head[8];
 	float angle=atan2f(sqrtf(x*x+y*y),-z);
-	/* Clear central 70-degree cone; feather to full coverage at 55 degrees. */
-	float a=XwaVrMask_Clamp((angle-0.6108652382f)/0.3490658504f,0,1);
+	/* Clear central 40-degree cone; feather to full coverage at 35 degrees.
+	 * The old 35..55 degree band only dimmed the extreme edges in dark space. */
+	float a=XwaVrMask_Clamp((angle-0.3490658504f)/0.2617993878f,0,1);
 	return a*a*(3-2*a);
 }
 
