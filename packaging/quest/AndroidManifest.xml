@@ -85,7 +85,7 @@
              belong to it. See SetupProvider.java. -->
         <provider
             android:name="org.openxwa.quest.SetupProvider"
-            android:authorities="org.openxwa.quest.setup"
+            android:authorities="@PACKAGE@.setup"
             android:exported="true" />
     </application>
 </manifest>

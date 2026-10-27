@@ -1,4 +1,10 @@
-# OpenXWA VR
+# OpenXWA Comfort
+
+Comfort Edition development starts from the pinned Quest 1.0.1 release. The first
+native baseline has a separate package and signing identity; headset validation
+and comfort/performance changes are still pending. See [build, install and validation status](comfort/README.md).
+
+## Upstream OpenXWA VR
 
 *Star Wars: X-Wing Alliance* in virtual reality, standalone on Meta Quest 3 /
 3S: no PC needed while you play. Pico and Steam Frame are supported but
