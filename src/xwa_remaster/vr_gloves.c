@@ -1,3 +1,4 @@
+#include "xwa_remaster/vr_pilot_space.h"
 /* VR pilot gloves; see vr_gloves.h.
  *
  * The glove meshes are the Godot XR Tools gloves (CC0, DigitalN8m4r3),
@@ -639,7 +640,7 @@ void XwaVrGloves_Submit(AeronScene3D* scene, AeronCommandBuffer* cmd, const floa
 		AeronXrHand xh;
 		h->shown = 0;
 		h->capsule_count = 0;
-		if (!Aeron_XrGetHand(hand, &xh)) {
+		if (!XwaVrPilotSpace_GetHand(hand, &xh)) {
 			continue;
 		}
 		/* Pose from the controller: finger on the trigger -> resting curl

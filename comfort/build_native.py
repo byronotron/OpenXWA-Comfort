@@ -226,10 +226,11 @@ endif()
                            "default_peripheral_mask": False,
                            "build_definition_sha256": hashlib.sha256((ROOT / "CMakeLists.txt").read_bytes()).hexdigest()})
     if args.profile == "pilot-motion":
-        provenance.update({"kind": "comfort-pilot-motion-test", "app_version": "0.3.1-pilot-motion",
-                           "app_version_code": 12, "app_label": "OpenXWA Comfort", "default_impact_shake": 1.0,
+        provenance.update({"kind": "comfort-seated-inertia-test", "app_version": "0.4.0-seated-inertia",
+                           "app_version_code": 13, "app_label": "OpenXWA Comfort", "default_impact_shake": 1.0,
                            "default_peripheral_mask": False, "default_pilot_center": False,
                            "default_pilot_inertia_m": 0,
+                           "inertia_setting": "XWA_COMFORT_SEAT_INERTIA",
                            "build_definition_sha256": hashlib.sha256((ROOT / "CMakeLists.txt").read_bytes()).hexdigest()})
     write(packaged / "native-build.json", json.dumps(provenance, indent=2))
     print(f"Native libraries rebuilt: {build}")

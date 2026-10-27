@@ -45,7 +45,8 @@ static void test_runtime_gates(void) {
 	snap->cockpit_valid=1; snap->cockpit.hardpoint_world[0]=300;
 	snap->flight_camera.cockpit_visible=1;
 	snap->flight_camera.player_obj_idx=snap->flight_camera.focus_obj_idx=1;
-	_putenv_s("XWA_COMFORT_PILOT_CENTER",""); _putenv_s("XWA_COMFORT_PILOT_INERTIA","");
+	_putenv_s("XWA_COMFORT_PILOT_CENTER",""); _putenv_s("XWA_COMFORT_SEAT_INERTIA","");
+	_putenv_s("XWA_COMFORT_PILOT_INERTIA","0.035"); /* retired exterior-only key must not enable new effect */
 	fl_pilot_motion_update(snap,1,1000000); assert(!s_pilot_motion.have);
 	_putenv_s("XWA_COMFORT_PILOT_CENTER","1");
 	fl_pilot_motion_update(snap,1,1010000); assert(s_pilot_motion.have);
@@ -66,14 +67,58 @@ static void test_runtime_gates(void) {
 	}
 	s.hyperspace_preview=0; unfocused=0;
 	fl_pilot_motion_update(snap,0,1110000); assert(!s_pilot_motion.have);
-	_putenv_s("XWA_COMFORT_PILOT_CENTER","0"); _putenv_s("XWA_COMFORT_PILOT_INERTIA","nan");
+	_putenv_s("XWA_COMFORT_PILOT_CENTER","0"); _putenv_s("XWA_COMFORT_SEAT_INERTIA","nan");
 	fl_pilot_motion_update(snap,1,1120000); assert(!s_pilot_motion.have);
-	_putenv_s("XWA_COMFORT_PILOT_INERTIA","0.01");
+	_putenv_s("XWA_COMFORT_SEAT_INERTIA","0.01");
 	fl_pilot_motion_update(snap,1,1130000); assert(s_pilot_motion.have);
 	free(snap);
 }
 
+static void test_relative_inertia(void) {
+	for(int pose=0;pose<25;pose++) for(int seat=0;seat<3;seat++) {
+		XwaRemasterFlightView view={0};
+		float angle=pose*0.13f;
+		view.camera.ori[0]=cosf(angle); view.camera.ori[2]=sinf(angle);
+		view.camera.pos[0]=8; view.camera.pos[1]=-3; view.camera.pos[2]=1;
+		XwaRemasterFlightView before=view;
+		XwaVrPilotMotion_Reset(&s_pilot_motion);
+		s_pilot_motion.units_per_m=40.96f;
+		const float pivot[3]={13,-28,45}, inertia[3]={0.01f,-0.02f,0.015f};
+		for(int a=0;a<3;a++) {
+			s_pilot_motion.inertia_m[a]=inertia[a];
+			s_pilot_motion.offset_world[a]=pivot[a]+inertia[a]*40.96f;
+		}
+		fl_pilot_motion_apply_view(&view);
+		fl_pilot_motion_space(&view.camera);
+		float rig[3],rows[9]; fl_pilot_motion_rig_base(&view.camera,rig);
+		fl_quat_to_mat3(view.camera.ori,rows);
+		for(int a=0;a<3;a++) {
+			near_value(rig[a],before.camera.pos[a]+pivot[a]);
+			near_value(view.camera.pos[a]-rig[a],inertia[a]*40.96f);
+		}
+		XwaCockpit cockpit={0}; cockpit.seat=seat; cockpit.hardpoint_world[0]=340; cockpit.hardpoint_world[2]=-120;
+		XwaFlightCamera cam={0}; cam.player_obj_idx=cam.focus_obj_idx=2;
+		XwaFlightObject anchor={0}; anchor.yaw=pose*1327;
+		float old_matrix[16],new_matrix[16];
+		fl_cockpit_model_matrix(&cockpit,&anchor,&cam,rows,before.camera.pos,old_matrix);
+		fl_cockpit_model_matrix(&cockpit,&anchor,&cam,rows,rig,new_matrix);
+		for(int a=0;a<3;a++) {
+			/* Relative eye/cockpit displacement must now be -inertia, not zero. */
+			near_value((new_matrix[a*4+3]-view.camera.pos[a])-(old_matrix[a*4+3]-before.camera.pos[a]),-inertia[a]*40.96f);
+		}
+		const float* d=XwaVrPilotSpace_Offset();
+		for(int a=0;a<3;a++) {
+			float world=(rows[a]*d[0]-rows[3+a]*d[1]-rows[6+a]*d[2])*40.96f;
+			near_value(world,inertia[a]*40.96f);
+		}
+	}
+	XwaVrPilotMotion_Reset(&s_pilot_motion);
+	AeronSceneCamera camera={0}; camera.ori[0]=1;
+	fl_pilot_motion_space(&camera);
+	for(int a=0;a<3;a++) assert(XwaVrPilotSpace_Offset()[a]==0);
+}
+
 int main(void) {
-	test_rig_and_tracking(); test_runtime_gates();
-	puts("PASS: production render-view offset, Off byte identity, 75 cockpit/turret rigs, 150 tracked eyes, unchanged headset inputs/orientation, runtime settings and excluded-view gates");
+	test_rig_and_tracking(); test_runtime_gates(); test_relative_inertia();
+	puts("PASS: production render-view offset, Off byte identity, 75 cockpit/turret rigs, 150 tracked eyes, relative eye/cockpit inertia on 75 poses, unchanged headset inputs/orientation, runtime settings and excluded-view gates");
 }

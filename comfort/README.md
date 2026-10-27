@@ -1,9 +1,11 @@
 # OpenXWA Comfort: first baseline
 
 The baseline history below is retained for comparison. The current test build is
-**0.3.1-pilot-motion**, documented in [PILOT-MOTION.md](PILOT-MOTION.md), adds
-Off-by-default experimental exterior-view pilot centering and inertia. Headset
-acceptance of these experiments is pending. It retains the accepted
+**0.4.0-seated-inertia**, documented in [SEATED-INERTIA.md](SEATED-INERTIA.md),
+moves the viewpoint relative to the cockpit with matching interaction transforms.
+It starts Off, including upgrades from the old inertia experiment. Pilot
+centering remains separately adjustable; headset acceptance of these experiments
+is pending. It retains the accepted
 Off-by-default peripheral mask driven by ship rotation, with separate
 strength and sensitivity controls. Impact shake remains Original by default;
 see [CAMERA-AUDIT.md](CAMERA-AUDIT.md). The Quest 3 user accepted the mask presets

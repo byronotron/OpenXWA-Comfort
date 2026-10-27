@@ -1,3 +1,4 @@
+#include "xwa_remaster/vr_pilot_space.h"
 /* VR lap console; see vr_lap_console.h. */
 
 #include "xwa_remaster/vr_lap_console.h"
@@ -753,7 +754,7 @@ static void vc_update_hand(int hand, const AeronXrPanel* pose, const float ax[3]
 	const int was_down = h->poke_down || h->trigger_down;
 	h->cursor = 0;
 	h->over_button = -1;
-	if (!s_vc.awake || s_vc.lap.grab_hand == hand + 1 || !Aeron_XrGetHand(hand, &xh)) {
+	if (!s_vc.awake || s_vc.lap.grab_hand == hand + 1 || !XwaVrPilotSpace_GetHand(hand, &xh)) {
 		if (was_down) {
 			vc_release(hand);
 		}
@@ -893,7 +894,7 @@ static void vc_update_grab(VcPlace* pl, const AeronXrPanel* pose, const float ax
 	for (int hand = 0; hand < 2; ++hand) {
 		AeronXrHand xh;
 		pl->hover_side[hand] = 0;
-		if (!Aeron_XrGetHand(hand, &xh)) {
+		if (!XwaVrPilotSpace_GetHand(hand, &xh)) {
 			if (pl->grab_hand == hand + 1) {
 				vc_grab_end(pl);
 			}
@@ -2035,7 +2036,7 @@ static void vw_update(const AeronXrView views[2]) {
 	const int hand = Aeron_XrLeftHanded() ? 1 : 0;
 	AeronXrHand xh;
 	memset(&xh, 0, sizeof xh);
-	const int tracked = Aeron_XrGetHand(hand, &xh);
+	const int tracked = XwaVrPilotSpace_GetHand(hand, &xh);
 	s_vw.drawn = 1;
 	if (s_vw.open && s_vw.hand != hand) {
 		vw_close();
@@ -2670,7 +2671,7 @@ int XwaVrConsole_LabelsFrame(AeronCommandBuffer* cmd, const AeronXrView views[2]
 	for (int h = 0; h < 2; ++h) {
 		LbSheet* s = &s_lb.sheet[h];
 		s->visible = 0;
-		if (!XwaVrControllers_View(h, &view[h]) || !Aeron_XrGetHand(h, &xh[h])) {
+		if (!XwaVrControllers_View(h, &view[h]) || !XwaVrPilotSpace_GetHand(h, &xh[h])) {
 			s_lb.alpha[h] = 0.0f;
 			s_lb.on[h] = 0;
 			s_lb.dwell[h] = 0.0f;
@@ -3220,7 +3221,7 @@ static void vp_update_hands(const AeronXrPanel* pose, const float ax[3], const f
 		s_vp.hover[hand] = -1;
 		s_vp.captured[hand] = 0;
 		s_vp.ray[hand] = 0;
-		if (!Aeron_XrGetHand(hand, &xh)) {
+		if (!XwaVrPilotSpace_GetHand(hand, &xh)) {
 			s_vp.poke_down[hand] = s_vp.trigger_down[hand] = 0;
 			continue;
 		}

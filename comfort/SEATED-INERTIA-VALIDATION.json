@@ -1,0 +1,95 @@
+{
+  "version": "0.4.0-seated-inertia",
+  "package": "org.openxwa.comfort",
+  "apk_sha256": "163bb1d4da4218c531dc7b35b59b0a2aecd0ea242ae01dcd7771552f696310e2",
+  "source_changes": {
+    "src/xwa_remaster/flight.c": "e1656aa1695825b36208b6a153c9fbfe55518da38fa7abd1627383da882df9c5",
+    "src/xwa_remaster/vr_cockpit_hud.c": "283ea5914bf1a80e88d8c7a9f3ef15c983229908e78c075cab263375571b7524",
+    "src/xwa_remaster/vr_comfort.h": "315b1b3a9b8909a2f6be2984a6ce994b52e6aca23507d3da910a0ba59a80e01b",
+    "src/xwa_remaster/vr_controllers.c": "52f0f3c7b5a17e654b03f0192e003e9f9cef689cfc00fcb8358bfe72312761be",
+    "src/xwa_remaster/vr_flight_stick.c": "64d442aaf15a8c3a4327ca1433bf5ad4aa01b2e1bd9ecad38cca21be78da092d",
+    "src/xwa_remaster/vr_gloves.c": "97766ab458d2c4047c8fed63abc5113ebe8764b37a34593bbcf53a700764f917",
+    "src/xwa_remaster/vr_lap_console.c": "bcc1ae094c23bc8891bbf8457b0dace05d4373407da5dc1b733d297599dd53e0",
+    "src/xwa_remaster/vr_peripheral_mask.c": "b3a8df1ee8ee29f9b9e559e096b2f79576c9d3eb62c21d0f7f2e939ce3de37b4",
+    "src/xwa_remaster/vr_peripheral_mask.h": "46dd072c06f389d2f259b95e4525bd5fb4ac43fccc64b8c5f8082301c46ff113",
+    "src/xwa_remaster/vr_peripheral_math.h": "d5460faf6616e871e517826fb4730878f7960539c5bf86c0bed44f66e5ce5ee0",
+    "src/xwa_remaster/vr_pilot_motion.h": "6135ece655e87f5d7afe757a0473878545200fdb07e4ccdb7ca8c8de70afefb2",
+    "src/xwa_remaster/vr_pilot_space.c": "5466fb171cfca7a63d0c024cf21f99360459bf29dd2739c96282c9733e22553b",
+    "src/xwa_remaster/vr_pilot_space.h": "1536fca776b5fc461f7660f3b78ab23330f837919b69e919dd8c852adb673deb",
+    "src/xwa_runtime/config/modern_vr_options_screen.c": "b6f71801c098002aa6982952e469fd2424e61c4f7cbe4dae1399142f72fd7e2d",
+    "src/xwa_runtime/snapshot/snapshot.c": "38b0addb2417800a1ee9af11bc819e0517ba153f991a8b6c9cfc1cc41304f195",
+    "src/xwa_runtime/snapshot/snapshot.h": "097d08928b3110a802f0b2563aecd02abeccb9f2c02f5c0cd827551da091b567"
+  },
+  "build_definition_sha256": "54ff1e8890567a53b6ed3b23c5e9d088e4e0b6f07ea46961dcc49c18f12cc47d",
+  "defaults": {
+    "seated_inertia_m": 0,
+    "setting_key": "XWA_COMFORT_SEAT_INERTIA",
+    "legacy_exterior_inertia_key": "ignored; cannot auto-enable new effect",
+    "pilot_center": false,
+    "peripheral_mask": false,
+    "impact_shake": 1
+  },
+  "caps_m": [
+    0,
+    0.01,
+    0.02,
+    0.035
+  ],
+  "tests": {
+    "camera_policy_and_integration": "passed: production functions; 75 relative eye/cockpit configurations, 150 tracked eyes, excluded-view/reset gates, Off byte identity and legacy setting retirement",
+    "pose_adapters": "passed: actual module; aim and valid grip/root model translations; orientations, input values and source records unchanged; stereo eye/hand/panel ray alignment; invalid tracking and zero-offset identity",
+    "stick_feedback": "passed: actual extracted stick update; 100 changing body offsets cannot steer held stick or drift placement; physical hand motion still works",
+    "camera_regression": "passed: 567 tracked-eye poses, 24 cockpit/turret poses, Original matches upstream",
+    "mask_regression": "passed: all accepted mask policies, cache transitions and stereo/GPU submission contracts",
+    "host_projection_test": "records production projection rebuild call with a stub; actual GPU visual alignment requires headset testing",
+    "layer_cache": "passed: cockpit-fixed and viewer-fixed cache ray invariants under 100 changing body offsets"
+  },
+  "native_checks": {
+    "libmain.so": {
+      "abi": "arm64-v8a",
+      "elf_alignment": 16384,
+      "dependencies": [
+        "libdl.so",
+        "libavformat.so",
+        "libavcodec.so",
+        "libavutil.so",
+        "libswresample.so",
+        "libswscale.so",
+        "libSDL3.so",
+        "libm.so",
+        "libzstd.so",
+        "libc++_shared.so",
+        "libc.so"
+      ],
+      "unresolved_strong_symbols": []
+    },
+    "libopenxwa_vkshim.so": {
+      "abi": "arm64-v8a",
+      "elf_alignment": 16384,
+      "dependencies": [
+        "libdl.so",
+        "libm.so",
+        "libc.so"
+      ],
+      "unresolved_strong_symbols": []
+    }
+  },
+  "packaging_checks": {
+    "signature": "verified",
+    "payloads": "byte-identical",
+    "package": "org.openxwa.comfort",
+    "provider": "org.openxwa.comfort.setup",
+    "headset_runtime": "not yet tested"
+  },
+  "unchanged_upstream_payloads": 124,
+  "installation": "pending user save/quit",
+  "headset_acceptance": "pending",
+  "enabled_frame_cost": "unmeasured",
+  "subjective_comfort": "unmeasured",
+  "scope": [
+    "Physical head pose and flight physics unchanged",
+    "Translation only; no simulated camera roll or pilot-body/arm IK",
+    "Pilot centering retains its render-only approximation",
+    "Legacy fixed HUD sheet keeps viewer-relative world projection; physical cockpit panels follow cockpit"
+  ]
+}

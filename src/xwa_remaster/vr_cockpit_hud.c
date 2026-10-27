@@ -1,3 +1,4 @@
+#include "xwa_remaster/vr_pilot_space.h"
 /* VR cockpit HUD panels; see vr_cockpit_hud.h. */
 
 #include "xwa_remaster/vr_cockpit_hud.h"
@@ -415,7 +416,7 @@ static void ck_update_grab(AeronXrPanel* out, const int* index_of) {
 	for (int hand = 0; hand < 2; ++hand) {
 		AeronXrHand xh;
 		s_ck.hover_panel[hand] = -1;
-		if (!Aeron_XrGetHand(hand, &xh)) {
+		if (!XwaVrPilotSpace_GetHand(hand, &xh)) {
 			if (s_ck.grab_panel[hand] >= 0) {
 				s_ck.grab_panel[hand] = -1;
 				ck_save_layout();

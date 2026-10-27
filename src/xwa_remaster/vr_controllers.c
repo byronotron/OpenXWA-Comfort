@@ -1,3 +1,4 @@
+#include "xwa_remaster/vr_pilot_space.h"
 /* VR controller models; see vr_controllers.h.
  *
  * The generic controller is built here from a few shapes (a rounded head
@@ -1656,7 +1657,7 @@ void XwaVrControllers_Submit(AeronScene3D* scene, AeronCommandBuffer* cmd, const
 		CtHand* h = &s_ct.hands[hand];
 		AeronXrHand xh;
 		h->shown = 0;
-		if (!Aeron_XrGetHand(hand, &xh)) {
+		if (!XwaVrPilotSpace_GetHand(hand, &xh)) {
 			continue;
 		}
 		/* The runtime's model, loaded (once per version) when it has one. */
@@ -1670,7 +1671,7 @@ void XwaVrControllers_Submit(AeronScene3D* scene, AeronCommandBuffer* cmd, const
 			}
 			if (h->runtime.mesh) {
 				float pos[3], q[4];
-				if (Aeron_XrLocateRenderModel(hand, pos, q, h->nodes, CT_MAX_NODES)) {
+				if (XwaVrPilotSpace_LocateRenderModel(hand, pos, q, h->nodes, CT_MAX_NODES)) {
 					uint32_t node_count = rm.node_count < CT_MAX_NODES ? rm.node_count : CT_MAX_NODES;
 					ct_runtime_pose(&h->runtime, h->nodes, node_count);
 					CtToScene x;

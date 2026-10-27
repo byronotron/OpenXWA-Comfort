@@ -3,6 +3,7 @@
 #include "xwa_remaster/flight.h"
 #include "xwa_remaster/vr_comfort.h"
 #include "xwa_remaster/vr_pilot_motion.h"
+#include "xwa_remaster/vr_pilot_space.h"
 #include "xwa_remaster/vr_peripheral_mask.h"
 
 #include "aeron/aeron.h"
@@ -4166,6 +4167,7 @@ static AeronTexture* s_xr_bloom_last;   /* the bloom the last eye output compute
  * The layers are last frame's (they move only when grabbed). With direct
  * output the alpha is written at the end of each eye's forward pass. */
 static AeronXrPanel s_xr_hud_layers[AERON_XR_MAX_PANELS + 8];
+static uint8_t s_xr_hud_layer_cockpit[AERON_XR_MAX_PANELS + 8];
 static int s_xr_hud_layer_count;
 static int s_xr_hands_over;
 static int s_xr_hook_eye;
@@ -4638,11 +4640,24 @@ static void fl_pilot_motion_apply_view(XwaRemasterFlightView* view) {
 	AeronScene_ComputeViewProj(&view->camera,view->view_proj);
 }
 
+static void fl_pilot_motion_rig_base(const AeronSceneCamera* camera,float out[3]) {
+	memcpy(out,camera->pos,3*sizeof *out);
+	for(int a=0;a<3;a++) if(s_pilot_motion.inertia_m[a]!=0)
+		out[a]-=s_pilot_motion.inertia_m[a]*s_pilot_motion.units_per_m;
+}
+
+static void fl_pilot_motion_space(const AeronSceneCamera* camera) {
+	float rows[9], local[3];
+	fl_quat_to_mat3(camera->ori,rows);
+	XwaVrPilotSpace_WorldToLocal(rows,s_pilot_motion.inertia_m,local);
+	XwaVrPilotSpace_Set(local);
+}
+
 static void fl_pilot_motion_update(const XwaSnapshot* snap, int stereo, uint64_t now) {
 	const XwaFlightCamera* cam=&snap->flight_camera;
 	const XwaFlightObject* anchor=fl_cockpit_anchor(snap,cam);
 	const char* pivot=getenv("XWA_COMFORT_PILOT_CENTER");
-	const char* inertia=getenv("XWA_COMFORT_PILOT_INERTIA");
+	const char* inertia=getenv("XWA_COMFORT_SEAT_INERTIA");
 	char* end=NULL;
 	float cap=inertia ? strtof(inertia,&end) : 0;
 	if(!inertia || end==inertia || *end || !isfinite(cap) || cap<0) cap=0;
@@ -4686,6 +4701,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	}
 	fl_point_lights_env_refresh();
 	XwaRemasterFlightView flight_view;
+	float cockpit_base[3];
 	if (!XwaRemasterFlight_BuildView(cam, s.rt_w, s.rt_h, &flight_view)) {
 		return NULL;
 	}
@@ -4699,6 +4715,8 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 								 probe.width == s.rt_w && probe.height == s.rt_h;
 		fl_pilot_motion_update(snap,stereo_probe,host_time_us);
 		fl_pilot_motion_apply_view(&flight_view);
+		fl_pilot_motion_rig_base(&flight_view.camera,cockpit_base);
+		fl_pilot_motion_space(&flight_view.camera);
 		memcpy(s.camera_local,flight_view.camera.pos,sizeof s.camera_local);
 		XwaRemasterHud_SetWorldSplit(stereo_probe && fl_xr_hud_head_locked());
 		/* Cockpit panels: the targeting computer overlaps the MFDs on the
@@ -4742,6 +4760,8 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	AeronSceneCamera xr_eyes[2];
 	const int stereo = fl_xr_stereo_eligible(cam) && Aeron_XrStereoBegin(&xr_frame) &&
 					   xr_frame.width == s.rt_w && xr_frame.height == s.rt_h;
+	AeronXrView cockpit_views[2];
+	if(stereo) XwaVrPilotSpace_Views(xr_frame.views,cockpit_views);
 	/* Depth boost: the outside world is seen with the eyes moved apart by
 	 * XWA_XR_DEPTH_BOOST (hyper-stereo), so ships at combat range show depth;
 	 * the cockpit is shifted with each eye to keep its real size. */
@@ -5373,9 +5393,9 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		AeronSceneMesh* cockpit_mesh = XwaRemasterShip_MeshForName(snap->cockpit.model_name);
 		if (cockpit_mesh) {
 			float m[16];
-			fl_cockpit_model_matrix(&snap->cockpit, cockpit_anchor, cam, s.crows, s.camera_local, m);
+			fl_cockpit_model_matrix(&snap->cockpit, cockpit_anchor, cam, s.crows, cockpit_base, m);
 			fl_xr_seat_shift(snap, m);
-			fl_xr_cockpit_scale(snap, s.camera_local, m);
+			fl_xr_cockpit_scale(snap, cockpit_base, m);
 			AeronSceneMeshInstance inst;
 			memset(&inst, 0, sizeof inst);
 			inst.mesh = cockpit_mesh;
@@ -5414,7 +5434,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 			}
 			AeronScene_AddMeshInstance(s.scene, &inst);
 			if (stereo) {
-				XwaVrHudOcclusion_SetCockpit(cockpit_mesh, m, inst.mesh_table, s.crows, s.camera_local,
+				XwaVrHudOcclusion_SetCockpit(cockpit_mesh, m, inst.mesh_table, s.crows, cockpit_base,
 											 AERON_OPT_UNITS_PER_METER * fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f));
 			}
 			if (player_f) {
@@ -5438,14 +5458,17 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	if (stereo) {
 		fl_prof(FL_PROF_SCENE);
 		const float vr_units = AERON_OPT_UNITS_PER_METER * fl_xr_env("XWA_XR_WORLD_SCALE", 1.0f);
-		/* The flight stick first: its grab decides what the grips do. */
+		/* Fresh hand geometry in cockpit space before stick hit-testing. */
+		XwaVrGloves_Submit(s.scene, cmd, s.crows, cockpit_base, vr_units);
 		XwaVrStick_Update();
-		XwaVrGloves_Submit(s.scene, cmd, s.crows, flight_view.camera.pos, vr_units);
-		XwaVrStick_Submit(s.scene, cmd, s.crows, flight_view.camera.pos, vr_units);
+		XwaVrStick_Submit(s.scene, cmd, s.crows, cockpit_base, vr_units);
 		fl_prof(FL_PROF_HANDS);
 		/* The hands' alpha for the overlay over the HUD layers. */
-		XwaVrHandOverlay_SetLayers(s_xr_hud_layers, s_xr_hud_layer_count);
-		s_xr_hands_over = XwaVrHandOverlay_Prepare(cmd, xr_frame.views, xr_frame.width, xr_frame.height);
+		AeronXrPanel hand_layers[AERON_XR_MAX_PANELS+8];
+		for(int i=0;i<s_xr_hud_layer_count;i++) XwaVrPilotSpace_LayerInCockpit(
+			&s_xr_hud_layers[i],s_xr_hud_layer_cockpit[i],&hand_layers[i]);
+		XwaVrHandOverlay_SetLayers(hand_layers, s_xr_hud_layer_count);
+		s_xr_hands_over = XwaVrHandOverlay_Prepare(cmd, cockpit_views, xr_frame.width, xr_frame.height);
 		fl_prof(FL_PROF_OVERLAY);
 	} else {
 		XwaVrGloves_Idle();
@@ -5579,6 +5602,8 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 																 cmd_split, snap->cockpit.model_name, panels,
 																 AERON_XR_MAX_PANELS);
 			XwaVrCockpitHud_PrepareOverlay(cmd, g_xr_hud_w, g_xr_hud_h);
+			/* Build/grab in cockpit coordinates; submit a tracking-space copy. */
+			XwaVrPilotSpace_Panels(panels,panel_count);
 			if (panel_count == 0 && !s.suppress_hud && !out_of_cockpit) {
 				/* Nothing recognised in this HUD (e.g. an unusual HUD mode):
 				 * show it as the helmet sheet rather than not at all. */
@@ -5597,7 +5622,8 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 		if (split && !s.suppress_hud) {
 			AeronXrHudQuad occlude_quad;
 			fl_xr_hud_quad(&flight_view.camera, &occlude_quad, 0);
-			XwaVrHudOcclusion_Prepare(cmd, xr_frame.views, &occlude_quad, g_xr_hud_w > 0 ? g_xr_hud_w : s.rt_w,
+			XwaVrPilotSpace_ToCockpit(occlude_quad.position);
+			XwaVrHudOcclusion_Prepare(cmd, cockpit_views, &occlude_quad, g_xr_hud_w > 0 ? g_xr_hud_w : s.rt_w,
 									  g_xr_hud_h > 0 ? g_xr_hud_h : s.rt_h);
 		}
 		s_xr_eye_alpha = s_xr_hands_over && !direct_used[1] ? XwaVrHandOverlay_List(1) : NULL;
@@ -5619,18 +5645,23 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 				fl_xr_hud_quad(&flight_view.camera, &hud_world, 0);
 				Aeron_XrStereoCommitPanels(&hud_world, panels, panel_count);
 				for (int i = 0; i < panel_count && !s.suppress_hud && nl < AERON_XR_MAX_PANELS; ++i) {
-					s_xr_hud_layers[nl++] = panels[i];
+					XwaVrPilotSpace_CacheLayer(&panels[i],1,&s_xr_hud_layers[nl],&s_xr_hud_layer_cockpit[nl]);
+					nl++;
 				}
+				s_xr_hud_layer_cockpit[nl]=0;
 				nl += fl_xr_hud_layer(&hud_world, NULL, &s_xr_hud_layers[nl]);
 			} else if (split) {
 				fl_xr_hud_quad(&flight_view.camera, &hud, 1);
 				fl_xr_hud_quad(&flight_view.camera, &hud_world, 0);
 				Aeron_XrStereoCommitHuds(&hud, &hud_world);
+				s_xr_hud_layer_cockpit[nl]=0;
 				nl += fl_xr_hud_layer(&hud, &xr_frame.views[0], &s_xr_hud_layers[nl]);
+				s_xr_hud_layer_cockpit[nl]=0;
 				nl += fl_xr_hud_layer(&hud_world, NULL, &s_xr_hud_layers[nl]);
 			} else {
 				fl_xr_hud_quad(&flight_view.camera, &hud, 0);
 				Aeron_XrStereoCommit(&hud);
+				s_xr_hud_layer_cockpit[nl]=0;
 				nl += fl_xr_hud_layer(&hud, &xr_frame.views[0], &s_xr_hud_layers[nl]);
 			}
 			s_xr_hud_layer_count = nl;
@@ -5649,10 +5680,13 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 			} else if (xr_frame.console_width > 0) {
 				AeronXrPanel console[2];
 				const int n = XwaVrConsole_Frame(cmd, xr_frame.console_width, xr_frame.console_height,
-												 xr_frame.views, console);
+												 cockpit_views, console);
+				XwaVrPilotSpace_Panels(console,n);
 				Aeron_XrStereoCommitPanelLayer(AERON_XR_PANEL_CONSOLE, console, n);
 				if (n > 0 && s_xr_hud_layer_count < max_layers) {
-					s_xr_hud_layers[s_xr_hud_layer_count++] = console[0];
+					XwaVrPilotSpace_CacheLayer(&console[0],1,&s_xr_hud_layers[s_xr_hud_layer_count],
+						&s_xr_hud_layer_cockpit[s_xr_hud_layer_count]);
+					s_xr_hud_layer_count++;
 				}
 			}
 			if (xr_frame.card_width > 0 && out_of_cockpit) {
@@ -5662,10 +5696,13 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 				for (int card = 0; card < 2; ++card) {
 					AeronXrPanel quads[2];
 					const int n = XwaVrConsole_CardFrame(cmd, card, xr_frame.card_width, xr_frame.card_height,
-														 xr_frame.views, quads);
+														 cockpit_views, quads);
+					XwaVrPilotSpace_Panels(quads,n);
 					Aeron_XrStereoCommitPanelLayer(card ? AERON_XR_PANEL_CARD2 : AERON_XR_PANEL_CARD, quads, n);
 					if (n > 0 && s_xr_hud_layer_count < max_layers) {
-						s_xr_hud_layers[s_xr_hud_layer_count++] = quads[0];
+						XwaVrPilotSpace_CacheLayer(&quads[0],1,&s_xr_hud_layers[s_xr_hud_layer_count],
+							&s_xr_hud_layer_cockpit[s_xr_hud_layer_count]);
+						s_xr_hud_layer_count++;
 					}
 				}
 			}
@@ -5673,7 +5710,8 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 			/* Labels beside the controllers the player looks at. */
 			{
 				AeronXrPanel labels[2];
-				const int n = out_of_cockpit ? 0 : XwaVrConsole_LabelsFrame(cmd, xr_frame.views, labels);
+				const int n = out_of_cockpit ? 0 : XwaVrConsole_LabelsFrame(cmd, cockpit_views, labels);
+				XwaVrPilotSpace_Panels(labels,n);
 				Aeron_XrStereoCommitPanelLayer(AERON_XR_PANEL_LABELS, labels, n);
 			}
 			/* Faint beams from the hands to where they point on the console. */
@@ -5684,12 +5722,13 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 					float from[3], to[3];
 					const int beam = XwaVrConsole_RayBeam(hand, from, to); /* 2: the quick wheel's, bright */
 					if (beam &&
-						XwaVrBeam_Pose(from, to, xr_frame.views, beam == 1, xr_frame.beam_height, &beams[beam_count])) {
+						XwaVrBeam_Pose(from, to, cockpit_views, beam == 1, xr_frame.beam_height, &beams[beam_count])) {
 						beam_count++;
 					}
 				}
 				if (beam_count &&
 					XwaVrBeam_DrawStrips(cmd, xr_frame.beam_target, xr_frame.beam_width, xr_frame.beam_height)) {
+					XwaVrPilotSpace_Panels(beams,beam_count);
 					Aeron_XrStereoCommitBeams(beams, beam_count);
 				}
 			}
@@ -5727,6 +5766,7 @@ static float fl_vr_env_dim_step(int dimmed) {
 }
 
 int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
+	XwaVrPilotSpace_Reset();
 	XwaVrPilotMotion_Reset(&s_pilot_motion);
 	XwaVrPeripheralMask_Reset();
 	const float film_dim = fl_vr_env_dim_step(dimmed);
@@ -5954,6 +5994,7 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 void XwaRemasterFlight_ReleaseVrEnvironment(void) { XwaVrEnv_Release(); }
 
 void XwaRemasterFlight_Shutdown(void) {
+	XwaVrPilotSpace_Reset();
 	XwaVrPilotMotion_Reset(&s_pilot_motion);
 	XwaVrPeripheralMask_Shutdown();
 	XwaVrEnv_Release();

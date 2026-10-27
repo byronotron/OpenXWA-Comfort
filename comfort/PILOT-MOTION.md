@@ -1,5 +1,9 @@
 # Pilot motion experiments: 0.3.1
 
+This document records the first, exterior-only inertia prototype. The current
+relative eye/cockpit revision is described in [SEATED-INERTIA.md](SEATED-INERTIA.md).
+The pilot-centering behavior below remains applicable.
+
 Both new options are in **VR Options → Comfort**, default to **Off**, and save
 immediately. Existing mask strength/sensitivity and impact shake choices are
 preserved. The accepted 0.2.5 mask presets are unchanged.

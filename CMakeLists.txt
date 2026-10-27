@@ -295,6 +295,7 @@ add_library(xwa_remaster STATIC
     src/xwa_remaster/vr_controllers.c
     src/xwa_remaster/vr_ktx2_decode.cpp
     src/xwa_remaster/vr_flight_stick.c
+    src/xwa_remaster/vr_pilot_space.c
     src/xwa_remaster/vr_env.c
     src/xwa_remaster/vr_menu_beam.c
     src/xwa_remaster/assets.c

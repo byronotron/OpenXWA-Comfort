@@ -1,3 +1,4 @@
+#include "xwa_remaster/vr_pilot_space.h"
 /* VR flight stick; see vr_flight_stick.h. */
 
 #include "xwa_remaster/vr_flight_stick.h"
@@ -55,9 +56,11 @@ static struct {
 	float fwd, side, twist; /* shown tilt (radians) and twist */
 	int held;               /* right hand flies it */
 	float grab_offset[3];   /* palm - grip centre at the grab */
+	float grab_inertia[3];  /* body translation at grab; must never steer the ship */
 	float grab_yaw;
 	int moving;             /* left hand moves it */
 	float move_offset[3];   /* palm - pivot */
+	float move_inertia[3];
 	int hover[2];
 	float grip_prev[2];
 	int updated, shown;
@@ -435,7 +438,7 @@ void XwaVrStick_Update(void) {
 	float palm[2][3];
 	int valid[2];
 	for (int h = 0; h < 2; ++h) {
-		valid[h] = Aeron_XrGetHand(h, &hands[h]);
+		valid[h] = XwaVrPilotSpace_GetHand(h, &hands[h]);
 		if (valid[h]) {
 			st_palm(h, &hands[h], palm[h]);
 		}
@@ -455,6 +458,7 @@ void XwaVrStick_Update(void) {
 			}
 		} else if (near && grip >= ST_GRIP_ON && s_st.grip_prev[h] < ST_GRIP_OFF) {
 			s_st.held = 1;
+			memcpy(s_st.grab_inertia,XwaVrPilotSpace_Offset(),sizeof s_st.grab_inertia);
 			for (int k = 0; k < 3; ++k) {
 				s_st.grab_offset[k] = palm[h][k] - centre[k];
 			}
@@ -485,11 +489,13 @@ void XwaVrStick_Update(void) {
 				Aeron_XrHapticPulse(h, 0.3f, 20);
 			} else {
 				for (int k = 0; k < 3; ++k) {
-					s_st.pivot[k] = palm[h][k] - s_st.move_offset[k];
+					s_st.pivot[k] = palm[h][k] - s_st.move_offset[k] -
+						(XwaVrPilotSpace_Offset()[k]-s_st.move_inertia[k]);
 				}
 			}
 		} else if (near && grip >= ST_GRIP_ON && s_st.grip_prev[h] < ST_GRIP_OFF) {
 			s_st.moving = 1;
+			memcpy(s_st.move_inertia,XwaVrPilotSpace_Offset(),sizeof s_st.move_inertia);
 			for (int k = 0; k < 3; ++k) {
 				s_st.move_offset[k] = palm[h][k] - s_st.pivot[k];
 			}
@@ -504,7 +510,8 @@ void XwaVrStick_Update(void) {
 	if (s_st.held) {
 		float v[3];
 		for (int k = 0; k < 3; ++k) {
-			v[k] = palm[1][k] - s_st.grab_offset[k] - s_st.pivot[k];
+			v[k] = palm[1][k] - s_st.grab_offset[k] - s_st.pivot[k] -
+				(XwaVrPilotSpace_Offset()[k]-s_st.grab_inertia[k]);
 		}
 		const float up = fmaxf(v[1], 0.02f);
 		float fwd = atan2f(-v[2], up);

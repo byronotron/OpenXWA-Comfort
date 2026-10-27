@@ -1,12 +1,14 @@
 # OpenXWA Comfort
 
 Comfort Edition starts from the pinned Quest 1.0.1 release, with a separate
-package and signing identity. Test build 0.3.1 offers **VR Options → Comfort**:
+package and signing identity. Test build 0.4.0 offers **VR Options → Comfort**:
 Impact Camera Shake (Off / Reduced / Original, default Original) and adaptive
 Peripheral Mask (default Off), with Low / Medium / High strength and sensitivity.
 The mask fades with ship rotation; natural head turns do not trigger it.
-Experimental Pilot-Centered Rotation and Pilot Inertia both default to Off;
-see [behavior and limitations](comfort/PILOT-MOTION.md).
+Experimental Pilot-Centered Rotation and Pilot Inertia both default to Off.
+Inertia now moves the viewpoint relative to the cockpit, with matching hand,
+control and HUD coordinate transforms. See [behavior and testing](comfort/SEATED-INERTIA.md)
+and the [centering experiment](comfort/PILOT-MOTION.md).
 See the [mask behavior and test scope](comfort/PERIPHERAL-MASK.md),
 [camera audit](comfort/CAMERA-AUDIT.md) and [build instructions](comfort/README.md).
 
