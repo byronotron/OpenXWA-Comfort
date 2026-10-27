@@ -62,6 +62,9 @@ enum {
 	VR_ASTC,
 	VR_GPU_TIMING,
 	VR_IMPACT_SHAKE,
+	VR_MASK,
+	VR_MASK_STRENGTH,
+	VR_MASK_SENSITIVITY,
 	VR_COUNT
 };
 
@@ -101,6 +104,9 @@ static const char* const k_off_rec_texts[] = { "Off (Recommended)", "On" };
 static const char* const k_bloom_values[] = { "1", "eye", "0" };
 static const char* const k_shake_texts[] = { "Off", "Reduced (25%)", "Original" };
 static const char* const k_shake_values[] = { "0", "0.25", "1" };
+static const char* const k_mask_strength_texts[] = { "Low", "Medium", "High" };
+static const char* const k_mask_strength_values[] = { "0.35", "0.65", "1" };
+static const char* const k_mask_sensitivity_values[] = { "0.65", "1", "1.5" };
 
 /* Page 1 holds what costs or saves GPU time: each night-shift
  * optimization can be switched off there on its own to find a regression. */
@@ -146,6 +152,9 @@ static const VrSetting k_settings[VR_COUNT] = {
 	/* The shim's per-pass GPU timestamps (the log's "GPU per frame"). */
 	{ "XWA_XR_GPU_TIMING", "GPU Timing in Log (restart)", k_toggle_texts, k_toggle_values, 2, 1, 72, 1 },
 	{ "XWA_COMFORT_IMPACT_SHAKE", "Impact Camera Shake", k_shake_texts, k_shake_values, 3, 2, 100, 2 },
+	{ "XWA_COMFORT_MASK", "Peripheral Mask", k_toggle_texts, k_toggle_values, 2, 0, 102, 2 },
+	{ "XWA_COMFORT_MASK_STRENGTH", "Mask Strength", k_mask_strength_texts, k_mask_strength_values, 3, 1, 103, 2 },
+	{ "XWA_COMFORT_MASK_SENSITIVITY", "Mask Sensitivity", k_mask_strength_texts, k_mask_sensitivity_values, 3, 1, 104, 2 },
 };
 
 static struct {
@@ -421,6 +430,9 @@ static const struct {
 	{ "AERON_XR_INVERT_PITCH", "0" },
 	{ "XWA_XR_HANDS", "controllers" },
 	{ "XWA_COMFORT_IMPACT_SHAKE", "1" },
+	{ "XWA_COMFORT_MASK", "0" },
+	{ "XWA_COMFORT_MASK_STRENGTH", "0.65" },
+	{ "XWA_COMFORT_MASK_SENSITIVITY", "1" },
 };
 
 /* Hand-placed spots that come with them (LOCAL space, metres; HUD panels
@@ -481,7 +493,8 @@ static void vr_draw_settings(XwaModernOptionsMenu* menu, int page) {
 		/* The helmet HUD size only applies to the helmet layout. */
 		const int disabled = (i == VR_HUD_SIZE && g_vr.index[VR_HUD_LAYOUT] != 1) ||
 							 (i == VR_STICK_TWIST && g_vr.index[VR_FLIGHT_STICK] == 0) ||
-							 (i == VR_WHEEL_SLOWMO && g_vr.index[VR_WHEEL] == 0);
+							 (i == VR_WHEEL_SLOWMO && g_vr.index[VR_WHEEL] == 0) ||
+							 ((i == VR_MASK_STRENGTH || i == VR_MASK_SENSITIVITY) && g_vr.index[VR_MASK] == 0);
 		uint8_t value = g_vr.index[i];
 		if (XwaModernOptionsMenu_DrawCycleU8(menu, &value, setting->label, setting->texts, setting->count,
 											 setting->button_id, disabled) &&

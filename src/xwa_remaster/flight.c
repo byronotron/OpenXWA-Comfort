@@ -2,6 +2,7 @@
 
 #include "xwa_remaster/flight.h"
 #include "xwa_remaster/vr_comfort.h"
+#include "xwa_remaster/vr_peripheral_mask.h"
 
 #include "aeron/aeron.h"
 #include "aeron/config_file.h"
@@ -1545,6 +1546,8 @@ static float fl_comfort_shake_scale(const XwaFlightCamera* cam) {
 								   getenv("XWA_COMFORT_IMPACT_SHAKE"));
 }
 
+static void fl_comfort_ship_quaternion(const XwaFlightObject* anchor, float q[4]);
+
 static int fl_build_view_at_origin(const XwaFlightCamera* cam, const int32_t origin_world[3], int target_w,
 								   int target_h, XwaRemasterFlightView* out) {
 	if (!cam || !out || target_w <= 0 || target_h <= 0) {
@@ -1716,6 +1719,15 @@ static void fl_object_world(const float cur[3][3], float out[9]) {
 			out[i * 3 + j] = src[i][j];
 		}
 	}
+}
+
+static void fl_comfort_ship_quaternion(const XwaFlightObject* anchor, float q[4]) {
+	float body[3][3];
+	if (anchor->has_mobj && !anchor->orient_dirty) fl_curmat_from_cached(anchor->rows, body);
+	else fl_curmat_from_euler(anchor, body);
+	/* curMat is a proper rotation. fl_object_world includes the OPT model's
+	 * reflected axis convention and must not be converted to a quaternion. */
+	fl_rows_to_quat(&body[0][0], q);
 }
 
 /* Model metres -> scene units from a model->space basis + native-unit translation, the
@@ -4621,6 +4633,7 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	}
 	fl_prof_start();
 	const XwaFlightCamera* cam = &snap->flight_camera;
+	if (!XwaVrComfort_InternalFlight(cam)) XwaVrPeripheralMask_Reset();
 	if (!fl_ensure(target_w, target_h)) {
 		return NULL;
 	}
@@ -4707,6 +4720,21 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 	s.before_opaque_mode = FL_BEFORE_OPAQUE_NONE;
 	const XwaFlightObject* cockpit_anchor = fl_cockpit_anchor(snap, cam);
 	fl_comfort_pivot_audit(snap, cockpit_anchor);
+	{
+		float ship_q[4] = {1,0,0,0};
+		const int eligible = stereo && cockpit_anchor && XwaVrComfort_InternalFlight(cam) &&
+			!Aeron_XrIsUnfocused();
+		uint64_t identity = 0;
+		if (eligible) {
+			/* Body basis only: never the camera, turret aim or tracked eye orientation. */
+			fl_comfort_ship_quaternion(cockpit_anchor, ship_q);
+			identity = ((uint64_t)cockpit_anchor->signature << 32) |
+				((uint64_t)cockpit_anchor->slot << 16) | cockpit_anchor->object_type;
+			identity ^= ((uint64_t)snap->cockpit.seat << 60) | ((uint64_t)cam->region << 56);
+		}
+		XwaVrPeripheralMask_Update(ship_q, (uint32_t)snap->game_time_ms, host_time_us, identity, eligible);
+		if (stereo) XwaVrPeripheralMask_Prepare(cmd, xr_frame.views, xr_frame.format);
+	}
 
 	/* ---- Motion-blur frame context (the TIE model) --------------------
 	 * Velocity derives from the prev/curr SNAPSHOT pair (one sim advance
@@ -5523,12 +5551,15 @@ AeronTexture* XwaRemasterFlight_Render(AeronCommandBuffer* cmd, const XwaSnapsho
 									  g_xr_hud_h > 0 ? g_xr_hud_h : s.rt_h);
 		}
 		s_xr_eye_alpha = s_xr_hands_over && !direct_used[1] ? XwaVrHandOverlay_List(1) : NULL;
-		const int right_out =
+		int right_out =
 			direct_used[1] ||
 			fl_xr_output_eye(cmd, xr_frame.eye_targets[1], xr_frame.format,
 							 s.present_bloom_tex ? s.present_bloom_tex : fl_xr_right_bloom(cmd, xr_frame.views));
 		s_xr_eye_alpha = NULL;
 		s_xr_hud_layer_count = 0;
+		/* Both resolved eye images, including direct output. RGB only: existing
+		 * hand-overlay alpha and compositor HUD/console layers remain intact. */
+		if (right_out) right_out = XwaVrPeripheralMask_Render(cmd, xr_frame.eye_targets, xr_frame.width, xr_frame.height);
 		if (right_out &&
 			fl_xr_output_hud(cmd, xr_frame.hud_target, head_parts, cockpit_active) &&
 			(!cmd_aux || fl_xr_output_hud(cmd, xr_frame.hud_aux_target, FL_HUD_CMD, 2)) &&
@@ -5646,6 +5677,7 @@ static float fl_vr_env_dim_step(int dimmed) {
 }
 
 int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
+	XwaVrPeripheralMask_Reset();
 	const float film_dim = fl_vr_env_dim_step(dimmed);
 	AeronXrStereoFrame xr_frame;
 	if (!cmd || !XwaVrEnv_Enabled() || !Aeron_XrStereoBegin(&xr_frame)) {
@@ -5871,6 +5903,7 @@ int XwaRemasterFlight_RenderVrEnvironment(AeronCommandBuffer* cmd, int dimmed) {
 void XwaRemasterFlight_ReleaseVrEnvironment(void) { XwaVrEnv_Release(); }
 
 void XwaRemasterFlight_Shutdown(void) {
+	XwaVrPeripheralMask_Shutdown();
 	XwaVrEnv_Release();
 	XwaVrMenuBeam_Shutdown();
 	if (s_xr_present) {

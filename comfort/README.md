@@ -1,10 +1,11 @@
 # OpenXWA Comfort: first baseline
 
 The baseline history below is retained for comparison. The current test build is
-**0.1.2-original-default**, documented in [CAMERA-AUDIT.md](CAMERA-AUDIT.md). It adds
-impact shake reduction and a Comfort menu, while preserving the existing camera
-pivot and direct headset tracking. Subjective comfort and impact flight tests
-remain pending.
+**0.2.0-adaptive-mask**, documented in [PERIPHERAL-MASK.md](PERIPHERAL-MASK.md).
+It adds an Off-by-default peripheral mask driven by ship rotation, with separate
+strength and sensitivity controls. Impact shake remains Original by default;
+see [CAMERA-AUDIT.md](CAMERA-AUDIT.md). Headset flight and subjective comfort
+validation of the mask remain pending.
 
 This branch starts from OpenXWA Quest **v1.0.1**, commit
 `22c3fd3373c4b1a45bffb2072b131e242dd322d2`, with Aeron pinned to

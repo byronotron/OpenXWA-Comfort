@@ -1,10 +1,12 @@
 # OpenXWA Comfort
 
 Comfort Edition starts from the pinned Quest 1.0.1 release, with a separate
-package and signing identity. Test build 0.1.2 offers **VR Options → Comfort →
-Impact Camera Shake** (Off / Reduced / Original), with Original as the default.
-See the [camera audit and test
-scope](comfort/CAMERA-AUDIT.md) and [build instructions](comfort/README.md).
+package and signing identity. Test build 0.2.0 offers **VR Options → Comfort**:
+Impact Camera Shake (Off / Reduced / Original, default Original) and adaptive
+Peripheral Mask (default Off), with Low / Medium / High strength and sensitivity.
+The mask fades with ship rotation; natural head turns do not trigger it.
+See the [mask behavior and test scope](comfort/PERIPHERAL-MASK.md),
+[camera audit](comfort/CAMERA-AUDIT.md) and [build instructions](comfort/README.md).
 
 ## Upstream OpenXWA VR
 
